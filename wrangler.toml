@@ -1,0 +1,19 @@
+name = "phone-url-filter"
+main = "src/index.js"
+compatibility_date = "2024-12-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "phone-url-filter-db"
+database_id = "9e5b0576-7a7c-4af0-8d13-495fb9e30718"
+
+[vars]
+# Cloudflare account + the URL-type Gateway list the default-deny HTTP policy allowlists against.
+# The list is created by scripts/setup-gateway.sh; src/gateway.js appends/removes items from it.
+CF_ACCOUNT_ID = "905456397f790c63aafc1cb42c400cb3"
+CF_GATEWAY_LIST_ID = "ca654a6f-6899-48d6-afa7-51e187a37451"
+
+# Secrets — set via wrangler secret put (values are NOT stored here):
+#   npx wrangler secret put GEMINI_API_KEY        (Google Gemini key — page classification)
+#   npx wrangler secret put CF_GATEWAY_API_TOKEN  (Cloudflare token, Account > Zero Trust > Edit)
+#   npx wrangler secret put OPERATOR_KEY          (bearer token gating POST /api/admin/allow)
