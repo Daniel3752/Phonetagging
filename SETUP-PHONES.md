@@ -167,6 +167,50 @@ domains you trust.
 
 ---
 
+## Supervising iPhones (Mac + Apple Configurator) — iOS ONLY
+
+Android phones don't need this — QR enrollment already makes them fully managed. **iPhones do.**
+A QR-enrolled iPhone is *not* supervised, and without supervision the app allowlist won't hold and
+the certificate won't auto-trust. Apple Configurator on your MacBook fixes that.
+
+> **Each iPhone gets ERASED during this.** Back up anything you care about first. Do this *before*
+> handing the phone to anyone.
+
+### One-time, on your Mac
+1. Install **Apple Configurator** (free, Mac App Store) and open it.
+2. Create your organization (first run): **Apple Configurator → Settings/Preferences → Organizations
+   → +** and fill in a name (e.g. "Shmira"). This generates the supervision identity that gets
+   baked into every phone.
+
+### Per iPhone
+1. Connect the iPhone to the Mac by cable. On the phone, tap **Trust** if asked.
+2. In Apple Configurator, select the device → click **Prepare** (top toolbar).
+3. **Configuration: Manual** → Next.
+4. **MDM Server: Do not enroll in MDM** → Next.
+   *(Simplest path: supervise here, then enroll into ManageEngine by QR afterward. You can instead
+   add your ManageEngine server and enroll in one shot, but "do not enroll" keeps it simple.)*
+5. **Supervise devices: checked.** (Optionally uncheck "Allow devices to pair with other
+   computers" for a tighter lock.) → Next.
+6. **Organization:** pick the one you created → Next.
+7. **Setup Assistant:** choose "Show only some steps" and skip the fluff → Next.
+8. Click **Prepare**. It erases + supervises the phone. Wait for it to finish.
+9. On the phone, walk through the iOS Setup Assistant. It's now supervised.
+10. **Enroll into ManageEngine by QR** the way you already know. Because it's supervised, ManageEngine
+    now enforces the iOS restrictions (app allowlist, cert auto-trust, etc.).
+
+### Verify supervision
+- On the iPhone: **Settings** shows a line at the very top — *"This iPhone is supervised and managed
+  by Shmira."* No line = not supervised.
+- In ManageEngine: the device's inventory page shows **Supervised: Yes**.
+
+### Notes
+- A **factory reset undoes** Configurator supervision (the phone would need the Mac step again).
+  Enrolling the phone into **ABM** later makes supervision survive resets — worth doing if the
+  cohort grows.
+- After the iPhone is supervised + enrolled, make sure the **Shmira iOS** profile actually has a
+  **Restrictions** payload (App Store disabled / allowed-apps list) — supervision is what lets those
+  restrictions bite, but you still have to add them to the profile.
+
 ## Turning a phone off the filter
 Unenroll / retire the device in ManageEngine (removes the profiles, app, and lock). Nothing else to
 do — there's no server-side per-phone record to clean up.
