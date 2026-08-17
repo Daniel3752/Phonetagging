@@ -1,3 +1,8 @@
+> **Note:** this repo now holds two independent projects.
+> `telnyx-callfork/` is a separate Cloudflare Worker (Telnyx call fork + callback) with its own
+> `wrangler.toml` and README — see [`telnyx-callfork/README.md`](telnyx-callfork/README.md).
+> Everything below describes the **Phone URL Filter** project at the repo root.
+
 # Phone URL Filter
 
 AI-assisted web filtering for managed phones, built on **Cloudflare Gateway + a Cloudflare Worker**.
