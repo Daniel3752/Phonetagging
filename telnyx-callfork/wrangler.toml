@@ -6,23 +6,37 @@ compatibility_date = "2025-01-01"
 # Workers paid plan ($5/mo), which is 5x this project's entire budget. Telnyx's
 # call queue holds the only state this system has. Free tier is the target.
 
+# ---------------------------------------------------------------------------
+# IDENTITY VALUES ARE SECRETS — DO NOT PUT THEM IN THIS FILE.
+#
+# This repository is public. Anything written into [vars] below is published to
+# the internet permanently (git keeps history, so deleting it later does not
+# un-publish it). Your phone numbers and SIP endpoint are personal data, and an
+# exposed SIP URI is a standing target for toll-fraud scanners.
+#
+# Set them as secrets instead — the Worker reads secrets and vars identically,
+# so no code changes:
+#
+#   npx wrangler secret put TELNYX_US_DID      # +1XXXXXXXXXX — inbound DID, callback
+#                                              # target, and callerId on every
+#                                              # outbound leg (Israeli carriers
+#                                              # reject CLI you don't own)
+#   npx wrangler secret put SIP_URI            # sip:credential@sip.telnyx.com —
+#                                              # $0 termination, the leg we WANT
+#                                              # answered
+#   npx wrangler secret put FLIP_NUMBER        # +9725XXXXXXX — rings free, costs
+#                                              # $0.1096/min 60/60 if it ANSWERS
+#   npx wrangler secret put IPHONE_HOT_NUMBER  # +9725XXXXXXX
+#
+# FLIP_NUMBER and IPHONE_HOT_NUMBER are also the callback whitelist: only those
+# two numbers may dequeue a parked caller.
+#
+# For local `wrangler dev`, put the same keys in .dev.vars (gitignored).
+# See .dev.vars.example.
+# ---------------------------------------------------------------------------
+
 [vars]
-# Inbound US DID (also the callback target, and the callerId on every outbound
-# leg — Israeli carriers reject caller ID you don't own).
-TELNYX_US_DID = "+15550001111"
-
-# SIP credential the iPhone softphone registers to. $0 termination — the leg we
-# actually want answered.
-SIP_URI = "sip:yourcredential@sip.telnyx.com"
-
-# Israeli mobiles. These ring for free but cost $0.1096/min with 60/60 billing
-# if they ANSWER — which is the whole reason the callback path exists.
-FLIP_NUMBER = "+972500000000"
-IPHONE_HOT_NUMBER = "+972500000001"
-
-# Both numbers above are the callback whitelist: only they may dequeue a
-# parked caller.
-
+# Non-sensitive tuning only. Safe to commit.
 RING_TIMEOUT = "15"        # seconds the fork rings (Telnyx clamps to 5-120)
 MAX_HOLD_SECONDS = "60"    # max park time before the voicemail prompt
 QUEUE_NAME = "parked"      # single fixed queue — the entire state model
@@ -45,7 +59,7 @@ HOLD_MUSIC_URL = ""
 # Set to "false" in production once the XML has been verified, to disable ?dry=1.
 ALLOW_DRY_RUN = "true"
 
-# Secrets — set with `wrangler secret put`, never committed:
+# Remaining secret, in addition to the four identity values above:
 #   npx wrangler secret put TELNYX_PUBLIC_KEY
 #     Telnyx portal > Account Settings > Keys & Credentials > Public Key.
 #     Enables Ed25519 webhook signature verification. If unset, the worker

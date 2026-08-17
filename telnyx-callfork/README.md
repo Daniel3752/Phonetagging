@@ -72,14 +72,36 @@ certainly "use the queue".
 
 ## Configuration
 
-All in `wrangler.toml` `[vars]`:
+> **⚠️ This repository is public. The four identity values are secrets, not `[vars]`.**
+> Writing your real DID, SIP URI, or Israeli numbers into `wrangler.toml` publishes them
+> permanently — git history preserves them even after an edit. An exposed SIP URI in particular is a
+> standing target for toll-fraud scanners. Set them with `wrangler secret put`; the Worker reads
+> secrets and vars identically.
+
+**Secrets** — never committed:
+
+| Secret | Meaning |
+|---|---|
+| `TELNYX_US_DID` | Inbound DID, callback target, and `callerId` on every outbound leg |
+| `SIP_URI` | `sip:credential@sip.telnyx.com` — the softphone leg |
+| `FLIP_NUMBER` | Israeli flip phone, `+9725…` — also on the callback whitelist |
+| `IPHONE_HOT_NUMBER` | Israeli iPhone SIM, `+9725…` — also on the callback whitelist |
+| `TELNYX_PUBLIC_KEY` | Telnyx portal → *Account Settings → Keys & Credentials → Public Key* |
+
+```bash
+npx wrangler secret put TELNYX_US_DID
+npx wrangler secret put SIP_URI
+npx wrangler secret put FLIP_NUMBER
+npx wrangler secret put IPHONE_HOT_NUMBER
+npx wrangler secret put TELNYX_PUBLIC_KEY
+```
+
+For local `wrangler dev`, copy `.dev.vars.example` to `.dev.vars` (gitignored) and fill it in there.
+
+**Non-sensitive vars** — safe to commit, in `wrangler.toml` `[vars]`:
 
 | Var | Meaning | Default |
 |---|---|---|
-| `TELNYX_US_DID` | Inbound DID, callback target, and `callerId` on every outbound leg | — |
-| `SIP_URI` | `sip:credential@sip.telnyx.com` — the softphone leg | — |
-| `FLIP_NUMBER` | Israeli flip phone, `+9725…` | — |
-| `IPHONE_HOT_NUMBER` | Israeli iPhone SIM, `+9725…` | — |
 | `RING_TIMEOUT` | Fork ring seconds (Telnyx clamps 5–120) | `15` |
 | `MAX_HOLD_SECONDS` | Max park time | `60` |
 | `QUEUE_NAME` | Fixed queue name | `parked` |
@@ -87,13 +109,7 @@ All in `wrangler.toml` `[vars]`:
 | `PUBLIC_BASE_URL` | Force absolute callback URLs; unset → derived from the request origin | unset |
 | `ALLOW_DRY_RUN` | Set `"false"` to disable `?dry=1` in production | `"true"` |
 
-Secret:
-
-```bash
-npx wrangler secret put TELNYX_PUBLIC_KEY   # Telnyx portal > Account Settings > Keys & Credentials > Public Key
-```
-
-With it set, every webhook is verified as an Ed25519 signature over `{telnyx-timestamp}|{raw body}`
+With `TELNYX_PUBLIC_KEY` set, every webhook is verified as an Ed25519 signature over `{telnyx-timestamp}|{raw body}`
 from the `telnyx-signature-ed25519` header, with a 5-minute replay window. Without it the worker
 fails open — but the dequeue path is separately gated by the ANI whitelist
 (`[FLIP_NUMBER, IPHONE_HOT_NUMBER]`, compared after E.164 normalization), so a stranger still can't
