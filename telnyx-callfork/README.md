@@ -221,11 +221,14 @@ If `+1…` doesn't connect from the flip, save it with HOT's international acces
 priced per *carrier prefix* (`012`, `013`, `014`, `015`, `017`…), so the prefix you dial can decide
 whether the call comes out of your bundle or is billed à la carte — see below.
 
-## 3b. Confirm your HOT plan actually includes minutes to the US
+## 3b. HOT plan international minutes
 
-The callback path is only free **if it is**. If it isn't, dialing the DID from HOT costs HOT's
-international rate, which can be worse than just answering on the flip — so check before you rely
-on it:
+**Working assumption: the HOT plan includes outgoing minutes to the US**, so the callback leg is
+free and the cost model in this README holds as written.
+
+That assumption is the load-bearing one for the whole design — if it's ever wrong, the callback path
+stops being free and the economics invert (see *Known tradeoffs*). Steps to re-check it, should the
+plan change:
 
 - **HOT Mobile app / self-service** on [hotmobile.co.il](https://www.hotmobile.co.il): look for
   שיחות לחו״ל ("calls abroad") in your plan details, and specifically whether the **US** is in the
@@ -237,7 +240,7 @@ on it:
   your next HOT itemized bill (פירוט שיחות) for that call. Bundle minutes show as included; anything
   else shows a charge.
 
-If the US **isn't** included, the callback path still works — it just isn't free, and you should
+If the US ever **isn't** included, the callback path still works — it just isn't free, and you should
 compare HOT's per-minute international rate against the $0.1096/min + 60-second minimum you'd pay by
 answering on the flip instead.
 
@@ -274,10 +277,12 @@ These are accepted, not bugs. Don't "fix" them without redoing the cost math.
   the free SIP leg.
 - **The caller hears roughly 15–25 seconds** of ringing plus the "one moment" prompt before I'm
   bridged in. That's the price of the callback pattern.
-- **The callback leg is only free if HOT's plan includes international minutes to the US.** If it
-  doesn't, dialing the US DID from HOT costs HOT's international rate instead of nothing — which
-  could be worse than just answering on the flip. **Verify this on your specific plan before
-  relying on the callback path.**
+- **The callback leg is free only because the HOT plan includes international minutes to the US.**
+  That is the assumption this system is built on (§3b). If the plan ever changes, dialing the US DID
+  from HOT costs HOT's international rate instead of nothing — potentially worse than just answering
+  on the flip, at which point the callback path is no longer the cheap option and the design should
+  be revisited rather than patched. Watch the dialing prefix too: bundle rates can be tied to
+  HOT's `017` prefix.
 - `machineDetection` reduces but does not eliminate voicemail-answer billing (see above).
 - One fixed queue means one parked caller at a time in practice. A second simultaneous caller queues
   behind the first and gets bridged on a second callback. Fine for a single-user system; there is no
