@@ -176,10 +176,23 @@ Set `ALLOW_DRY_RUN = "false"` once you're satisfied.
 
 3. **Create the SIP credential** for the iPhone softphone.
    *Voice → SIP Connections → Create → Credentials* connection. Note the username, password, and
-   the realm (`sip.telnyx.com`). `SIP_URI` is then `sip:<username>@sip.telnyx.com`. Register the
-   softphone (Groundwire, Zoiper, Linphone…) against it with **push/background registration on**,
-   otherwise the SIP leg won't ring when the phone is asleep and you'll fall through to the
+   the realm (`sip.telnyx.com`). `SIP_URI` is then `sip:<username>@sip.telnyx.com`.
+
+   **⚠️ On the same *Authentication and routing* panel, set "Receive SIP URI calls" to
+   "Only from my Connections".** It defaults to **Not enabled**, which means Telnyx will not process
+   calls addressed to `sip:<username>@sip.telnyx.com` — so the `<Sip>` leg of the fork **silently
+   never rings**, every call falls through to the park branch, and it looks like the fork is broken.
+   Don't use *From anyone*: that lets any stranger on the internet ring the phone by dialing the SIP
+   URI directly. The TeXML application dialing the leg is your own connection, so
+   *Only from my Connections* is sufficient.
+
+   Then register the softphone (Groundwire, Zoiper, Linphone…) with **push/background registration
+   on**, otherwise the SIP leg won't ring when the phone is asleep and you'll fall through to the
    expensive path more often than necessary.
+
+   Treat the SIP password like a card number — anyone holding it can place calls billed to your
+   account, and your outbound profile allows Israel at $0.1096/min. Never paste it into a
+   screenshot, an issue, or this repo.
 
 4. **⚠️ Enable Israel on the Outbound Voice Profile.** This is the single most common reason "the
    flip never rings", and it has **two** gates, one of which is a human approval that can take a
