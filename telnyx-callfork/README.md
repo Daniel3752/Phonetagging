@@ -235,11 +235,44 @@ Use the full `+1XXXXXXXXXX` form. Unconditional (`**21*`) is what you want — n
 conditional forwarding — so the T-Mobile SIM never rings and never involves its own voicemail.
 Confirm with `*#21#` before relying on it. The SIM stays a normal line; nothing is ported.
 
-## 3. Flip phone speed dial
+## 3. Flip phone: hardware, speed dial, and the one key that costs money
 
-On most feature phones: **Contacts → the DID entry → Options → Assign speed dial → key 2–9**
-(key 1 is usually reserved for voicemail). Then press-and-hold that key to call back into the
-parked caller.
+**The handset must be 4G/5G with working VoLTE.** Israel shut down 2G and 3G on 31 December 2025;
+since 1 January 2026 only VoLTE-capable devices get voice service at all. "4G" on the box is not the
+same as VoLTE — support can depend on a carrier profile in the regional firmware, so a phone sold
+for another market may register yet fail to place calls. Test it by making an ordinary call on the
+HOT SIM before building anything on top of it. Carrier-certified handsets (HOT subsidizes them for
+this transition) sidestep the question.
+
+Reference handset for this setup: **Nokia 110 4G (2023), TA-1543** — S30+, no apps, no data, which
+is exactly the point.
+
+### ⚠️ Green answers. Green is the $0.11 key.
+
+On the flip, the Call key is the only action in the whole system that costs real money: it answers
+the leg and triggers the 60-second minimum at $0.1096/min. Every other outcome — reject, ignore,
+phone off, no coverage — is **$0.00**, because Telnyx bills from answer, not from ring.
+
+The muscle memory to build is **red, then dial back**. Never green while it's ringing.
+
+Note that rejecting doesn't get the caller parked any sooner: the SIP leg keeps ringing until
+`RING_TIMEOUT`, so reject and ignore reach the park at the same moment. Rejecting only stops your
+pocket buzzing.
+
+### Speed dial (Nokia 110 4G / S30+)
+
+**More → Speed dials →** a free slot **→ Assign** → the DID contact. Then **press and hold that
+number key on the home screen** to dial. Use key **2**; key 1 is usually reserved for voicemail.
+
+The callback flow is then: **red** to reject, **hold 2** to call back into the parked caller.
+
+Feature phones can't remap keys, so there's no way to make the Call key do this instead — and you
+wouldn't want it to, given what that key does during a ring.
+
+**Alternative, no setup required:** because the worker sets `callerId` to the DID on the outbound
+leg, the flip displays the DID as the incoming caller — so the rejected call is the top entry in the
+call log, and green-then-green dials it back. Convenient, but it puts your thumb on the expensive
+key during a ring. Speed dial is the safer habit.
 
 Save the DID in **full international form** (`+1XXXXXXXXXX`) so it dials correctly from Israel.
 Place it on a key you can find without looking — you'll be pressing it seconds after rejecting a
@@ -293,6 +326,14 @@ forked call — the exact charge this whole system exists to avoid. Worse, it ha
 The `machineDetection="Enable"` attribute on the `<Number>` leg is a backstop for the case where
 voicemail sneaks back — but detection takes a few hundred milliseconds *inside an already-answered,
 already-billed leg*. Disabling voicemail at the carrier is the actual fix.
+
+There are three independent defenses against this one charge, and they're worth keeping all three:
+
+1. **Voicemail cancelled at the carrier** — the real fix.
+2. **`machineDetection` on the leg** — catches it if voicemail is ever re-provisioned.
+3. **`RING_TIMEOUT` = 15s** — carrier voicemail typically answers at 20–25s, so Telnyx cancels the
+   leg *before* voicemail can pick up. This is why the timeout is a cost control and not just a UX
+   knob: pushing it past ~18s erodes the margin and lets voicemail win the race.
 
 ---
 
