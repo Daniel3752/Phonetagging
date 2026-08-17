@@ -165,11 +165,28 @@ Set `ALLOW_DRY_RUN = "false"` once you're satisfied.
    otherwise the SIP leg won't ring when the phone is asleep and you'll fall through to the
    expensive path more often than necessary.
 
-4. **⚠️ Enable Israel on the Outbound Voice Profile.** *Voice → Outbound Voice Profiles → your
-   profile → Destinations*. New accounts ship with international destinations **locked**, and
-   **calls to `+972` will silently fail with no useful error** until Israel is explicitly allowed.
-   Attach that profile to the TeXML Application. This is the single most common reason "the flip
-   never rings". Set a daily spend limit here too while you're at it.
+4. **⚠️ Enable Israel on the Outbound Voice Profile.** This is the single most common reason "the
+   flip never rings", and it has **two** gates, one of which is a human approval that can take a
+   day or more — do it first, not last.
+
+   By default **every** Outbound Voice Profile allows traffic to the **US and Canada only**. A call
+   to `+972` is rejected with:
+
+   ```
+   SIP 403 — Dialed Number is not included in whitelisted countries D13
+   ```
+
+   1. **Level 2 verification.** Most international destinations require it before they can be
+      activated. Request it in the portal (you'll be prompted when you try to add a restricted
+      region, or via *Account Settings → Verification*). This is a manual review — expect a wait,
+      and expect to supply business/identity details.
+   2. **Whitelist the region.** *Voice → Outbound Voice Profiles →* your profile *→ Destinations*,
+      then click the **`+`** next to the region containing Israel (you can add individual countries,
+      whole continents, or everything). Approval at step 1 does **not** whitelist anything by
+      itself — this step is always manual.
+
+   Then attach that profile to the TeXML Application, and set a **daily spend limit** on it while
+   you're here — it's the cheapest insurance against a loop dialing Israel at $0.1096/min.
 
 5. Grab the **public key** (*Account Settings → Keys & Credentials → Public Key*) and set it as the
    `TELNYX_PUBLIC_KEY` secret.
@@ -199,15 +216,42 @@ Save the DID in **full international form** (`+1XXXXXXXXXX`) so it dials correct
 Place it on a key you can find without looking — you'll be pressing it seconds after rejecting a
 call.
 
+If `+1…` doesn't connect from the flip, save it with HOT's international access prefix instead:
+**`017`** + country code + number, i.e. `0171XXXXXXXXXX`. Some Israeli international bundles are
+priced per *carrier prefix* (`012`, `013`, `014`, `015`, `017`…), so the prefix you dial can decide
+whether the call comes out of your bundle or is billed à la carte — see below.
+
+## 3b. Confirm your HOT plan actually includes minutes to the US
+
+The callback path is only free **if it is**. If it isn't, dialing the DID from HOT costs HOT's
+international rate, which can be worse than just answering on the flip — so check before you rely
+on it:
+
+- **HOT Mobile app / self-service** on [hotmobile.co.il](https://www.hotmobile.co.il): look for
+  שיחות לחו״ל ("calls abroad") in your plan details, and specifically whether the **US** is in the
+  included-destinations list and how many minutes.
+- **Call `*053`** and ask directly: *"Does my plan include outgoing minutes to the United States,
+  how many per month, and which dialing prefix do I have to use to get the bundle rate?"* That last
+  part matters — see the `017` note above.
+- **Empirical check:** call the DID from the flip once, let the worker answer, hang up, then look at
+  your next HOT itemized bill (פירוט שיחות) for that call. Bundle minutes show as included; anything
+  else shows a charge.
+
+If the US **isn't** included, the callback path still works — it just isn't free, and you should
+compare HOT's per-minute international rate against the $0.1096/min + 60-second minimum you'd pay by
+answering on the flip instead.
+
 ## 4. ⚠️ Disable HOT Mobile voicemail on **both** Israeli lines
 
 This is not optional. **A voicemail pickup is an answered leg**: Telnyx bills it at $0.1096/min
 with a 60-second minimum, so HOT's voicemail greeting costs eleven cents every time it catches a
 forked call — the exact charge this whole system exists to avoid. Worse, it happens silently.
 
-- HOT Mobile voicemail deactivation: dial **`*111`** for the HOT service menu, or call HOT customer
-  service (**`*6688`** from a HOT line) and ask to **cancel the voicemail service (תא קולי)** on
-  both numbers — not just "don't play the greeting", cancel the service.
+- HOT Mobile customer service: **`*053`** (or `*0053`) from a HOT line, `053-500-3000` /
+  `1-800-800-053` otherwise, `+972-53-500-3000` from abroad. Ask to **cancel the voicemail service
+  (תא קולי)** on both numbers — "cancel the service", not "turn off the greeting". You can also do
+  it in the HOT Mobile app / self-service area on
+  [hotmobile.co.il](https://www.hotmobile.co.il) if it's exposed there for your plan.
 - The `##002#` and `##61#` / `##62#` / `##67#` GSM codes clear the network-side no-answer, busy, and
   unreachable diversions that route to voicemail. Dial them from each Israeli handset. Note HOT may
   re-provision voicemail on a SIM swap or plan change — recheck after either.
