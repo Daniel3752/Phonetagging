@@ -1,0 +1,52 @@
+name = "telnyx-callfork"
+main = "src/index.js"
+compatibility_date = "2025-01-01"
+
+# No KV, no D1, no Durable Objects — on purpose. Durable Objects require the
+# Workers paid plan ($5/mo), which is 5x this project's entire budget. Telnyx's
+# call queue holds the only state this system has. Free tier is the target.
+
+[vars]
+# Inbound US DID (also the callback target, and the callerId on every outbound
+# leg — Israeli carriers reject caller ID you don't own).
+TELNYX_US_DID = "+15550001111"
+
+# SIP credential the iPhone softphone registers to. $0 termination — the leg we
+# actually want answered.
+SIP_URI = "sip:yourcredential@sip.telnyx.com"
+
+# Israeli mobiles. These ring for free but cost $0.1096/min with 60/60 billing
+# if they ANSWER — which is the whole reason the callback path exists.
+FLIP_NUMBER = "+972500000000"
+IPHONE_HOT_NUMBER = "+972500000001"
+
+# Both numbers above are the callback whitelist: only they may dequeue a
+# parked caller.
+
+RING_TIMEOUT = "15"        # seconds the fork rings (Telnyx clamps to 5-120)
+MAX_HOLD_SECONDS = "60"    # max park time before the voicemail prompt
+QUEUE_NAME = "parked"      # single fixed queue — the entire state model
+
+# Optional hold music (MP3/WAV URL). Empty -> a short spoken hold line instead.
+HOLD_MUSIC_URL = ""
+
+# Optional prompt overrides.
+# GREETING_TEXT = "One moment please, connecting you."
+# HOLD_TEXT = "Please hold, connecting you now."
+# VOICEMAIL_TEXT = "Sorry, no one is available right now. Please try again later. Goodbye."
+# NO_CALL_WAITING_TEXT = "There is no call waiting. Goodbye."
+# VOICE = "female"
+# LANGUAGE = "en-US"
+
+# Force the absolute base URL used in TeXML action/waitUrl attributes. Leave
+# unset to derive it from the incoming request origin.
+# PUBLIC_BASE_URL = "https://telnyx-callfork.example.workers.dev"
+
+# Set to "false" in production once the XML has been verified, to disable ?dry=1.
+ALLOW_DRY_RUN = "true"
+
+# Secrets — set with `wrangler secret put`, never committed:
+#   npx wrangler secret put TELNYX_PUBLIC_KEY
+#     Telnyx portal > Account Settings > Keys & Credentials > Public Key.
+#     Enables Ed25519 webhook signature verification. If unset, the worker
+#     fails open, but the dequeue path is still gated by the ANI whitelist.
