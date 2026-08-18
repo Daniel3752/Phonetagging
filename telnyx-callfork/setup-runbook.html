@@ -1,0 +1,384 @@
+<title>Call-Fork Setup Runbook</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #F6F7F9;
+    --surface: #FFFFFF;
+    --surface-2: #EDF0F4;
+    --ink: #121821;
+    --muted: #58626E;
+    --line: #DCE1E8;
+    --line-strong: #C4CCD6;
+    --accent: #0E7C5A;
+    --accent-ink: #0A5B43;
+    --accent-contrast: #FFFFFF;
+    --warn: #8F5D0E;
+    --warn-bg: #FAF0D9;
+    --warn-line: #E7CE93;
+    --danger: #AE342A;
+    --danger-bg: #FAE6E2;
+    --danger-line: #EBBAB1;
+    --shadow: 0 1px 2px rgba(18,24,33,.05), 0 8px 24px -12px rgba(18,24,33,.18);
+    --radius: 14px;
+  }
+  :root:not([data-theme="light"]) {
+    @media (prefers-color-scheme: dark) {
+      --bg: #0E1319;
+      --surface: #161D26;
+      --surface-2: #1E2732;
+      --ink: #E8EDF3;
+      --muted: #94A1AE;
+      --line: #29333E;
+      --line-strong: #384654;
+      --accent: #38BC8B;
+      --accent-ink: #74E2B8;
+      --accent-contrast: #06130D;
+      --warn: #E4AE52;
+      --warn-bg: #2A2313;
+      --warn-line: #4A3D1D;
+      --danger: #EC8175;
+      --danger-bg: #2C1712;
+      --danger-line: #4C2A23;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 10px 30px -14px rgba(0,0,0,.6);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0E1319;
+    --surface: #161D26;
+    --surface-2: #1E2732;
+    --ink: #E8EDF3;
+    --muted: #94A1AE;
+    --line: #29333E;
+    --line-strong: #384654;
+    --accent: #38BC8B;
+    --accent-ink: #74E2B8;
+    --accent-contrast: #06130D;
+    --warn: #E4AE52;
+    --warn-bg: #2A2313;
+    --warn-line: #4A3D1D;
+    --danger: #EC8175;
+    --danger-bg: #2C1712;
+    --danger-line: #4C2A23;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 10px 30px -14px rgba(0,0,0,.6);
+  }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "IBM Plex Sans", system-ui, sans-serif;
+    font-size: 16px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 760px; margin: 0 auto; padding: clamp(20px, 4vw, 44px) clamp(16px, 4vw, 32px) 96px; }
+
+  /* ---- Masthead ---- */
+  .mast { margin-bottom: 34px; }
+  .kicker {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12px; font-weight: 500;
+    letter-spacing: .14em; text-transform: uppercase;
+    color: var(--accent-ink);
+    display: inline-flex; align-items: center; gap: 8px;
+  }
+  .kicker::before {
+    content: ""; width: 9px; height: 9px; border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 22%, transparent);
+  }
+  h1 {
+    font-family: "Bricolage Grotesque", system-ui, sans-serif;
+    font-weight: 800; font-size: clamp(30px, 6.5vw, 46px);
+    line-height: 1.02; letter-spacing: -.02em;
+    text-wrap: balance; margin: 14px 0 12px;
+  }
+  .standfirst { font-size: 17px; color: var(--muted); max-width: 60ch; margin: 0; }
+
+  /* ---- Cost strip ---- */
+  .costs {
+    margin: 26px 0 8px; padding: 16px 18px;
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: var(--radius); box-shadow: var(--shadow);
+    display: grid; gap: 12px;
+  }
+  .costs h2 {
+    font-family: "IBM Plex Mono", monospace; font-size: 11.5px; font-weight: 600;
+    letter-spacing: .13em; text-transform: uppercase; color: var(--muted);
+    margin: 0;
+  }
+  .cost-row { display: flex; justify-content: space-between; align-items: baseline; gap: 14px; font-size: 14.5px; }
+  .cost-row span:first-child { color: var(--ink); }
+  .cost-row .val { font-family: "IBM Plex Mono", monospace; font-variant-numeric: tabular-nums; font-weight: 500; white-space: nowrap; }
+  .cost-row.free .val { color: var(--accent-ink); }
+  .cost-row.bad .val { color: var(--danger); }
+  .cost-note { font-size: 13px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 11px; margin: 0; }
+
+  /* ---- Callouts ---- */
+  .callout {
+    border-radius: 12px; padding: 14px 16px; margin: 20px 0;
+    border: 1px solid; font-size: 14.5px; display: grid; gap: 4px;
+  }
+  .callout .lbl { font-weight: 600; font-family: "IBM Plex Sans"; display: flex; align-items: center; gap: 8px; }
+  .callout.danger { background: var(--danger-bg); border-color: var(--danger-line); color: var(--ink); }
+  .callout.danger .lbl { color: var(--danger); }
+  .callout.warn { background: var(--warn-bg); border-color: var(--warn-line); color: var(--ink); }
+  .callout.warn .lbl { color: var(--warn); }
+  .callout .ico { font-family: "IBM Plex Mono", monospace; font-weight: 600; }
+
+  /* ---- Phases ---- */
+  .phase {
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: var(--radius); box-shadow: var(--shadow);
+    margin: 18px 0; overflow: hidden;
+  }
+  .phase > summary {
+    list-style: none; cursor: pointer; padding: 18px 20px;
+    display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 14px;
+  }
+  .phase > summary::-webkit-details-marker { display: none; }
+  .pnum {
+    font-family: "IBM Plex Mono", monospace; font-weight: 600; font-size: 14px;
+    width: 34px; height: 34px; border-radius: 9px;
+    display: grid; place-items: center;
+    background: var(--surface-2); color: var(--accent-ink);
+    border: 1px solid var(--line);
+  }
+  .ptitle { font-family: "Bricolage Grotesque", sans-serif; font-weight: 700; font-size: 18px; letter-spacing: -.01em; }
+  .pwhere { font-family: "IBM Plex Mono", monospace; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .chev { color: var(--muted); transition: transform .2s ease; }
+  .phase[open] .chev { transform: rotate(90deg); }
+  .pbody { padding: 2px 20px 22px; border-top: 1px solid var(--line); }
+  .pbody > *:first-child { margin-top: 16px; }
+
+  /* ---- Checklist ---- */
+  ol.steps { list-style: none; counter-reset: s; margin: 0; padding: 0; display: grid; gap: 2px; }
+  ol.steps > li { position: relative; }
+  .step { display: flex; gap: 12px; align-items: flex-start; padding: 9px 8px; border-radius: 9px; }
+  .step:hover { background: var(--surface-2); }
+  .step input {
+    appearance: none; -webkit-appearance: none; margin: 2px 0 0; flex: none;
+    width: 20px; height: 20px; border: 1.5px solid var(--line-strong);
+    border-radius: 6px; background: var(--surface); cursor: pointer; position: relative;
+    transition: background .12s, border-color .12s;
+  }
+  .step input:hover { border-color: var(--accent); }
+  .step input:checked { background: var(--accent); border-color: var(--accent); }
+  .step input:checked::after {
+    content: ""; position: absolute; left: 6px; top: 2px; width: 5px; height: 10px;
+    border: solid var(--accent-contrast); border-width: 0 2px 2px 0; transform: rotate(42deg);
+  }
+  .step input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .step label { cursor: pointer; font-size: 15px; }
+  .step input:checked + label { color: var(--muted); text-decoration: line-through; text-decoration-color: var(--line-strong); }
+  .step label b { font-weight: 600; }
+
+  code, .mono { font-family: "IBM Plex Mono", monospace; font-size: .87em; }
+  .pbody code {
+    background: var(--surface-2); border: 1px solid var(--line);
+    padding: 1.5px 6px; border-radius: 5px; word-break: break-word;
+  }
+  .hint { font-size: 13.5px; color: var(--muted); margin: 4px 0 0 40px; }
+  .hint code { font-size: .9em; }
+
+  /* ---- Values table ---- */
+  .tbl-wrap { overflow-x: auto; margin: 4px 0; border: 1px solid var(--line); border-radius: 10px; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; min-width: 460px; }
+  th, td { text-align: left; padding: 10px 13px; border-bottom: 1px solid var(--line); }
+  th { font-family: "IBM Plex Mono", monospace; font-size: 11px; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+  tr:last-child td { border-bottom: none; }
+  td:first-child { font-family: "IBM Plex Mono", monospace; font-size: 13px; color: var(--accent-ink); white-space: nowrap; }
+
+  .section-label {
+    font-family: "IBM Plex Mono", monospace; font-size: 11.5px; font-weight: 600;
+    letter-spacing: .13em; text-transform: uppercase; color: var(--muted);
+    margin: 40px 0 4px;
+  }
+  .foot { margin-top: 40px; padding-top: 18px; border-top: 1px solid var(--line); font-size: 13px; color: var(--muted); }
+  a { color: var(--accent-ink); }
+</style>
+
+<div class="wrap">
+  <header class="mast">
+    <div class="kicker">Telnyx Call-Fork · Live Setup</div>
+    <h1>Call-Fork Setup Runbook</h1>
+    <p class="standfirst">One US number rings both Israeli phones. Nobody answers the flip — you reject and dial back on free plan minutes. Work top to bottom; each phase unlocks the next. Tick boxes as you go — they're saved on this device.</p>
+  </header>
+
+  <section class="costs" aria-label="Cost model">
+    <h2>Why the design looks like this</h2>
+    <div class="cost-row free"><span>US DID rental</span><span class="val">~$1 / mo</span></div>
+    <div class="cost-row"><span>Inbound to the US DID</span><span class="val">$0.005 / min</span></div>
+    <div class="cost-row free"><span>Answer on the iPhone softphone (SIP)</span><span class="val">$0 · free</span></div>
+    <div class="cost-row free"><span>Flip <em>rings</em> but you reject it</span><span class="val">$0 · free</span></div>
+    <div class="cost-row bad"><span>Flip <em>answers</em> (or voicemail picks up)</span><span class="val">$0.1096 / min · 60/60</span></div>
+    <p class="cost-note">Billing starts on <b>answer</b>, never on ring. The whole system exists to keep that last red line from ever happening. Target spend: about a dollar a month plus pennies.</p>
+  </section>
+
+  <div class="callout danger">
+    <span class="lbl"><span class="ico">◉</span> The green key on the flip is the $0.11 key</span>
+    <span>Pressing Call to answer on the Nokia is the only action in the system that costs real money — it triggers the 60-second minimum at $0.1096/min. Build one habit: <b>red to reject, then dial back</b>. Every other outcome — reject, ignore, phone off, no coverage — is free.</span>
+  </div>
+
+  <!-- PHASE 1 -->
+  <details class="phase" open>
+    <summary><span class="pnum">1</span><span><span class="ptitle">Deploy the worker</span><br><span class="pwhere">dash.cloudflare.com · browser only</span></span><span class="chev">▶</span></summary>
+    <div class="pbody">
+      <p>No download, no terminal. Cloudflare pulls the code straight from your GitHub repo (already merged to <code>main</code>).</p>
+      <ol class="steps">
+        <li><div class="step"><input type="checkbox" id="s1a"><label for="s1a">Open <b>Workers &amp; Pages → Create → Workers → Import a repository</b></label></div></li>
+        <li><div class="step"><input type="checkbox" id="s1b"><label for="s1b">Authorize GitHub, pick <b>Daniel3752/Phonetagging</b></label></div></li>
+        <li><div class="step"><input type="checkbox" id="s1c"><label for="s1c">Branch: <b>main</b></label></div></li>
+        <li><div class="step"><input type="checkbox" id="s1d"><label for="s1d">Root directory: type <b><code>telnyx-callfork</code></b> — the one setting that matters</label></div></li>
+        <li><div class="step"><input type="checkbox" id="s1e"><label for="s1e">Click <b>Deploy</b>, then copy the <code>…workers.dev</code> URL it gives you</label></div></li>
+      </ol>
+      <p class="hint">If the build shows a red error, screenshot it — subfolder builds occasionally need one tweak.</p>
+    </div>
+  </details>
+
+  <!-- PHASE 2 -->
+  <details class="phase">
+    <summary><span class="pnum">2</span><span><span class="ptitle">Add the 5 secrets</span><br><span class="pwhere">worker → settings → variables</span></span><span class="chev">▶</span></summary>
+    <div class="pbody">
+      <p>In the new Worker → <b>Settings → Variables and Secrets → Add</b>. Choose <b>Encrypt</b> for each so it's a secret, not plain text. Never paste these into the repo.</p>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>Secret</th><th>Value</th></tr></thead>
+        <tbody>
+          <tr><td>TELNYX_US_DID</td><td>your US DID, <span class="mono">+1…</span></td></tr>
+          <tr><td>SIP_URI</td><td><span class="mono">sip:usersupport11004@sip.telnyx.com</span></td></tr>
+          <tr><td>FLIP_NUMBER</td><td>the Nokia's HOT number, <span class="mono">+972…</span></td></tr>
+          <tr><td>IPHONE_HOT_NUMBER</td><td>the iPhone's HOT number, <span class="mono">+972…</span></td></tr>
+          <tr><td>TELNYX_PUBLIC_KEY</td><td>Telnyx → Account Settings → Keys &amp; Credentials → Public Key</td></tr>
+        </tbody>
+      </table></div>
+      <ol class="steps" style="margin-top:14px">
+        <li><div class="step"><input type="checkbox" id="s2a"><label for="s2a">All five added and <b>encrypted</b></label></div></li>
+      </ol>
+    </div>
+  </details>
+
+  <!-- PHASE 3 -->
+  <details class="phase">
+    <summary><span class="pnum">3</span><span><span class="ptitle">Health check</span><br><span class="pwhere">your worker URL</span></span><span class="chev">▶</span></summary>
+    <div class="pbody">
+      <p>Open <code>https://&lt;your-worker&gt;.workers.dev/health</code> in the browser.</p>
+      <ol class="steps">
+        <li><div class="step"><input type="checkbox" id="s3a"><label for="s3a">All four <code>configured</code> flags read <b>true</b></label></div></li>
+        <li><div class="step"><input type="checkbox" id="s3b"><label for="s3b"><code>signatureVerification</code> reads <b>enabled</b></label></div></li>
+      </ol>
+      <p class="hint">Paste this output back to me and I'll confirm it's green before you spend a cent on the DID.</p>
+    </div>
+  </details>
+
+  <!-- PHASE 4 -->
+  <details class="phase">
+    <summary><span class="pnum">4</span><span><span class="ptitle">Wire Telnyx to the worker</span><br><span class="pwhere">portal.telnyx.com</span></span><span class="chev">▶</span></summary>
+    <div class="pbody">
+      <p>You've already built the SIP Connection (<code>flipforwarding</code>), the TeXML app (<code>callforwarding</code>), and added Israel to the Outbound Voice Profile. This phase connects them and points the DID at the right object.</p>
+      <ol class="steps">
+        <li><div class="step"><input type="checkbox" id="s4a"><label for="s4a">TeXML app <b>Voice URL</b> = <code>https://&lt;your-worker&gt;.workers.dev/voice/inbound</code>, method <b>POST</b></label></div></li>
+        <li><div class="step"><input type="checkbox" id="s4b"><label for="s4b">TeXML app has the <b>Israel-enabled Outbound Voice Profile</b> attached (this is what lets the fork reach the flip)</label></div></li>
+        <li><div class="step"><input type="checkbox" id="s4c"><label for="s4c">Buy a <b>Local</b> DID — <em>not</em> toll-free (toll-free can't be dialed from Israel and kills the callback)</label></div></li>
+        <li><div class="step"><input type="checkbox" id="s4d"><label for="s4d">Assign the DID to the <b>callforwarding TeXML app</b> — <em>not</em> the SIP Connection</label></div></li>
+      </ol>
+      <div class="callout warn">
+        <span class="lbl"><span class="ico">▲</span> The one wiring mistake that breaks everything silently</span>
+        <span>If the DID is assigned to the SIP Connection instead of the TeXML app, inbound calls skip the worker entirely and there's no error to tell you why. Numbers → My Numbers → your DID → Connection/Application = <b>callforwarding</b>.</span>
+      </div>
+    </div>
+  </details>
+
+  <!-- PHASE 5 -->
+  <details class="phase">
+    <summary><span class="pnum">5</span><span><span class="ptitle">Set up the phones</span><br><span class="pwhere">iPhone · Nokia · both HOT lines</span></span><span class="chev">▶</span></summary>
+    <div class="pbody">
+      <ol class="steps">
+        <li><div class="step"><input type="checkbox" id="s5a"><label for="s5a"><b>Register the softphone</b> (Groundwire / Zoiper / Linphone) on the iPhone against credential <code>usersupport11004</code></label></div></li>
+      </ol>
+      <p class="hint">Turn <b>push / background registration ON</b> — if the app sleeps, the SIP leg won't ring and you'll take the expensive path more often. Confirm it shows <em>registered</em> under the SIP Connection.</p>
+      <ol class="steps">
+        <li><div class="step"><input type="checkbox" id="s5b"><label for="s5b"><b>Cancel HOT voicemail</b> on <em>both</em> Israeli lines — call <code>*053</code>, cancel the service (תא קולי), not just the greeting</label></div></li>
+      </ol>
+      <div class="callout warn">
+        <span class="lbl"><span class="ico">▲</span> Voicemail is a billed answer</span>
+        <span>If HOT voicemail picks up a forked call, that's an answered leg at $0.1096 with the 60-second minimum — the exact charge this system avoids, happening silently. Verify: call each Israeli number and let it ring out. You want the "not answering" tone, <b>not</b> a greeting.</span>
+      </div>
+      <ol class="steps">
+        <li><div class="step"><input type="checkbox" id="s5c"><label for="s5c"><b>Speed-dial the DID</b> on the Nokia: More → Speed dials → free slot → Assign → the DID, on <b>key 2</b></label></div></li>
+      </ol>
+      <p class="hint">Save the DID in full international form (<code>+1…</code>). If your HOT bundle rate is tied to the <code>017</code> prefix, save it as <code>0171…</code> instead so the callback comes out of the bundle.</p>
+    </div>
+  </details>
+
+  <!-- PHASE 6 -->
+  <details class="phase">
+    <summary><span class="pnum">6</span><span><span class="ptitle">Test — before touching T-Mobile</span><br><span class="pwhere">any phone → the DID</span></span><span class="chev">▶</span></summary>
+    <div class="pbody">
+      <p>Call the Telnyx DID <em>directly</em> from any phone and walk the whole path. No real minutes at risk — you control every leg.</p>
+      <ol class="steps">
+        <li><div class="step"><input type="checkbox" id="s6a"><label for="s6a">Both the iPhone softphone and the Nokia <b>ring</b></label></div></li>
+        <li><div class="step"><input type="checkbox" id="s6b"><label for="s6b">Press <b>red</b> on the Nokia → caller hears "one moment" and hold music</label></div></li>
+        <li><div class="step"><input type="checkbox" id="s6c"><label for="s6c"><b>Hold key 2</b> on the Nokia → you're bridged to the waiting caller</label></div></li>
+        <li><div class="step"><input type="checkbox" id="s6d"><label for="s6d">Also try answering on the <b>iPhone softphone</b> — bridges immediately, the cheap path</label></div></li>
+      </ol>
+      <p class="hint">If a leg misbehaves, Telnyx <b>Voice → Debugging</b> shows per-leg SIP results. Send me what you see and I'll read it.</p>
+    </div>
+  </details>
+
+  <!-- PHASE 7 -->
+  <details class="phase">
+    <summary><span class="pnum">7</span><span><span class="ptitle">Turn on T-Mobile forwarding</span><br><span class="pwhere">the US phone · do this last</span></span><span class="chev">▶</span></summary>
+    <div class="pbody">
+      <p>Only once Phase 6 works end to end. Doing this last means a broken forward can't strand your real US number.</p>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>Dial on the US phone</th><th>Does</th></tr></thead>
+        <tbody>
+          <tr><td>**21*&lt;DID&gt;#</td><td>Enable unconditional forwarding to the DID</td></tr>
+          <tr><td>*#21#</td><td>Check current forwarding status</td></tr>
+          <tr><td>##21#</td><td>Disable forwarding</td></tr>
+          <tr><td>##002#</td><td>Clear all forwarding rules</td></tr>
+        </tbody>
+      </table></div>
+      <ol class="steps" style="margin-top:14px">
+        <li><div class="step"><input type="checkbox" id="s7a"><label for="s7a">Dialed <b>**21*&lt;DID&gt;#</b> with the full <span class="mono">+1…</span> number</label></div></li>
+        <li><div class="step"><input type="checkbox" id="s7b"><label for="s7b">Confirmed with <b>*#21#</b></label></div></li>
+        <li><div class="step"><input type="checkbox" id="s7c"><label for="s7c">Called the US number from another phone — it reaches Israel</label></div></li>
+      </ol>
+      <p class="hint">Use unconditional (<code>**21*</code>), not busy/no-answer forwarding, so the T-Mobile SIM never rings and never involves its own voicemail.</p>
+    </div>
+  </details>
+
+  <div class="section-label">If something looks broken</div>
+  <div class="tbl-wrap"><table>
+    <thead><tr><th>Symptom</th><th>Most likely cause</th></tr></thead>
+    <tbody>
+      <tr><td>Nothing reaches the worker</td><td>DID assigned to the SIP Connection, not the TeXML app (Phase 4)</td></tr>
+      <tr><td>Flip never rings</td><td>Israel not enabled on the Outbound Voice Profile, or the number is <span class="mono">+972</span>-wrong</td></tr>
+      <tr><td>iPhone softphone never rings</td><td>"Receive SIP URI calls" not set to <em>Only from my Connections</em>, or app not registered</td></tr>
+      <tr><td>A surprise $0.11 charge</td><td>Voicemail answered a leg — recheck Phase 5, or you pressed green on the flip</td></tr>
+      <tr><td>Callback isn't free</td><td>HOT plan doesn't include US minutes, or wrong dialing prefix (<span class="mono">017</span>)</td></tr>
+    </tbody>
+  </table></div>
+
+  <p class="foot">Repo: <span class="mono">Daniel3752/Phonetagging → telnyx-callfork/</span>. Full detail, including the accepted tradeoffs, lives in that folder's README. Checkbox progress is stored only in this browser.</p>
+</div>
+
+<script>
+  (function () {
+    var KEY = "callfork-runbook-v1";
+    var boxes = Array.prototype.slice.call(document.querySelectorAll('.step input[type=checkbox]'));
+    var saved;
+    try { saved = JSON.parse(localStorage.getItem(KEY) || "{}"); } catch (e) { saved = {}; }
+    boxes.forEach(function (b) {
+      if (saved[b.id]) b.checked = true;
+      b.addEventListener('change', function () {
+        saved[b.id] = b.checked;
+        try { localStorage.setItem(KEY, JSON.stringify(saved)); } catch (e) {}
+      });
+    });
+  })();
+</script>
