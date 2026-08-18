@@ -64,3 +64,5 @@ ALLOW_DRY_RUN = "true"
 #     Telnyx portal > Account Settings > Keys & Credentials > Public Key.
 #     Enables Ed25519 webhook signature verification. If unset, the worker
 #     fails open, but the dequeue path is still gated by the ANI whitelist.
+
+# Build trigger: force a fresh Workers build to pick up the deploy command. (no-op)
