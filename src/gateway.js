@@ -1,19 +1,26 @@
-// Cloudflare Gateway API client — mutates the shared URL allowlist that the default-deny HTTP
-// policy reads from. One list for the whole fleet: a verdict is decided once per URL (see the
+// Cloudflare Gateway API client — mutates the shared allowlists that the default-deny policies read
+// from. One list per granularity for the whole fleet: a verdict is decided once (see the
 // url_verdicts table) and applies to every managed phone at once.
 //
-// The list and the HTTP policies that reference it are created by scripts/setup-gateway.sh via
-// this same API. This client, at runtime, only appends/removes items from the list.
+// Two lists exist deliberately:
+//   * a DOMAIN-type list (CF_GATEWAY_HOST_LIST_ID) read by the default-deny DNS policy. This is what
+//     v1 enforces — DNS filtering matches hostnames, needs no certificate and no TLS decryption.
+//   * a URL-type list (CF_GATEWAY_LIST_ID) read by the default-deny HTTP policy. Dormant in v1 and
+//     kept intact so enabling path blocking later is a config change, not a rewrite. Do not delete
+//     these functions because they look unused — that is the point.
 //
-// Requires env.CF_ACCOUNT_ID, env.CF_GATEWAY_LIST_ID (plain vars) and env.CF_GATEWAY_API_TOKEN
-// (wrangler secret; a token with "Zero Trust: Edit" on the account).
+// The lists and the policies referencing them are created by scripts/setup-gateway.sh via this same
+// API. This client, at runtime, only appends/removes items.
+//
+// Requires env.CF_ACCOUNT_ID and env.CF_GATEWAY_API_TOKEN (wrangler secret; a token with
+// "Zero Trust: Edit" on the account), plus whichever list id the called function needs.
 
 const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
 const RETRY_DELAYS_MS = [500, 1500];
 
 async function cfFetch(env, path, options = {}) {
-  if (!env.CF_ACCOUNT_ID || !env.CF_GATEWAY_LIST_ID || !env.CF_GATEWAY_API_TOKEN) {
-    throw new Error('Cloudflare Gateway is not configured (CF_ACCOUNT_ID / CF_GATEWAY_LIST_ID / CF_GATEWAY_API_TOKEN)');
+  if (!env.CF_ACCOUNT_ID || !env.CF_GATEWAY_API_TOKEN) {
+    throw new Error('Cloudflare Gateway is not configured (CF_ACCOUNT_ID / CF_GATEWAY_API_TOKEN)');
   }
 
   const url = `https://api.cloudflare.com/client/v4/accounts/${env.CF_ACCOUNT_ID}${path}`;
@@ -39,19 +46,34 @@ async function cfFetch(env, path, options = {}) {
   }
 }
 
-// Adds a single full URL to the allowlist. Cloudflare dedupes identical item values server-side,
-// so calling this twice for the same URL (a race between two phones hitting the same new site at
-// once) is harmless. URLs must include the scheme (https://…) — Gateway rejects bare domains.
-export async function addUrlToAllowlist(env, url) {
-  return cfFetch(env, `/gateway/lists/${env.CF_GATEWAY_LIST_ID}`, {
+function patchList(env, listId, { append = [], remove = [] }) {
+  if (!listId) throw new Error('Cloudflare Gateway list id is not configured');
+  return cfFetch(env, `/gateway/lists/${listId}`, {
     method: 'PATCH',
-    body: JSON.stringify({ append: [{ value: url }], remove: [] }),
+    body: JSON.stringify({ append: append.map((value) => ({ value })), remove }),
   });
 }
 
+// --- Hostname list (DOMAIN type) — what v1 enforces, via the default-deny DNS policy. ------------
+
+// Cloudflare dedupes identical item values server-side, so calling this twice for the same hostname
+// (two phones hitting the same new site at once) is harmless. Values are bare hostnames with no
+// scheme and no trailing dot — Gateway rejects anything else in a domain-type list.
+export async function addHostToAllowlist(env, hostname) {
+  return patchList(env, env.CF_GATEWAY_HOST_LIST_ID, { append: [hostname] });
+}
+
+export async function removeHostFromAllowlist(env, hostname) {
+  return patchList(env, env.CF_GATEWAY_HOST_LIST_ID, { remove: [hostname] });
+}
+
+// --- URL list (URL type) — dormant in v1; the path-blocking upgrade path. ------------------------
+
+// URLs must include the scheme (https://…) — Gateway rejects bare domains in a URL-type list.
+export async function addUrlToAllowlist(env, url) {
+  return patchList(env, env.CF_GATEWAY_LIST_ID, { append: [url] });
+}
+
 export async function removeUrlFromAllowlist(env, url) {
-  return cfFetch(env, `/gateway/lists/${env.CF_GATEWAY_LIST_ID}`, {
-    method: 'PATCH',
-    body: JSON.stringify({ append: [], remove: [url] }),
-  });
+  return patchList(env, env.CF_GATEWAY_LIST_ID, { remove: [url] });
 }

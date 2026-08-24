@@ -8,12 +8,17 @@ database_name = "phone-url-filter-db"
 database_id = "9e5b0576-7a7c-4af0-8d13-495fb9e30718"
 
 [vars]
-# Cloudflare account + the URL-type Gateway list the default-deny HTTP policy allowlists against.
-# The list is created by scripts/setup-gateway.sh; src/gateway.js appends/removes items from it.
 CF_ACCOUNT_ID = "905456397f790c63aafc1cb42c400cb3"
+
+# The DOMAIN-type Gateway list the default-deny DNS policy allowlists against. This is what v1
+# enforces. Created by scripts/setup-gateway.sh, which prints the id to paste here.
+CF_GATEWAY_HOST_LIST_ID = ""
+
+# The URL-type list read by the (currently unused) default-deny HTTP policy. Dormant in v1 and kept
+# for the path-blocking upgrade path — see the "Forward-compatibility" section of the plan.
 CF_GATEWAY_LIST_ID = "ca654a6f-6899-48d6-afa7-51e187a37451"
 
 # Secrets — set via wrangler secret put (values are NOT stored here):
-#   npx wrangler secret put GEMINI_API_KEY        (Google Gemini key — page classification)
+#   npx wrangler secret put GEMINI_API_KEY        (Google Gemini key — site classification)
 #   npx wrangler secret put CF_GATEWAY_API_TOKEN  (Cloudflare token, Account > Zero Trust > Edit)
-#   npx wrangler secret put OPERATOR_KEY          (bearer token gating POST /api/admin/allow)
+#   npx wrangler secret put OPERATOR_KEY          (bearer token gating /api/admin/*)

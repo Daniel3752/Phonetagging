@@ -1,7 +1,11 @@
-// The page Cloudflare Gateway redirects a blocked phone to. Gateway appends policy context as a
-// query string (the block policy has "Send policy context" on) — cf_site_uri is the full URL that
-// got blocked. The page offers a "Check this site" button that calls /api/verdict; a clean site is
-// added to the allowlist and the user just reloads, anything else stays blocked.
+// The request-access page.
+//
+// With DNS-level filtering there is no injected block page: a blocked lookup just fails in the
+// browser, and Cloudflare never gets the chance to hand us the URL. So this page is reached
+// DELIBERATELY — via a bookmark or a launcher tile — and asks the user which site they want.
+//
+// It still accepts Gateway's cf_site_uri when present, so it keeps working unchanged if full-URL
+// path blocking is switched on later (that mode does inject a block page).
 //
 // Self-contained HTML (no external assets) so it works even though every other host is blocked.
 export function renderBlockPage() {
@@ -10,7 +14,7 @@ export function renderBlockPage() {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Site blocked</title>
+<title>Request a site</title>
 <style>
   :root { color-scheme: light dark; }
   * { box-sizing: border-box; }
@@ -38,23 +42,32 @@ export function renderBlockPage() {
   .no h3 { color: #f0c96b; }
   .err h3 { color: #e08a8a; }
   .msg { margin-top: 12px; min-height: 1.2em; color: #e08a8a; font-size: .9rem; }
+  input[type=text] {
+    width: 100%; padding: 13px 14px; font-size: 1rem; margin-bottom: 12px;
+    border-radius: 10px; border: 1px solid #33447f;
+    background: #0e1733; color: #eef0f6;
+  }
+  input[type=text]:focus { outline: 2px solid #e8c96b; outline-offset: 1px; }
+  label { display: block; font-size: .85rem; color: #8fa0c8; margin-bottom: 6px; }
 </style>
 </head>
 <body>
   <div class="wrap">
-    <p class="eyebrow">Site blocked</p>
-    <h1>This site isn't on the approved list</h1>
+    <p class="eyebrow">Request a site</p>
+    <h1>Ask for a site to be approved</h1>
     <p class="site" id="site"></p>
 
     <div class="card" id="start">
-      <p>New sites are checked automatically. Most ordinary sites are approved within a few seconds. Tap below to check this one.</p>
+      <p>New sites are checked automatically. Most ordinary sites are approved within a few seconds.</p>
+      <label for="url">Site address</label>
+      <input type="text" id="url" inputmode="url" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="example.com">
       <button id="btn" type="button">Check this site</button>
       <div class="msg" id="msg"></div>
     </div>
 
     <div class="card raised ok" id="clean">
       <h3>Approved</h3>
-      <p>This site checked out and is now allowed. Reload the page to continue.</p>
+      <p>This site checked out and is now allowed. Open it again to continue — you may need to wait a moment for the change to reach this phone.</p>
     </div>
 
     <div class="card raised no" id="blocked">
@@ -70,21 +83,29 @@ export function renderBlockPage() {
 
 <script>
 (function () {
+  function id(x) { return document.getElementById(x); }
+
+  // Gateway supplies cf_site_uri only when a full-URL HTTP block page injected it. Under DNS
+  // filtering it is absent and the user types the site instead.
   var params = new URLSearchParams(location.search);
-  var site = params.get('cf_site_uri') || '';
-  document.getElementById('site').textContent = site || '(unknown site)';
+  var prefill = params.get('cf_site_uri') || '';
 
   var cards = { start: id('start'), clean: id('clean'), blocked: id('blocked'), error: id('error') };
-  var btn = id('btn'), msg = id('msg'), errmsg = id('errmsg');
-  function id(x) { return document.getElementById(x); }
+  var btn = id('btn'), msg = id('msg'), errmsg = id('errmsg'), input = id('url');
+
+  if (prefill) {
+    input.value = prefill;
+    id('site').textContent = prefill;
+  }
   function show(name) { for (var k in cards) cards[k].style.display = (k === name ? 'block' : 'none'); }
 
-  btn.addEventListener('click', async function () {
-    if (!site) {
-      errmsg.textContent = "This page is missing the site address — ask whoever set up filtering to turn on 'Send policy context' for the block page.";
-      show('error'); return;
-    }
-    btn.disabled = true; btn.textContent = 'Checking…'; msg.textContent = '';
+  function reset() { btn.disabled = false; btn.textContent = 'Check this site'; }
+
+  async function check() {
+    var site = input.value.trim();
+    if (!site) { msg.textContent = 'Type a site address first.'; input.focus(); return; }
+
+    btn.disabled = true; btn.textContent = 'Checking\u2026'; msg.textContent = '';
     try {
       var res = await fetch('/api/verdict', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -96,13 +117,16 @@ export function renderBlockPage() {
       else if (data.verdict === 'blocked') { show('blocked'); }
       else {
         errmsg.textContent = data.reason || "Couldn't check this site right now. Try again in a moment.";
-        show('error'); btn.disabled = false; btn.textContent = 'Check this site';
+        show('error'); reset();
       }
     } catch (e) {
       errmsg.textContent = e.message || "Couldn't reach the filtering server. Check your connection.";
-      show('error'); btn.disabled = false; btn.textContent = 'Check this site';
+      show('error'); reset();
     }
-  });
+  }
+
+  btn.addEventListener('click', check);
+  input.addEventListener('keydown', function (e) { if (e.key === 'Enter') check(); });
 })();
 </script>
 </body>
