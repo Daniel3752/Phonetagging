@@ -1,216 +1,221 @@
-# Setting up phones (ManageEngine + Cloudflare WARP)
+# Setting up phones (Headwind MDM + Cloudflare Gateway DNS)
 
-Step-by-step for getting a phone filtered. You already know how to **enroll a device in ManageEngine
-by scanning a QR code** — this guide covers everything that has to happen *around* that.
+Per-phone setup for Android. iOS is at the end and is not ready yet.
 
-> **Sensitive values** (team name, service token, operator key) are **not** in this file. They're
-> kept separately (ask Claude / see your saved `phone-setup-secrets.txt`). Where this guide says
-> `<AUTH_CLIENT_ID>` etc., paste the real value from there.
+Two things go onto each phone, once:
+
+1. **Headwind MDM agent as Device Owner** — controls which apps exist and cannot be uninstalled.
+2. **Private DNS locked to Cloudflare Gateway** — hostname filtering, enforced by the agent.
+
+There is **no certificate to install**, no VPN app, and no supervision step. That is the direct
+benefit of filtering by hostname instead of by full URL: nothing breaks on certificate-pinned apps
+and there is no do-not-inspect list to maintain.
 
 ---
 
-## The idea in one picture
+## Before you start: verify the assumption this all rests on
 
+> ⚠ **Do this first, on one throwaway phone, before enrolling anybody.**
+
+Since 2026 Google Play Protect has been **blocking custom-built Device Policy Controllers** during
+QR provisioning. The mitigation is to use the **stock, published** Headwind agent
+(`com.hmdm.launcher` from F-Droid or Play) rather than a custom build — the stock binary is what
+Play Protect recognises.
+
+Confirm all four of these before going further:
+
+- [ ] The stock agent provisions as Device Owner via QR without a Play Protect block
+- [ ] It can push a CA certificate (`installCaCert`) — you don't need this now, but it is the one
+      capability you cannot retrofit later without touching every phone again
+- [ ] It can pin Private DNS and set the `DISALLOW_*` user restrictions listed in Part 3
+- [ ] Its REST API can change a device's configuration remotely
+
+**If the first one fails, stop.** The whole design rests on it, and the fallback is a different
+enforcement layer, not a workaround.
+
+---
+
+## Part 1 — Cloudflare, once for the whole fleet
+
+1. Run the Gateway setup script from the repo root:
+
+   ```bash
+   CF_ACCOUNT_ID=… CF_GATEWAY_API_TOKEN=… WORKER_HOST=… ./scripts/setup-gateway.sh
+   ```
+
+   It creates the hostname allowlist, the default-deny DNS policy, and YouTube Restricted Mode +
+   SafeSearch. It prints `CF_GATEWAY_HOST_LIST_ID` — paste that into `wrangler.toml` and redeploy.
+
+2. In **Zero Trust → DNS locations**, note the location's **DoT hostname**. It looks like
+   `abc123.cloudflare-gateway.com`. That single string is what every phone points at.
+
+   The free plan allows 3 DNS locations, so you get at most 3 network policy tiers. Per-family
+   variation lives in the app layer instead — that is a deliberate trade for unlimited free devices.
+
+3. **Allowlist the worker's own host before enrolling anyone.** Under default-deny, if the worker
+   doesn't resolve, nobody can request a site — including you. The script's rule already exempts
+   `WORKER_HOST`; confirm it actually took effect.
+
+> A default-deny policy that silently fails open looks exactly like one that works. Verify from a
+> test device that a random site is genuinely blocked before you trust it.
+
+---
+
+## Part 2 — Headwind server, once
+
+Stand up Headwind MDM Community on a small VPS (~$5–6/month, unlimited devices, no licensing).
+Follow the upstream install docs at <https://h-mdm.com/download/>.
+
+Then, in the Headwind panel, create one **configuration per policy** you intend to use — at minimum
+a baseline (e.g. `day`) and any scheduled variants (e.g. `evening`). Note each configuration's id.
+
+In the worker console at `/admin` → **Policies & apps**, create a matching policy for each one and
+paste its Headwind configuration id. That mapping is what lets the scheduler swap a phone between
+them.
+
+Set `HEADWIND_BASE_URL` in `wrangler.toml` and `HEADWIND_API_TOKEN` (or `HEADWIND_USER` +
+`HEADWIND_PASSWORD`) via `wrangler secret put`.
+
+---
+
+## Part 3 — Per phone
+
+The phone must be **factory reset** — Device Owner can only be established during initial setup.
+
+1. On the welcome screen, tap the same spot 6 times to bring up the QR scanner.
+2. Scan the enrollment QR from your Headwind server.
+3. Let it provision. The agent installs and becomes Device Owner.
+
+Then apply, via the device's Headwind configuration:
+
+**Private DNS**
+
+- `PRIVATE_DNS_MODE` = hostname
+- `PRIVATE_DNS_SPECIFIER` = the DoT hostname from Part 1
+
+**User restrictions**
+
+| Restriction | Why |
+|---|---|
+| `DISALLOW_INSTALL_APPS` | app control means nothing if they can install anything |
+| `DISALLOW_INSTALL_UNKNOWN_SOURCES` | sideloading is the obvious bypass |
+| `DISALLOW_CONFIG_PRIVATE_DNS` | otherwise the filter is one Settings screen away |
+| `DISALLOW_CONFIG_VPN` | a VPN app routes around DNS entirely |
+| `DISALLOW_SAFE_BOOT` | safe mode disables device admin apps |
+| `DISALLOW_ADD_USER` | a second user profile is an unfiltered phone |
+
+Plus `setUninstallBlocked` on the agent itself.
+
+**Deliberately not set: `DISALLOW_FACTORY_RESET`.** It blocks the Settings path but not a
+recovery-mode reset, so it buys very little while making a legitimately stuck phone much harder to
+recover. See "What this can't do" below.
+
+Finally, register the phone in the worker console at `/admin` → **Devices**: give it a label, its
+Headwind device id, a baseline policy, and **the family's time zone** — schedules are evaluated in
+the phone's local time.
+
+---
+
+## Part 4 — Verify, on the actual phone
+
+Don't skip this. Every check has failed silently for somebody.
+
+```bash
+adb shell dpm list-owners          # should name the Headwind agent
 ```
-Phone ──(WARP app)──► Cloudflare Gateway ──► the internet
-                          │
-                          ├─ blocks every site not on the allowlist
-                          ├─ shows your block page for blocked sites
-                          └─ the block page asks the AI; clean sites get allowed
-```
 
-Three things must be true on every phone, or filtering silently doesn't happen:
-
-1. **WARP is installed** and routing traffic to Cloudflare.
-2. **WARP is connected to *your* organization** (`wandering-sky-cada`) — not the free public WARP.
-   This is the part people miss.
-3. **Cloudflare's certificate is installed and trusted**, so Gateway can read HTTPS addresses.
-
-Plus: WARP must be **locked on** so the phone's user can't switch it off.
+- [ ] A random unapproved site fails to load
+- [ ] An approved site loads
+- [ ] Settings → Private DNS shows the Gateway hostname and **cannot be changed**
+- [ ] The agent cannot be uninstalled
+- [ ] Blocking an app in `/admin` makes it disappear from the phone within a sync cycle
+- [ ] The request page reaches the worker and can get a site approved
+- [ ] The operator password removes management (test this before you need it in anger)
 
 ---
 
-## Part 1 — Cloudflare dashboard (do ONCE, not per phone)
+## Part 5 — Day to day
 
-Most of this is already done for you. You only need to do steps **1A** and **1B**.
+**Approve a site.** The user opens the request page and types the site; ordinary sites clear in a
+few seconds. Anything the classifier won't clear stays blocked until you allow it by hand in
+`/admin` → **Sites**.
 
-**Already done** (for reference): TLS decryption is ON, the default-deny policy is created, the URL
-allowlist exists, and the AI worker is live. You don't need to touch those.
+There is no injected block page — a DNS-blocked site just fails in the browser. Put the request page
+on the home screen or as a bookmark so it is somewhere obvious.
 
-### 1A. Allow the enrollment token to enroll devices
-
-This lets phones join your org automatically with no login.
-
-1. Go to **one.dash.cloudflare.com** → your account → **Settings** (left sidebar) → **WARP Client**.
-2. Find **Device enrollment permissions** → click **Manage**.
-3. Click **Add a rule** (or **Create a policy**).
-4. Name it `MDM phones`. Under the rule, choose include type **Service Auth**, and select the token
-   named **phone-warp-enrollment**.
-5. Save. (This is what makes the service token in Part 2 actually work.)
-
-### 1B. Download the Cloudflare certificate
-
-1. Still in **Settings** → **Resources** (or **Settings → Network → Certificates**).
-2. Find the **Cloudflare certificate** for in-line inspection → **Download** the `.pem` (also grab
-   `.crt`/`.der` if offered — some MDM cert uploads want a specific format).
-3. Keep this file; you'll upload it to ManageEngine in Part 2A.
-
-> If you see an option to **generate** a certificate first, do that, make it **active**, then
-> download it.
+**Change apps or schedules.** All in `/admin`. Changes reach phones on the next scheduler run (five
+minutes), or immediately via **Apply now**.
 
 ---
 
-## Part 2 — ManageEngine (do ONCE; applies to every enrolled phone)
+## The escape hatch
 
-You'll create a few **profiles/policies** in ManageEngine and assign them to the group your phones
-are in. Exact menu names vary slightly by ManageEngine version, so this describes the *thing* to
-create; look for that wording.
+The operator password fully removes management from a phone.
 
-### 2A. Push the Cloudflare certificate
-
-1. In ManageEngine: **Device Mgmt → Profiles → Create Profile** (pick **iOS** or **Android**).
-2. Add a **Certificate** payload/section.
-3. Upload the `.pem`/`.crt` from step 1B.
-4. Save, and **assign the profile** to your phone group.
-
-This installs Cloudflare's cert in the phone's trust store so decrypted HTTPS doesn't throw
-certificate warnings.
-
-> **iOS extra step:** a pushed cert via MDM is trusted automatically on **supervised** devices. If a
-> phone isn't supervised, someone has to manually flip *Settings → General → About → Certificate
-> Trust Settings*. Supervision avoids that — another reason iOS phones should be supervised.
-
-### 2B. Add the WARP app as a managed app
-
-The app is **Cloudflare One Agent**.
-
-- **iOS:** App Repository / App Management → **Add App → Apple App Store** → search *Cloudflare One
-  Agent* (App Store ID **6443476555**). Add it, mark it **managed**, assign to the group.
-- **Android:** App Management → **Managed Google Play** → search *Cloudflare One Agent* (package
-  **`com.cloudflare.cloudflareoneagent`**). Approve it, assign to the group.
-
-Set it to **install automatically** (mandatory app) so it lands without the user doing anything.
-
-### 2C. Configure the WARP app (THE important part)
-
-This is the **App Configuration** (a.k.a. *Managed App Config* / *App Settings*) for the Cloudflare
-One Agent app you just added. It's a set of key/value pairs. In ManageEngine, open the app → **App
-Configuration** → add these keys:
-
-| Key | Value | Why |
-|---|---|---|
-| `organization` | `wandering-sky-cada` | Joins **your** org, not public WARP |
-| `auth_client_id` | `<AUTH_CLIENT_ID>` | Zero-touch enroll (from secrets file) |
-| `auth_client_secret` | `<AUTH_CLIENT_SECRET>` | Zero-touch enroll (from secrets file) |
-| `service_mode` | `warp` | Full Gateway filtering (not DNS-only) |
-| `auto_connect` | `0` | Connect immediately and stay connected |
-| `switch_locked` | `true` | User can't turn WARP off |
-| `onboarding` | `false` | Skip the app's welcome screens |
-
-- **Android:** these go in as **Managed Configuration** key/values for the app.
-- **iOS:** these go in as the app's **Configuration** dictionary (key/value; ManageEngine may accept
-  a plist/XML — same keys). If ManageEngine wants types: `switch_locked`/`onboarding` are booleans,
-  the rest are strings, `auto_connect` is a number.
-
-### 2D. Force WARP always-on (belt and suspenders)
-
-`switch_locked` already stops the user disabling WARP, but also set OS-level always-on VPN:
-
-- **Android:** in the phone's restrictions profile, set **Always-on VPN** → app
-  `com.cloudflare.cloudflareoneagent`, and enable **Lockdown** (block traffic when VPN is down).
-- **iOS (supervised):** add a **VPN** payload set to **Always-on / Per-app** for Cloudflare One
-  Agent. (Supervised-only — another reason to supervise iPhones.)
+**It is an operator recovery tool. Do not ship it to families with the phone.** Anyone holding it
+can lift every restriction on that device, which makes it the single point of failure for the whole
+arrangement.
 
 ---
 
-## Part 3 — Enroll a phone (per phone)
+## What this can't do
 
-1. Enroll via **QR code** the way you already do.
-2. Everything from Part 2 auto-applies: the cert installs, WARP installs, connects to
-   `wandering-sky-cada`, and locks on. No login, no taps.
-3. Give it a minute; watch the phone show a VPN/WARP indicator.
+Be straight with families about all of these up front:
 
----
-
-## Part 4 — Check it actually works
-
-On the enrolled phone:
-
-1. Open the browser, go to a random site you haven't approved → you should get **your block page**.
-2. Tap **Check this site**. A clean site (e.g. a news site) should approve in a few seconds; reload
-   and it loads.
-3. Try an obviously bad site → stays blocked.
-4. Confirm WARP can't be turned off (the toggle should be greyed/locked).
-5. Confirm a normal app (banking, App Store) still works — if one breaks, see Part 5.
+- **A factory reset removes everything.** There is no factory-reset protection without an enterprise
+  Google binding. This is a strong guardrail, not a cage.
+- **YouTube Shorts, Instagram Reels and WhatsApp Status/Channels cannot be separated** from the rest
+  of those apps. In-app they are the same endpoints as ordinary content, behind certificate pinning.
+  No network filter reaches them. Those apps are all-or-nothing.
+- **No duration quotas.** Time windows work; "90 minutes a day" needs on-device usage accounting
+  that isn't built.
+- **DNS is bypassable** by a VPN app, hardcoded resolvers, or third-party DoH. The app allowlist is
+  what actually closes those doors.
 
 ---
-
-## Part 5 — Ongoing: two things you'll do
-
-### Allow a site someone asks for
-Either add the URL in the Cloudflare dashboard (**Gateway → Lists → Shmira Mobile Allowlist**), or
-run the operator command (see README — needs your operator key).
-
-### Fix an app that breaks (Do-Not-Inspect)
-Some apps (banking especially) refuse a decrypted connection ("certificate pinning"). When one
-breaks, exempt its domain from inspection:
-
-1. **one.dash.cloudflare.com → Gateway → Firewall Policies → HTTP → Add a policy** (or edit a
-   "Do Not Inspect" policy).
-2. Action: **Do Not Inspect**. Selector: **Host** (or **Domain**) → the app's domain.
-3. Put it **above** the default-deny policy in order.
-
-Starter domains worth exempting up front (banking varies — add yours as needed):
-`apple.com`, `icloud.com`, `mzstatic.com`, `push.apple.com`, `googleapis.com`, `gstatic.com`,
-`play.google.com`. This both un-breaks those apps **and** lets them through unfiltered — so only add
-domains you trust.
-
----
-
-## Supervising iPhones (Mac + Apple Configurator) — iOS ONLY
-
-Android phones don't need this — QR enrollment already makes them fully managed. **iPhones do.**
-A QR-enrolled iPhone is *not* supervised, and without supervision the app allowlist won't hold and
-the certificate won't auto-trust. Apple Configurator on your MacBook fixes that.
-
-> **Each iPhone gets ERASED during this.** Back up anything you care about first. Do this *before*
-> handing the phone to anyone.
-
-### One-time, on your Mac
-1. Install **Apple Configurator** (free, Mac App Store) and open it.
-2. Create your organization (first run): **Apple Configurator → Settings/Preferences → Organizations
-   → +** and fill in a name (e.g. "Shmira"). This generates the supervision identity that gets
-   baked into every phone.
-
-### Per iPhone
-1. Connect the iPhone to the Mac by cable. On the phone, tap **Trust** if asked.
-2. In Apple Configurator, select the device → click **Prepare** (top toolbar).
-3. **Configuration: Manual** → Next.
-4. **MDM Server: Do not enroll in MDM** → Next.
-   *(Simplest path: supervise here, then enroll into ManageEngine by QR afterward. You can instead
-   add your ManageEngine server and enroll in one shot, but "do not enroll" keeps it simple.)*
-5. **Supervise devices: checked.** (Optionally uncheck "Allow devices to pair with other
-   computers" for a tighter lock.) → Next.
-6. **Organization:** pick the one you created → Next.
-7. **Setup Assistant:** choose "Show only some steps" and skip the fluff → Next.
-8. Click **Prepare**. It erases + supervises the phone. Wait for it to finish.
-9. On the phone, walk through the iOS Setup Assistant. It's now supervised.
-10. **Enroll into ManageEngine by QR** the way you already know. Because it's supervised, ManageEngine
-    now enforces the iOS restrictions (app allowlist, cert auto-trust, etc.).
-
-### Verify supervision
-- On the iPhone: **Settings** shows a line at the very top — *"This iPhone is supervised and managed
-  by Shmira."* No line = not supervised.
-- In ManageEngine: the device's inventory page shows **Supervised: Yes**.
-
-### Notes
-- A **factory reset undoes** Configurator supervision (the phone would need the Mac step again).
-  Enrolling the phone into **ABM** later makes supervision survive resets — worth doing if the
-  cohort grows.
-- After the iPhone is supervised + enrolled, make sure the **Shmira iOS** profile actually has a
-  **Restrictions** payload (App Store disabled / allowed-apps list) — supervision is what lets those
-  restrictions bite, but you still have to add them to the profile.
 
 ## Turning a phone off the filter
-Unenroll / retire the device in ManageEngine (removes the profiles, app, and lock). Nothing else to
-do — there's no server-side per-phone record to clean up.
+
+Delete the device in the Headwind panel and remove it in `/admin` → **Devices**. There is no
+server-side state to clean beyond that; the audit log deliberately keeps its history.
+
+---
+
+## Appendix — iPhone (not ready)
+
+**Not deployable yet.** Recorded here so the sequence is clear.
+
+The **network layer ports over for free**: iOS supports a managed DNS payload, so the same Gateway
+allowlist, worker and classifier apply unchanged. A DNS profile can even be installed on an
+unmanaged iPhone today — but without supervision the user can delete it in Settings, so it filters
+the cooperative, not the determined.
+
+The **enforcement layer is the wall**. iOS has no equivalent of Device Owner available to an
+individual:
+
+- App control and non-removable profiles require **supervision**, which requires an MDM server.
+- A self-hosted Apple MDM server (**NanoMDM**/**MicroMDM**, both free) needs an **APNs certificate**,
+  and Apple issues those only to organizations in **Apple Business Manager** or **Apple School
+  Manager**. There is no hobbyist route. ABM is free but needs a legal entity and a D-U-N-S number;
+  ASM needs a recognized educational institution — plausibly available here, and the cheapest route
+  to the strong version.
+- **Enrollment doesn't scale to families.** Automated Device Enrollment — the version that survives
+  a factory reset — only covers devices purchased through Apple under the organization's account. A
+  phone a family already owns must be prepped individually with **Apple Configurator on a Mac**,
+  which erases it, and carries a 30-day window in which the user can release it.
+
+**Sequence:**
+
+1. **Now, free** — push the Cloudflare DNS profile. Immediate hostname filtering, no infrastructure.
+   Removable; say so.
+2. **Now, with a Mac** — Apple Configurator alone can supervise a phone and install a
+   **non-removable** profile that locks DNS, restricts apps by bundle ID, disables App Store
+   installs and hides built-in apps. No ABM, no APNs, no server, no recurring cost. The limitation
+   is that it **cannot be changed remotely** — every policy edit means reconnecting the cable.
+3. **Paperwork, start early** — determine ABM or ASM eligibility. This gates remote control and has
+   lead time, so do it in parallel with the Android rollout, not after.
+4. **Only if 3 clears** — NanoMDM + SCEP + TLS, obtain the APNs certificate, add `src/apple-mdm.js`
+   beside `src/headwind.js`. The whole control plane is reused unchanged.
+
+Step 3 is the go/no-go. If ABM/ASM proves unavailable, iPhones top out at step 2: locked, but only
+adjustable with a cable.
