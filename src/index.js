@@ -17,6 +17,9 @@
 // allowlist for every managed phone; every verdict is decided once per site and cached forever.
 
 import { classifySite } from './gemini.js';
+import { handleAdmin } from './admin-api.js';
+import { runScheduler } from './scheduler.js';
+import { renderAdminPage } from './admin-page.js';
 import { addHostToAllowlist, removeHostFromAllowlist } from './gateway.js';
 import { sha256Hex, timingSafeEqual } from './crypto.js';
 import { renderBlockPage } from './block-page.js';
@@ -102,7 +105,34 @@ export default {
       return handleAdminRevoke(request, env);
     }
 
+    // The operator console. The page itself is public HTML — it holds no secrets and renders
+    // nothing until the operator supplies the key, which every /api/admin/* call then requires.
+    if (url.pathname === '/admin' && request.method === 'GET') {
+      return new Response(renderAdminPage(), {
+        headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' },
+      });
+    }
+
+    if (url.pathname.startsWith('/api/admin/')) {
+      const denied = requireOperator(request, env);
+      if (denied) return denied;
+      return handleAdmin(request, env, url.pathname);
+    }
+
     return json({ error: 'Not found' }, 404);
+  },
+
+  // Cron Trigger. Cloudflare retries a scheduled invocation that throws, so failures are collected
+  // per device inside runScheduler and reported rather than thrown — one unreachable phone must not
+  // cause the whole fleet's run to be retried.
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(
+      runScheduler(env).then((summary) => {
+        console.log('scheduler run', JSON.stringify(summary));
+      }).catch((err) => {
+        console.error('scheduler run failed outright:', err.message);
+      })
+    );
   },
 };
 

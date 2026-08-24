@@ -7,8 +7,8 @@
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "db:init": "wrangler d1 execute phone-url-filter-db --remote --file=./schema.sql",
-    "db:migrate": "wrangler d1 execute phone-url-filter-db --remote --file=./migrations/0001_hostname_scope.sql",
-    "test": "node test/smoke.mjs"
+    "db:migrate": "wrangler d1 migrations apply phone-url-filter-db --remote",
+    "test": "node test/policy.test.mjs && node test/smoke.mjs && node --experimental-sqlite test/control-plane.test.mjs"
   },
   "devDependencies": {
     "wrangler": "^4.120.0"
