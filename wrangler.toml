@@ -18,7 +18,7 @@ CF_ACCOUNT_ID = "905456397f790c63aafc1cb42c400cb3"
 
 # The DOMAIN-type Gateway list the default-deny DNS policy allowlists against. This is what v1
 # enforces. Created by scripts/setup-gateway.sh, which prints the id to paste here.
-CF_GATEWAY_HOST_LIST_ID = ""
+CF_GATEWAY_HOST_LIST_ID = "128c36f6-5345-4361-887e-998f1eeb6365"
 
 # The URL-type list read by the (currently unused) default-deny HTTP policy. Dormant in v1 and kept
 # for the path-blocking upgrade path — see the "Forward-compatibility" section of the plan.

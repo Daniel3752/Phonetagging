@@ -29,6 +29,20 @@ API="https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}"
 AUTH="Authorization: Bearer ${CF_GATEWAY_API_TOKEN}"
 PY=python3
 
+# Returns the first unused precedence at or after $1. Cloudflare rejects a rule whose precedence
+# collides with an existing one, and the old full-URL HTTP policy from a previous install occupies
+# 1000 — so hardcoding a value makes this script fail on any account that has ever run it before.
+free_precedence() {
+  curl -s "${API}/gateway/rules" -H "${AUTH}" \
+    | WANT="$1" ${PY} -c "
+import sys, json, os
+used = {r.get('precedence') for r in (json.load(sys.stdin).get('result') or [])}
+p = int(os.environ['WANT'])
+while p in used: p += 1
+print(p)
+"
+}
+
 # Creates a Gateway rule unless one with the same name already exists. Body arrives on stdin.
 create_rule_if_absent() {
   local name="$1" body
@@ -70,17 +84,21 @@ echo "2/4 Creating default-deny DNS policy…"
 # out phones. A default-deny policy that silently fails open looks identical to one that works.
 export TRAFFIC="not (any(dns.domains[*] in \$${HOST_LIST_ID}) or dns.fqdn == \"${WORKER_HOST}\")"
 export WORKER_HOST
+export PRECEDENCE=$(free_precedence 1000)
+echo "   using precedence ${PRECEDENCE}"
 ${PY} -c "import json,os; print(json.dumps({
   'name': 'Phone filter: default-deny DNS (allowlist only)',
   'description': 'Allow only hostnames the AI or operator approved; block every other lookup.',
   'action': 'block',
   'filters': ['dns'],
   'enabled': True,
-  'precedence': 1000,
+  'precedence': int(os.environ['PRECEDENCE']),
   'traffic': os.environ['TRAFFIC'],
 }))" | create_rule_if_absent 'Phone filter: default-deny DNS (allowlist only)'
 
 echo "3/4 Enabling YouTube Restricted Mode + SafeSearch…"
+export YT_PREC=$(free_precedence 900)
+export SS_PREC=$(free_precedence $((YT_PREC + 1)))
 # Both work inside the native apps, not just browsers, and need no certificate. They do NOT remove
 # YouTube Shorts or Instagram Reels — no network-layer control can. See the plan.
 #
@@ -88,12 +106,12 @@ echo "3/4 Enabling YouTube Restricted Mode + SafeSearch…"
 # rejected, set them from the Zero Trust dashboard instead and leave this step out.
 ${PY} -c "print(__import__('json').dumps({
   'name': 'Phone filter: YouTube Restricted Mode',
-  'action': 'ytrestricted', 'filters': ['dns'], 'enabled': True, 'precedence': 900,
+  'action': 'ytrestricted', 'filters': ['dns'], 'enabled': True, 'precedence': int(__import__('os').environ['YT_PREC']),
   'traffic': 'any(dns.domains[*] in {\"youtube.com\" \"youtu.be\" \"googlevideo.com\"})',
 }))" | create_rule_if_absent 'Phone filter: YouTube Restricted Mode'
 ${PY} -c "print(__import__('json').dumps({
   'name': 'Phone filter: SafeSearch',
-  'action': 'safesearch', 'filters': ['dns'], 'enabled': True, 'precedence': 901,
+  'action': 'safesearch', 'filters': ['dns'], 'enabled': True, 'precedence': int(__import__('os').environ['SS_PREC']),
   'traffic': 'any(dns.domains[*] in {\"google.com\" \"bing.com\" \"duckduckgo.com\" \"yandex.com\"})',
 }))" | create_rule_if_absent 'Phone filter: SafeSearch'
 
@@ -109,10 +127,11 @@ else
     -d "${SETTINGS}" | ${PY} -c "import sys,json; d=json.load(sys.stdin); print('   tls_decrypt ->', (d.get('result') or {}).get('settings',{}).get('tls_decrypt'))"
 
   export TRAFFIC="not (http.request.uri in \$${CF_GATEWAY_LIST_ID} or http.request.host in {\"${WORKER_HOST}\"})"
+  export PRECEDENCE=$(free_precedence 1000)
   ${PY} -c "import json,os; print(json.dumps({
     'name': 'Phone filter: default-deny (allowlist only)',
     'description': 'Allow only URLs the AI/operator approved; block everything else and send it to the block page.',
-    'action': 'block', 'filters': ['http'], 'enabled': True, 'precedence': 1000,
+    'action': 'block', 'filters': ['http'], 'enabled': True, 'precedence': int(os.environ['PRECEDENCE']),
     'traffic': os.environ['TRAFFIC'],
     'rule_settings': {'block_page': {'target_uri': 'https://'+os.environ['WORKER_HOST']+'/blocked', 'include_context': True}}
   }))" | create_rule_if_absent 'Phone filter: default-deny (allowlist only)'
