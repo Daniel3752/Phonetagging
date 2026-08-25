@@ -27,7 +27,12 @@ Confirm all four of these before going further:
 - [ ] The stock agent provisions as Device Owner via QR without a Play Protect block
 - [ ] It can push a CA certificate (`installCaCert`) — you don't need this now, but it is the one
       capability you cannot retrofit later without touching every phone again
-- [ ] It can pin Private DNS and set the `DISALLOW_*` user restrictions listed in Part 3
+- [x] ~~It can pin Private DNS~~ — **it cannot.** Verified against the live server's API: Headwind's
+      Configuration object has 73 fields and none of them touch DNS. Android exposes the capability
+      (`setGlobalPrivateDnsModeSpecifiedHost`, API 29+) but Headwind does not implement it, so
+      Private DNS is set once per device over adb — see Part 3. Everything else about the filter
+      stays remotely changeable.
+- [ ] It can set `DISALLOW_*` user restrictions via the configuration's `restrictions` field
 - [ ] Its REST API can change a device's configuration remotely
 
 **If the first one fails, stop.** The whole design rests on it, and the fallback is a different
@@ -88,12 +93,29 @@ The phone must be **factory reset** — Device Owner can only be established dur
 
 Then apply, via the device's Headwind configuration:
 
-**Private DNS**
+**Private DNS — set over adb, once, with the phone plugged in**
 
-- `PRIVATE_DNS_MODE` = hostname
-- `PRIVATE_DNS_SPECIFIER` = the DoT hostname from Part 1
+Headwind cannot do this (see the pre-flight checklist), so it is a per-device step at enrollment:
 
-**User restrictions**
+```
+adb shell settings put global private_dns_mode hostname
+adb shell settings put global private_dns_specifier <YOUR-DOT-HOSTNAME>
+```
+
+It persists across reboots. The `no_config_private_dns` restriction below is what stops the user
+changing it back — without that restriction this setting is one Settings screen away from being
+switched off, so the two go together or not at all.
+
+Note what this does and does not pin down. The phone stores only *which resolver to ask*; every
+filtering rule — the allowlist, the AI's decisions, revocations, SafeSearch — lives at Cloudflare
+and stays changeable remotely and instantly. The only thing that needs a cable again is moving a
+phone to a *different* resolver, i.e. a different policy tier.
+
+**User restrictions** — Headwind configuration → MDM Settings → `restrictions`, comma separated:
+
+```
+no_config_private_dns,no_config_vpn,no_install_apps,no_install_unknown_sources,no_safe_boot,no_add_user
+```
 
 | Restriction | Why |
 |---|---|
@@ -157,6 +179,22 @@ can lift every restriction on that device, which makes it the single point of fa
 arrangement.
 
 ---
+
+## Why there is one website policy for the whole fleet
+
+Per-person *website* rules would need the phone's identity to travel with each DNS query, and it
+cannot: Android's Private DNS speaks DoT, which carries only the question and the server hostname.
+There is no header, path or field to put an identifier in.
+
+Cloudflare does support identity-based DNS policies, but they require a `CF-Authorization` header,
+which means DoH, which means a DoH client app on every phone and a seat per device. The other route
+is one DNS location per tier (three on the free plan), which trades the seat cost for a cable visit
+whenever someone changes tier.
+
+Both were considered and rejected for v1. Per-person variation lives in the **app layer** instead —
+which apps exist, when they are available, the whole launcher — and that is free, unlimited, and
+fully remote through Headwind. In practice that is where the real difference between two users
+lies anyway.
 
 ## What this can't do
 
