@@ -19,6 +19,7 @@
 import { classifySite } from './gemini.js';
 import { MAX_DEVICE_LEVEL, NEVER_LEVEL, normalizeSiteLevel } from './levels.js';
 import { handleAdmin } from './admin-api.js';
+import { handleProxyCheck } from './proxy-api.js';
 import { runScheduler } from './scheduler.js';
 import { renderAdminPage } from './admin-page.js';
 import { addHostToAllowlist, removeHostFromAllowlist } from './gateway.js';
@@ -92,6 +93,12 @@ export default {
       return new Response(renderBlockPage(), {
         headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' },
       });
+    }
+
+    // Asked once per request by the filtering proxy's ACL helper. Authenticated with PROXY_KEY,
+    // not the operator key, so the proxy holds a credential that cannot administer anything.
+    if (url.pathname === '/api/proxy/check' && request.method === 'POST') {
+      return handleProxyCheck(request, env);
     }
 
     if (url.pathname === '/api/verdict' && request.method === 'POST') {

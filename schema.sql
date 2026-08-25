@@ -78,8 +78,13 @@ CREATE TABLE IF NOT EXISTS devices (
   -- a location per phone makes the hostname itself the identity, and a level change becomes an API
   -- call rather than an adb visit. Set once at enrolment, then immutable.
   gateway_location_id TEXT,
-  dns_hostname TEXT
+  dns_hostname TEXT,
+  -- The proxy username Squid authenticates, mapped to this device. Identity on the wire for free —
+  -- the DNS architecture needed a Cloudflare location per phone to achieve the same thing.
+  proxy_user TEXT
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_devices_proxy_user ON devices (proxy_user);
 
 -- A recurring time window that swaps in a different policy. device_id NULL means the schedule
 -- applies to every device whose baseline policy is base_policy_id, so a rule can be written once
@@ -134,3 +139,16 @@ INSERT OR IGNORE INTO level_definitions (level, name, description, allow_doorway
   (4, 'Permissive', 'Adds sites with immodest but non-explicit imagery. Search permitted.',  1, 1);
 
 CREATE INDEX IF NOT EXISTS idx_url_verdicts_level ON url_verdicts (level, scope);
+
+-- Search-query verdicts. See migrations/0004_search_verdicts.sql for why the key is normalised.
+CREATE TABLE IF NOT EXISTS search_verdicts (
+  query_hash TEXT PRIMARY KEY,
+  query_sample TEXT,
+  level INTEGER NOT NULL,
+  reason TEXT,
+  source TEXT NOT NULL DEFAULT 'gemini',
+  decided_at INTEGER NOT NULL,
+  hit_count INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE INDEX IF NOT EXISTS idx_search_verdicts_level ON search_verdicts (level, decided_at DESC);

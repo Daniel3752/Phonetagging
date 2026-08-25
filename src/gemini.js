@@ -136,3 +136,68 @@ export async function classifySite(env, { hostname, title, text }) {
   const level = Number.isInteger(parsed.level) && parsed.level >= 1 && parsed.level <= 5 ? parsed.level : 5;
   return { level, isDoorway: parsed.is_doorway === true, reason: trimReason(parsed.reason) };
 }
+
+// --- Search queries -----------------------------------------------------------------------------
+
+const QUERY_RESPONSE_SCHEMA = {
+  type: 'object',
+  properties: {
+    level: { type: 'integer' },
+    reason: { type: 'string' },
+  },
+  required: ['level'],
+};
+
+// Rating what someone TYPED, rather than where they went.
+//
+// This is the check the DNS-era system could not make. At DNS the filter sees `www.google.com` and
+// nothing more, so approving Google once approves every search anyone will ever run. Reading the
+// query means judging intent — "volcano facts" and something deliberately sought are the same
+// hostname and a world apart.
+//
+// Rated on the same 1-5 ladder as sites, so one device level governs both and the two checks cannot
+// drift apart.
+const QUERY_INSTRUCTIONS = `You are a content filter for supervised phones in an Orthodox Jewish (Haredi) community. You are rating a SEARCH QUERY — words someone typed into a search box — onto a strictness ladder. Subscribers pick a rung; a query is permitted for everyone at or above the rung you assign.
+
+Assign "level":
+1 - Essential. Torah and Jewish topics, schoolwork, health, government, banking, travel logistics, practical how-to.
+2 - General. News, business, technology, reference, products, sport, recipes, ordinary curiosity.
+3 - Mainstream. Entertainment, celebrities, music, films, general culture — nothing sought for its own suggestiveness.
+4 - Permissive. Queries likely to surface immodest but non-explicit imagery: fashion, swimwear, beauty, "photos of <public figure>", modelling.
+5 - Never. Anything seeking sexual or explicit material however phrased, including euphemism, slang, misspelling or another language; dating or hookups; gambling; graphic violence; drugs; self-harm; how to bypass or disable internet filters.
+
+Rules:
+- Judge the INTENT of the words, not whether they are individually innocent. Deliberately oblique phrasing for explicit material is level 5.
+- An ordinary word that happens to have a suggestive secondary meaning is not level 5 unless the phrasing points that way.
+- Shopping for ordinary clothing is level 3. Shopping for swimwear or lingerie is level 4.
+- A query in any language gets the same treatment as its English equivalent.
+- When genuinely torn between two rungs, choose the higher (stricter) one.
+
+The "reason" field must be a single short sentence, at most 12 words (e.g. "Ordinary schoolwork topic." or "Seeking explicit material.").`;
+
+// Judges a typed search query. Throws on any Gemini failure; the caller fails closed (blocks the
+// search) rather than letting an unjudged query through.
+export async function classifySearchQuery(env, { query, engine, isImageSearch }) {
+  const context = [
+    `Search engine: ${engine || 'unknown'}`,
+    isImageSearch ? 'This is an IMAGE search — results are pictures shown directly, not links. Rate one rung stricter than you otherwise would.' : null,
+    `Query: ${query}`,
+  ].filter(Boolean).join('\n');
+
+  const data = await callGemini(env, {
+    contents: [{ parts: [{ text: `${QUERY_INSTRUCTIONS}\n\n${context}` }] }],
+    generationConfig: {
+      response_mime_type: 'application/json',
+      response_schema: QUERY_RESPONSE_SCHEMA,
+    },
+  });
+
+  const responseText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!responseText) throw new Error('Empty Gemini response');
+
+  const parsed = JSON.parse(responseText);
+  // Same fail-closed clamp as sites: anything outside 1..5 becomes 5, so a malformed rating blocks
+  // rather than silently permitting an unjudged query.
+  const level = Number.isInteger(parsed.level) && parsed.level >= 1 && parsed.level <= 5 ? parsed.level : 5;
+  return { level, reason: trimReason(parsed.reason) };
+}
