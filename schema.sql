@@ -18,7 +18,14 @@ CREATE TABLE IF NOT EXISTS url_verdicts (
   verdict TEXT NOT NULL,       -- 'clean' | 'blocked'
   reason TEXT,
   source TEXT NOT NULL DEFAULT 'gemini', -- 'gemini' | 'operator'
-  decided_at INTEGER NOT NULL
+  decided_at INTEGER NOT NULL,
+  -- The minimum device level allowed to see this site, 1 (strictest) .. 5 (never). See levels.js
+  -- and migrations/0003_levels.sql for what each rung means.
+  level INTEGER,
+  -- Does this site reach arbitrary other content — a search engine, an image search, an open
+  -- user-content platform? Gated separately from the rating, because such a site's own homepage
+  -- always looks harmless and allowing it allows everything behind it.
+  is_doorway INTEGER NOT NULL DEFAULT 0
 );
 
 -- Lookups are always (scope, hostname) on the hot path.
@@ -62,7 +69,16 @@ CREATE TABLE IF NOT EXISTS devices (
   timezone TEXT NOT NULL DEFAULT 'UTC',
   last_applied_policy_id TEXT,
   last_seen_at INTEGER,
-  enrolled_at INTEGER NOT NULL
+  enrolled_at INTEGER NOT NULL,
+  -- Website strictness rung, 1..4. Defaults to 2 so a new phone starts usefully strict and is
+  -- loosened deliberately rather than tightened after the fact.
+  level INTEGER NOT NULL DEFAULT 2,
+  -- The phone's own Cloudflare Gateway DNS location and the DoT hostname it was issued. DNS-over-
+  -- TLS carries no identity, so a fleet sharing one resolver hostname can only share one policy;
+  -- a location per phone makes the hostname itself the identity, and a level change becomes an API
+  -- call rather than an adb visit. Set once at enrolment, then immutable.
+  gateway_location_id TEXT,
+  dns_hostname TEXT
 );
 
 -- A recurring time window that swaps in a different policy. device_id NULL means the schedule
@@ -98,3 +114,23 @@ CREATE TABLE IF NOT EXISTS audit_log (
 );
 
 CREATE INDEX IF NOT EXISTS idx_audit_log_at ON audit_log (at DESC);
+
+-- One row per strictness rung, holding the Gateway objects that enforce it. See levels.js for the
+-- semantics and migrations/0003_levels.sql for the rung descriptions.
+CREATE TABLE IF NOT EXISTS level_definitions (
+  level INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL,
+  gateway_list_id TEXT,        -- DOMAIN list holding hostnames rated exactly this level
+  gateway_policy_id TEXT,      -- default-deny DNS policy whose location set = devices on this rung
+  allow_doorways INTEGER NOT NULL DEFAULT 0,
+  allow_categories INTEGER NOT NULL DEFAULT 0
+);
+
+INSERT OR IGNORE INTO level_definitions (level, name, description, allow_doorways, allow_categories) VALUES
+  (1, 'Essential',  'Torah and education, banking, government, school and utilities only.', 0, 0),
+  (2, 'General',    'Adds news, reference, business, technology and non-clothing shopping.', 0, 0),
+  (3, 'Mainstream', 'Adds ordinary sites showing people: sports, travel, general retail.',   0, 0),
+  (4, 'Permissive', 'Adds sites with immodest but non-explicit imagery. Search permitted.',  1, 1);
+
+CREATE INDEX IF NOT EXISTS idx_url_verdicts_level ON url_verdicts (level, scope);
