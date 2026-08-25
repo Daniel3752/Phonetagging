@@ -17,6 +17,7 @@
 // allowlist for every managed phone; every verdict is decided once per site and cached forever.
 
 import { classifySite } from './gemini.js';
+import { MAX_DEVICE_LEVEL, NEVER_LEVEL, normalizeSiteLevel } from './levels.js';
 import { handleAdmin } from './admin-api.js';
 import { runScheduler } from './scheduler.js';
 import { renderAdminPage } from './admin-page.js';
@@ -165,13 +166,21 @@ async function handleVerdict(request, env) {
   // homepage is the fairest single sample of what the site is for.
   let safe;
   let reason;
+  let level = NEVER_LEVEL;
+  let isDoorway = false;
   try {
     const pageRes = await fetch(`https://${target.hostname}/`, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
     const html = await pageRes.text();
     const { title, text } = extractPageInfo(html);
     const result = await classifySite(env, { hostname: target.hostname, title, text });
-    safe = result.safe;
+    level = normalizeSiteLevel(result.level);
+    isDoorway = result.isDoorway === true;
     reason = result.reason;
+    // Until the per-level enforcement lists exist, a single shared allowlist still backs the
+    // default-deny policy, so "allowed at all" means "reachable from the most permissive rung".
+    // The rating and the doorway flag are recorded regardless, so switching enforcement over is a
+    // read of columns that are already populated rather than a re-classification of the corpus.
+    safe = level <= MAX_DEVICE_LEVEL && !isDoorway;
   } catch {
     return json({ verdict: 'error', reason: 'Could not check this site right now.' });
   }
@@ -185,24 +194,28 @@ async function handleVerdict(request, env) {
     } catch {
       return json({ verdict: 'error', reason: 'Could not update the filter right now.' });
     }
-    await recordVerdict(env, { hostHash, target, verdict: 'clean', reason, source: 'gemini' });
-    return json({ verdict: 'clean', reason, hostname: target.hostname });
+    await recordVerdict(env, { hostHash, target, verdict: 'clean', reason, source: 'gemini', level, isDoorway });
+    return json({ verdict: 'clean', reason, hostname: target.hostname, level });
   }
 
   // Not clean: cache the block so repeat hits don't re-call Gemini, and leave the wall up.
-  await recordVerdict(env, { hostHash, target, verdict: 'blocked', reason, source: 'gemini' });
-  return json({ verdict: 'blocked', reason, hostname: target.hostname });
+  await recordVerdict(env, { hostHash, target, verdict: 'blocked', reason, source: 'gemini', level, isDoorway });
+  return json({ verdict: 'blocked', reason, hostname: target.hostname, level });
 }
 
-function recordVerdict(env, { hostHash, target, verdict, reason, source }) {
+function recordVerdict(env, { hostHash, target, verdict, reason, source, level, isDoorway }) {
   return env.DB.prepare(`
-    INSERT INTO url_verdicts (url_hash, url, hostname, scope, verdict, reason, source, decided_at)
-    VALUES (?, ?, ?, 'host', ?, ?, ?, ?)
+    INSERT INTO url_verdicts (url_hash, url, hostname, scope, verdict, reason, source, decided_at, level, is_doorway)
+    VALUES (?, ?, ?, 'host', ?, ?, ?, ?, ?, ?)
     ON CONFLICT(url_hash) DO UPDATE SET
       url = excluded.url, hostname = excluded.hostname, scope = 'host',
       verdict = excluded.verdict, reason = excluded.reason,
-      source = excluded.source, decided_at = excluded.decided_at
-  `).bind(hostHash, target.url, target.hostname, verdict, reason || null, source, Date.now()).run();
+      source = excluded.source, decided_at = excluded.decided_at,
+      level = excluded.level, is_doorway = excluded.is_doorway
+  `).bind(
+    hostHash, target.url, target.hostname, verdict, reason || null, source, Date.now(),
+    normalizeSiteLevel(level), isDoorway ? 1 : 0
+  ).run();
 }
 
 // Operator-only manual allow — the "someone asks me for a site, I allow it" path. Adds the hostname
@@ -222,6 +235,9 @@ async function handleAdminAllow(request, env) {
   await addHostToAllowlist(env, target.hostname);
   await recordVerdict(env, {
     hostHash, target, verdict: 'clean', reason: 'Allowed by operator', source: 'operator',
+    // An operator allow lands on the ordinary rung rather than the most permissive one: the point
+    // of allowing by hand is usually that a site is fine for everyone, not that it is borderline.
+    level: body.level ?? 2, isDoorway: body.is_doorway === true,
   });
 
   return json({ ok: true, hostname: target.hostname });
@@ -246,6 +262,7 @@ async function handleAdminRevoke(request, env) {
   await removeHostFromAllowlist(env, target.hostname);
   await recordVerdict(env, {
     hostHash, target, verdict: 'blocked', reason: 'Revoked by operator', source: 'operator',
+    level: NEVER_LEVEL, isDoorway: false,
   });
 
   return json({ ok: true, hostname: target.hostname });

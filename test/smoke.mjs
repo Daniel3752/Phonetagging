@@ -12,7 +12,7 @@ import worker from '../src/index.js';
 const rows = new Map();
 const gatewayList = new Set();
 let gatewayFails = false;
-let geminiSafe = true;
+let geminiSafe = true;  // drives the fake's rating: 2 (General) when safe, 5 (Never) when not
 
 const DB = {
   prepare(sql) {
@@ -51,7 +51,10 @@ globalThis.fetch = async (url, opts) => {
     return Response.json({ success: true });
   }
   if (u.includes('generativelanguage')) {
-    return Response.json({ candidates: [{ content: { parts: [{ text: JSON.stringify({ safe: geminiSafe, reason: geminiSafe ? 'Ordinary site.' : 'Dating app.' }) }] } }] });
+    return Response.json({ candidates: [{ content: { parts: [{ text: JSON.stringify({
+      level: geminiSafe ? 2 : 5, is_doorway: false,
+      reason: geminiSafe ? 'Ordinary site.' : 'Dating app.',
+    }) }] } }] });
   }
   return new Response('<html><head><title>Example</title></head><body>hello world</body></html>');
 };
