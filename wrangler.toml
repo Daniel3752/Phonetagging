@@ -30,5 +30,5 @@ CF_GATEWAY_LIST_ID = "ca654a6f-6899-48d6-afa7-51e187a37451"
 #   npx wrangler secret put OPERATOR_KEY          (bearer token gating /api/admin/*)
 #   npx wrangler secret put HEADWIND_API_TOKEN    (or HEADWIND_USER + HEADWIND_PASSWORD)
 #
-# Plus HEADWIND_BASE_URL below once the MDM server is up (task 2.1).
-# HEADWIND_BASE_URL = "https://mdm.example.com"
+# The self-hosted Headwind MDM server the scheduler drives.
+HEADWIND_BASE_URL = "https://mdm.getshmira.com"

@@ -1,24 +1,26 @@
 // Headwind MDM REST client — the enforcement layer.
 //
 // Division of labour: this worker decides WHICH policy a device should be running (src/policy.js,
-// src/scheduler.js); Headwind is what actually applies it to the phone. A policy here maps onto a
-// Headwind "configuration", which is the unit Headwind assigns to a device.
+// src/scheduler.js); Headwind is what applies it to the phone. A policy here maps onto a Headwind
+// "configuration", which is the unit Headwind assigns to a device.
 //
-// ⚠ ENDPOINT SHAPES ARE UNVERIFIED. Every path and payload assumption lives in ENDPOINTS below,
-// deliberately in one block, because they were written from documentation rather than against a
-// running server. Task 2.1 of the plan is to stand up Headwind and correct these against the real
-// API before any phone depends on them. Nothing else in the codebase encodes Headwind's wire
-// format, so fixing them is a single-file change.
+// Endpoints and payload shapes below are taken from a live server's Swagger spec
+// (GET /rest/swagger.json on the Headwind host), not from documentation. If the server is upgraded,
+// re-read that spec before assuming these still hold.
 //
-// Requires env.HEADWIND_BASE_URL (e.g. https://mdm.example.com), plus either
+// Requires env.HEADWIND_BASE_URL (e.g. https://mdm.getshmira.com), plus either
 // env.HEADWIND_API_TOKEN or the env.HEADWIND_USER / env.HEADWIND_PASSWORD pair.
 
 const ENDPOINTS = {
-  login: '/rest/public/jwt/login',                                  // POST {login, password} -> {token}
-  devices: '/rest/private/devices/search',                          // POST search -> device list
-  updateDevice: '/rest/private/devices',                            // PUT a device object
-  configurations: '/rest/private/configurations/search',            // POST search -> configuration list
+  login: '/rest/public/jwt/login',                    // POST {login,password} -> {id_token}
+  deviceSearch: '/rest/private/devices/search',       // POST DeviceSearchRequest -> DeviceListView
+  deviceUpdate: '/rest/private/devices',              // PUT Device -> Response
+  configurationList: '/rest/private/configurations/list', // GET -> [LookupItem]
 };
+
+// Headwind paginates device search. One page this size covers any fleet this system is designed
+// for; a larger deployment would need to walk pages, which is why totalItemsCount is checked.
+const DEVICE_PAGE_SIZE = 1000;
 
 const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
 const RETRY_DELAYS_MS = [500, 1500];
@@ -29,7 +31,7 @@ function requireConfig(env) {
 }
 
 // A static API token is preferred; username/password login is the fallback, and the resulting JWT
-// is cached per-isolate so a scheduler run over many devices does not re-authenticate each time.
+// is cached per-isolate so a scheduler run over many devices doesn't re-authenticate each time.
 let cachedToken = null;
 let cachedTokenAt = 0;
 const TOKEN_TTL_MS = 10 * 60 * 1000;
@@ -42,17 +44,17 @@ async function authHeader(env) {
 
   if (cachedToken && Date.now() - cachedTokenAt < TOKEN_TTL_MS) return `Bearer ${cachedToken}`;
 
-  const base = requireConfig(env);
-  const res = await fetch(base + ENDPOINTS.login, {
+  const res = await fetch(requireConfig(env) + ENDPOINTS.login, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ login: env.HEADWIND_USER, password: env.HEADWIND_PASSWORD }),
   });
   if (!res.ok) throw new Error(`Headwind login failed: ${res.status}`);
 
-  const data = await res.json();
-  const token = data?.data?.token || data?.token;
-  if (!token) throw new Error('Headwind login returned no token');
+  // The spec calls the field id_token. Some builds wrap responses in {status, data}, so check both.
+  const body = await res.json();
+  const token = body?.id_token || body?.data?.id_token;
+  if (!token) throw new Error('Headwind login returned no id_token');
 
   cachedToken = token;
   cachedTokenAt = Date.now();
@@ -83,41 +85,74 @@ async function call(env, path, options = {}) {
   }
 }
 
-function unwrap(payload) {
-  // Headwind wraps successful responses as {status:'OK', data:[...]}; tolerate a bare array too.
-  if (Array.isArray(payload)) return payload;
-  const data = payload?.data;
-  if (Array.isArray(data)) return data;
-  if (Array.isArray(data?.items)) return data.items;
-  return [];
+// Successful responses may arrive bare or wrapped as {status:'OK', data:…}. Unwrap either.
+function payload(body) {
+  if (body && typeof body === 'object' && 'data' in body && 'status' in body) return body.data;
+  return body;
 }
 
+// Configuration names and ids — used to map a policy's headwind_configuration_id onto something
+// real, and to populate the operator UI.
 export async function listConfigurations(env) {
-  return unwrap(await call(env, ENDPOINTS.configurations, { method: 'POST', body: JSON.stringify({}) }));
+  const data = payload(await call(env, ENDPOINTS.configurationList, { method: 'GET' }));
+  return Array.isArray(data) ? data : [];
 }
 
+// One page of devices. DeviceView carries mdmMode/kioskMode, which is how we can confirm the agent
+// actually holds Device Owner without plugging the phone into a computer.
 export async function listDevices(env) {
-  return unwrap(await call(env, ENDPOINTS.devices, { method: 'POST', body: JSON.stringify({}) }));
+  const data = payload(await call(env, ENDPOINTS.deviceSearch, {
+    method: 'POST',
+    body: JSON.stringify({ pageNum: 1, pageSize: DEVICE_PAGE_SIZE }),
+  }));
+
+  const page = data?.devices || {};
+  const items = Array.isArray(page.items) ? page.items : [];
+
+  if (typeof page.totalItemsCount === 'number' && page.totalItemsCount > items.length) {
+    console.warn(`Headwind reports ${page.totalItemsCount} devices but one page returned ${items.length}; pagination needed.`);
+  }
+  return items;
 }
 
-// Assigns a configuration to one device — the single write the scheduler performs.
-//
-// Headwind's device update is a whole-object PUT rather than a patch, so the current object is
-// read first and only configurationId changed. Blind-writing a partial object here would silently
-// clear fields the operator set in the Headwind UI.
-export async function setDeviceConfiguration(env, headwindDeviceId, configurationId) {
+export async function findDevice(env, headwindDeviceId) {
   const devices = await listDevices(env);
-  const current = devices.find((d) => String(d.id) === String(headwindDeviceId));
+  return devices.find((d) => String(d.id) === String(headwindDeviceId)) || null;
+}
+
+// The single write the scheduler performs: point one device at a different configuration.
+//
+// PUT /private/devices takes a whole Device object, not a patch, so the current record is read
+// first and only configurationId changed. Blind-writing a partial object would silently clear
+// fields the operator set in the Headwind UI.
+//
+// DeviceView (what search returns) is a superset of Device (what the PUT accepts), so the writable
+// fields are copied across explicitly rather than passing the read object straight back — sending
+// read-only fields like statusCode or serial risks the server rejecting or misinterpreting them.
+export async function setDeviceConfiguration(env, headwindDeviceId, configurationId) {
+  const current = await findDevice(env, headwindDeviceId);
   if (!current) throw new Error(`Headwind device ${headwindDeviceId} not found`);
 
   if (String(current.configurationId) === String(configurationId)) {
     return { changed: false };
   }
 
-  await call(env, ENDPOINTS.updateDevice, {
+  await call(env, ENDPOINTS.deviceUpdate, {
     method: 'PUT',
-    body: JSON.stringify({ ...current, configurationId }),
+    body: JSON.stringify({
+      id: current.id,
+      number: current.number,
+      description: current.description ?? null,
+      configurationId: Number(configurationId),
+      imei: current.imei ?? null,
+      phone: current.phone ?? null,
+      custom1: current.custom1 ?? null,
+      custom2: current.custom2 ?? null,
+      custom3: current.custom3 ?? null,
+      groups: current.groups || [],
+    }),
   });
+
   return { changed: true, from: current.configurationId, to: configurationId };
 }
 

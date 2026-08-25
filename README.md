@@ -74,7 +74,7 @@ Worth knowing before promising anything to families:
 | `src/gateway.js` | Cloudflare Gateway client — hostname and (dormant) URL allowlists |
 | `src/policy.js` | Pure resolver: device + instant → effective policy |
 | `src/scheduler.js` | Cron job that pushes policy changes to Headwind |
-| `src/headwind.js` | Headwind MDM REST client ⚠ endpoints need verifying against a live server |
+| `src/headwind.js` | Headwind MDM REST client (endpoints taken from the live server's Swagger spec) |
 | `src/admin-api.js` | Operator API behind `/api/admin/*` |
 | `src/admin-page.js` | Operator console (`/admin`) |
 | `src/block-page.js` | Request-access page (`/blocked`) |
