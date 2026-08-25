@@ -73,3 +73,48 @@ buying a batch.
 The test phone resolves nothing on the building wifi — **including with Private DNS switched off**,
 which means it is probably not a DoT/port-853 problem. `ping 1.1.1.1` succeeds, so the network is
 up. Suspected captive portal or a network that withholds DNS. Unresolved; see the handoff notes.
+
+---
+
+## Architecture change, 25 Aug 2026: proxy replaces DNS as the enforcement layer
+
+DNS filtering sees a hostname and nothing else, so it can decide where someone went but never what
+they were looking for — the words typed into a search box live in the query string. A proxy sees the
+full URL. See `PROXY.md` for the design, what was verified, and the deployment runbook.
+
+The Cloudflare DNS setup above still works and is still deployed. Keep it until the proxy is proven
+on real phones; it is a working fallback, and the two are not mutually exclusive.
+
+### Verified on the Vortex this session
+
+- **Chrome on Android honours a system HTTP proxy.** `mitm.it` loaded and Wikipedia raised a
+  certificate warning — both only possible through the proxy.
+- **It works with DNS broken.** Pages loaded while the phone had no working resolver, because the
+  proxy resolves on its behalf. This retires the blocker that stopped the last two sessions.
+- **QUIC does not bypass it.** Chromium with QUIC enabled sent `CONNECT www.google.com:443` through
+  the proxy. QUIC is UDP, an HTTP proxy is TCP, so Chrome falls back. Verified on desktop Chromium,
+  not Android — see `PROXY.md`.
+- **Nothing broke.** No third-party apps installed, so the splice list starts empty.
+
+### Headwind capabilities, checked against the live API spec
+
+Pulled from `https://mdm.getshmira.com/rest/swagger.json` — 121 endpoints, 73 Configuration fields.
+
+| | |
+|---|---|
+| Per-app managed settings | **Yes** — `/private/devices/{id}/applicationSettings`, name/value/type, per device or per configuration. This is how Chrome policies get pushed. |
+| Certificate installation | **No** — zero mentions in the entire spec. adb, per phone. |
+| System proxy | **No** — zero mentions. adb, per phone. |
+
+### Still unresolved
+
+The Vortex resolves nothing over DoT on either the building wifi or a hotspot. Android's Private DNS
+in hostname mode is strict: if it cannot reach the resolver on port 853 it fails *every* lookup,
+which matches the symptom exactly. Untested causes, in order of likelihood: DoT not actually enabled
+on the `Phones` Gateway location; port 853 blocked on those networks; a typo in the specifier.
+
+The Cloudflare side is confirmed healthy — DoH queries against
+`l7eeo6k7lt.cloudflare-gateway.com` return a real IP for `en.wikipedia.org` and `0.0.0.0` for
+`google.com`. Whatever is wrong is between the phone and Cloudflare.
+
+This no longer blocks anything, since the proxy needs no DNS on the phone at all.

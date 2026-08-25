@@ -10,10 +10,21 @@ Three layers, each doing only what it is good at:
 | Layer | Component | Role |
 |---|---|---|
 | **Enforcement** | [Headwind MDM](https://h-mdm.com) Community, self-hosted; the stock agent as Device Owner | App control, uninstall-proofing, locked settings |
-| **Network** | Cloudflare Gateway DNS, via Android's locked Private DNS | Hostname allow/deny |
+| **Network** | A self-hosted Squid proxy with TLS interception — see [PROXY.md](PROXY.md) | Full-URL and search-query filtering |
+| **Network (fallback)** | Cloudflare Gateway DNS, via Android's locked Private DNS | Hostname allow/deny |
 | **Control plane** | This Cloudflare Worker + D1 | Policy store, AI classifier, scheduler, operator console |
 
 The worker decides *what each phone should be running*; Headwind is what actually applies it.
+
+### Levels, not allow/deny
+
+Sites and search queries are rated 1–5 on a modesty ladder rather than judged appropriate or not,
+and every device carries the rung it may see. Rating once and reusing it for everyone at or above
+that rung is what keeps classification volume flat as the fleet grows. See `src/levels.js`.
+
+A separate **doorway** flag covers sites whose function is reaching content they do not control —
+search engines, image search, open user-content platforms. It overrides the rating, because such a
+site's own homepage always looks harmless and allowing it allows everything behind it.
 
 ### App control
 
