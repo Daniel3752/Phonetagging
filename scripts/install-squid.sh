@@ -38,6 +38,16 @@ chown -R proxy:proxy "$SPOOL" "$SSL_DIR"
 echo "==> Helper"
 install -m 755 "$HERE/squid-acl-helper.py" /usr/local/bin/squid-acl-helper.py
 
+echo "==> Blocklists (explicit + social, from shmiras-blocklists)"
+install -m 755 "$HERE/sync-blocklists.sh" /usr/local/bin/sync-blocklists.sh
+mkdir -p /etc/squid/blocklists
+# One sync now so the helper has lists on first start; then daily, after the repo's 02:00 rebuild.
+/usr/local/bin/sync-blocklists.sh || echo "    initial blocklist sync failed — cron will retry"
+cat > /etc/cron.d/shmira-blocklists <<'CRON'
+17 3 * * * root /usr/local/bin/sync-blocklists.sh >> /var/log/shmira-blocklists.log 2>&1
+CRON
+chmod 644 /etc/cron.d/shmira-blocklists
+
 # The helper needs the Worker key. Squid does not pass its own environment to helpers reliably, so
 # it goes in a systemd drop-in that both squid and the helper inherit.
 if [[ ! -f /etc/squid/filter.env ]]; then

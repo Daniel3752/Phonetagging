@@ -33,6 +33,80 @@ WORKER_URL = os.environ.get('SHMIRA_WORKER_URL', 'https://phone-url-filter.danie
 PROXY_KEY = os.environ.get('SHMIRA_PROXY_KEY', '')
 TIMEOUT = float(os.environ.get('SHMIRA_TIMEOUT', '4.0'))
 
+# --- Blocklists ----------------------------------------------------------------------------------
+#
+# Two domain lists synced from the shmiras-blocklists repo (scripts/sync-blocklists.sh, daily):
+#   level1.json — explicit. Blocked at EVERY rung, so it is checked here BEFORE the Worker is even
+#                 asked. This is what keeps the permissive rungs (4, 5) safe: the Worker allows an
+#                 unknown host by default there, so an explicit site must be caught first.
+#   level2.json — social. Blocked at rungs 1-4 and allowed at rung 5, so its check needs the rung,
+#                 which the Worker returns as device_level; a tiny (~30-domain) list, applied after.
+#
+# Matching is by SUFFIX (a domain and all its subdomains), unlike the exact-host allowlist — a
+# blocklist that only matched the apex would miss www. and every CDN subdomain. Loaded into sets and
+# reloaded when the files change, so a daily sync is picked up without restarting the helper.
+BLOCKLIST_DIR = os.environ.get('SHMIRA_BLOCKLIST_DIR', '/etc/squid/blocklists')
+BLOCKLIST_RELOAD_SECS = float(os.environ.get('SHMIRA_BLOCKLIST_RELOAD', '300'))
+
+_blocklists = {'level1': set(), 'level2': set()}
+_blocklist_mtimes = {'level1': 0.0, 'level2': 0.0}
+_blocklist_checked_at = 0.0
+
+
+def _extract_domains(obj):
+    """The repo nests domains under category keys (level1.video, level2.social, ...). Flatten every
+    list of strings found, whatever the categories are called, so a new category needs no code change."""
+    out = set()
+    if isinstance(obj, dict):
+        for value in obj.values():
+            out |= _extract_domains(value)
+    elif isinstance(obj, list):
+        for item in obj:
+            if isinstance(item, str) and item.strip():
+                out.add(item.strip().lower().rstrip('.'))
+            else:
+                out |= _extract_domains(item)
+    return out
+
+
+def _load_one(name):
+    path = os.path.join(BLOCKLIST_DIR, f'{name}.json')
+    try:
+        mtime = os.path.getmtime(path)
+    except OSError:
+        return  # no file yet — an empty set means this list simply does not fire
+    if mtime == _blocklist_mtimes[name]:
+        return
+    try:
+        with open(path, 'r', encoding='utf-8') as fh:
+            data = json.load(fh)
+        _blocklists[name] = _extract_domains(data)
+        _blocklist_mtimes[name] = mtime
+    except (OSError, ValueError):
+        pass  # keep the previously loaded set rather than blanking the blocklist on a bad write
+
+
+def _refresh_blocklists():
+    global _blocklist_checked_at
+    now = time.time()
+    if now - _blocklist_checked_at < BLOCKLIST_RELOAD_SECS:
+        return
+    _blocklist_checked_at = now
+    _load_one('level1')
+    _load_one('level2')
+
+
+def _domain_blocked(host, blockset):
+    """True if host, or any parent domain of it, is in blockset. a.b.example.com matches an entry for
+    example.com. Stops at two labels — a TLD alone is never a blocklist entry."""
+    if not blockset:
+        return False
+    labels = host.split('.')
+    for i in range(len(labels) - 1):
+        if '.'.join(labels[i:]) in blockset:
+            return True
+    return False
+
 # A page load hits the same host dozens of times. Short TTL so an operator's decision reaches the
 # phones quickly — a minute of staleness is invisible to a person, and the alternative is a filter
 # where "I've allowed it" means "in an hour".
@@ -62,7 +136,7 @@ def _cache_put(key, allow):
 
 
 def ask_worker(user, url):
-    """Returns (allow: bool, reason: str). Raises nothing — failure means blocked."""
+    """Returns (allow: bool, reason: str, level: int|None). Raises nothing — failure means blocked."""
     payload = json.dumps({'user': user, 'url': url}).encode()
     req = urllib.request.Request(
         f'{WORKER_URL}/api/proxy/check',
@@ -91,17 +165,48 @@ def ask_worker(user, url):
             detail = exc.read().decode()[:120]
         except Exception:
             pass
-        return False, f'filter error HTTP {exc.code} {detail}'.strip()
+        return False, f'filter error HTTP {exc.code} {detail}'.strip(), None
     except (urllib.error.URLError, OSError, ValueError, json.JSONDecodeError) as exc:
-        return False, f'filter unreachable ({type(exc).__name__})'
+        return False, f'filter unreachable ({type(exc).__name__})', None
 
-    return bool(body.get('allow')), body.get('reason') or body.get('action') or 'blocked'
+    level = body.get('device_level')
+    level = level if isinstance(level, int) else None
+    return bool(body.get('allow')), body.get('reason') or body.get('action') or 'blocked', level
+
+
+def _host_of(url):
+    try:
+        return (urllib.parse.urlsplit(url).hostname or '').lower().rstrip('.')
+    except ValueError:
+        return ''
+
+
+def decide(user, url):
+    """The full local decision: L1 blocklist (all rungs) → Worker → L2 blocklist (rungs 1-4).
+
+    L1 is checked first and locally so an explicit host is denied without a Worker round trip, and so
+    the Worker's allow-by-default on the permissive rungs can never let a known-explicit site through.
+    L2 is rung-dependent, so it is applied after the Worker answers with device_level."""
+    host = _host_of(url)
+
+    if host and _domain_blocked(host, _blocklists['level1']):
+        return False, 'blocklist: explicit'
+
+    allow, reason, level = ask_worker(user, url)
+
+    # Social is blocked on every rung except the most open (5). The Worker allows these hosts by
+    # default on the permissive rungs, so the blocklist is what actually keeps them out at rung 4.
+    if allow and host and level is not None and level <= 4 and _domain_blocked(host, _blocklists['level2']):
+        return False, 'blocklist: social'
+
+    return allow, reason
 
 
 def main():
     # Unbuffered both ways: Squid waits on each answer, so anything sitting in a buffer is a stalled
     # page rather than a delayed log line.
     for raw in sys.stdin:
+        _refresh_blocklists()
         line = raw.rstrip('\n')
         if not line:
             continue
@@ -134,7 +239,7 @@ def main():
             key = (user, url)
             cached = _cache_get(key)
             if cached is None:
-                allow, reason = ask_worker(user, url)
+                allow, reason = decide(user, url)
                 _cache_put(key, allow)
             else:
                 allow, reason = cached, 'cached'
