@@ -73,10 +73,10 @@ row = await DB.prepare(`SELECT level, source, verdict FROM url_verdicts WHERE ho
 check('site rated and marked as an operator decision',
   row.level === 2 && row.source === 'operator' && row.verdict === 'clean', JSON.stringify(row));
 
-await admin('/api/admin/sites/level', { hostname: 'https://Bad.Example.COM/some/path', level: 5 });
+await admin('/api/admin/sites/level', { hostname: 'https://Bad.Example.COM/some/path', level: 6 });
 row = await DB.prepare(`SELECT hostname, verdict FROM url_verdicts WHERE hostname = ?`)
   .bind('bad.example.com').first();
-check('a pasted URL is reduced to its hostname and lowercased',
+check('a pasted URL is reduced to its hostname and lowercased, NEVER is blocked',
   !!row && row.verdict === 'blocked', JSON.stringify(row));
 
 console.log('\n4. an override on a site is what the proxy then enforces');
@@ -111,7 +111,7 @@ check('schedules removed with the device', left.n === 0,
 
 console.log('\n7. the ladder is served, not hard-coded in the page');
 const state = await (await admin('/api/admin/state', null, 'GET')).json();
-check('state carries the level definitions', Array.isArray(state.levels) && state.levels.length === 4);
+check('state carries the level definitions', Array.isArray(state.levels) && state.levels.length === 5);
 
 console.log(failures ? `\n${failures} FAILED\n` : '\nAll admin-level checks passed.\n');
 process.exit(failures ? 1 : 0);

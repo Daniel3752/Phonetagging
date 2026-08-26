@@ -399,7 +399,7 @@ export function renderAdminPage() {
     if (!el || el.dataset.filled) return;
     el.innerHTML = (state.levels || []).map(function (l) {
       return '<option value="' + l.level + '">' + esc(l.level + ' \u00b7 ' + l.name) + '</option>';
-    }).join('') + '<option value="5">5 \u00b7 Never</option>';
+    }).join('') + '<option value="6">Never (blocked everywhere)</option>';
     el.value = '2';
     el.dataset.filled = '1';
   }

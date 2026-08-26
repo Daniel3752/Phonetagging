@@ -123,6 +123,18 @@ export function isSearchUrl(rawUrl) {
   return parseSearchUrl(rawUrl) !== null;
 }
 
+// True when the hostname belongs to a recognised search engine, regardless of path or query. The
+// proxy uses this to let a search engine's HOMEPAGE (the empty search box, which parseSearchUrl
+// rejects because it has no query) load wherever the rung permits search — otherwise the box the
+// user is about to type a filtered query into would itself be blocked as an ordinary unlisted site.
+// The queries themselves still go through parseSearchUrl and the query filter; only the bare landing
+// is granted here.
+export function isSearchEngineHost(hostname) {
+  const h = String(hostname || '').replace(/\.$/, '').toLowerCase();
+  if (!h) return false;
+  return ENGINES.some((engine) => hostMatches(h, engine.hosts));
+}
+
 // A stable cache key for a query, so the same words asked twice are judged once.
 //
 // Normalised hard: lowercased, punctuation stripped, whitespace collapsed, words sorted. "Volcano

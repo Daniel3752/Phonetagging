@@ -11,8 +11,22 @@
 // Using Google's rolling "-latest" alias rather than a pinned version — pinned Flash-Lite versions
 // have been retired server-side before and started 404ing. As of this writing the alias resolves
 // to gemini-3.1-flash-lite.
+import { NEVER_LEVEL } from './levels.js';
+
 const GEMINI_MODEL = 'gemini-flash-lite-latest';
 const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
+
+// TEMPORARY BRIDGE between the model's rating scale and the internal one, and the ONLY place the two
+// scales meet. The prompts below still speak the old 1..5 ladder where 5 = "Never" (its wording is
+// the deferred rubric rewrite — see BUILD-PLAN.md §0/§4). Internally the ladder is now five real
+// device rungs 1..5 plus NEVER = 6, so a model "5" must NOT be read as "visible at rung 5" — that
+// would show explicit content at the most open rung. Map it to NEVER instead; 1..4 pass through.
+// When the rubric is rewritten to emit the 6-point scale directly, delete this and the mapping call.
+function aiRatingToInternal(level) {
+  const n = Number(level);
+  if (!Number.isInteger(n) || n < 1 || n >= 5) return NEVER_LEVEL; // 5, out-of-range, malformed → NEVER
+  return n; // 1..4 are already the internal min-rung
+}
 
 // Transient failures (rate limiting, momentary server issues) shouldn't fail a classification
 // immediately — retry a couple times with backoff. Non-transient errors (bad key, malformed
@@ -131,9 +145,9 @@ export async function classifySite(env, { hostname, title, text }) {
 
   const parsed = JSON.parse(responseText);
 
-  // Anything the model returns outside 1..5 becomes 5 (never). A malformed rating must fail closed:
-  // the alternative is an unjudged site silently entering the most permissive rung.
-  const level = Number.isInteger(parsed.level) && parsed.level >= 1 && parsed.level <= 5 ? parsed.level : 5;
+  // Map onto the internal scale (1..4 pass, 5/malformed → NEVER). A malformed rating fails closed:
+  // the alternative is an unjudged site silently entering a rung it was never cleared for.
+  const level = aiRatingToInternal(parsed.level);
   return { level, isDoorway: parsed.is_doorway === true, reason: trimReason(parsed.reason) };
 }
 
@@ -196,8 +210,8 @@ export async function classifySearchQuery(env, { query, engine, isImageSearch })
   if (!responseText) throw new Error('Empty Gemini response');
 
   const parsed = JSON.parse(responseText);
-  // Same fail-closed clamp as sites: anything outside 1..5 becomes 5, so a malformed rating blocks
-  // rather than silently permitting an unjudged query.
-  const level = Number.isInteger(parsed.level) && parsed.level >= 1 && parsed.level <= 5 ? parsed.level : 5;
+  // Same bridge and fail-closed as sites: 1..4 pass, a model "5"/malformed → NEVER, so an unjudged
+  // or explicit query blocks rather than slipping through at the most open rung.
+  const level = aiRatingToInternal(parsed.level);
   return { level, reason: trimReason(parsed.reason) };
 }

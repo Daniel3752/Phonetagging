@@ -16,7 +16,8 @@ async function check(name, fn) { await fn(); passed++; console.log(`  PASS  ${na
 let devices, siteVerdicts, searchVerdicts, geminiLevel, geminiFails, geminiCalls;
 
 function reset() {
-  devices = new Map([['phone-a', { id: 'dev1', level: 2 }], ['phone-open', { id: 'dev2', level: 4 }]]);
+  // phone-a is a deny-by-default allowlist rung (2); phone-open is the most open, permissive rung (5).
+  devices = new Map([['phone-a', { id: 'dev1', level: 2 }], ['phone-open', { id: 'dev2', level: 5 }]]);
   siteVerdicts = new Map();
   searchVerdicts = new Map();
   geminiLevel = 2;
@@ -34,6 +35,9 @@ const DB = {
       if (/FROM url_verdicts/.test(sql)) return siteVerdicts.get(q.args[0]) || null;
       return null;
     };
+    // keyword_rules is the only .all() query on this path; empty means every query falls through to
+    // the cache and the model, exactly as before the pre-filter existed.
+    q.all = async () => ({ results: /FROM keyword_rules/.test(sql) ? [] : [] });
     q.run = async () => {
       if (/INSERT INTO search_verdicts/.test(sql)) {
         searchVerdicts.set(q.args[0], { level: q.args[2], reason: q.args[3] });
@@ -130,36 +134,74 @@ await check('a site above the rung is blocked, not requestable', async () => {
   assert.equal(r.allow, false);
   assert.equal(r.action, 'blocked');
 });
-await check('a never-rated site is blocked even on the loosest rung', async () => {
-  siteVerdicts.set(await sha('bad.example.com'), { level: 5, is_doorway: 0, reason: 'Explicit.' });
+await check('a NEVER-rated site is blocked even on the most open rung', async () => {
+  siteVerdicts.set(await sha('bad.example.com'), { level: 6, is_doorway: 0, reason: 'Explicit.' });
   const r = await (await ask({ user: 'phone-open', url: 'https://bad.example.com/' })).json();
   assert.equal(r.allow, false);
 });
-await check('a doorway is blocked below the rung that permits doorways', async () => {
-  siteVerdicts.set(await sha('portal.example.com'), { level: 1, is_doorway: 1, reason: 'Search.' });
+await check('an unknown site is allowed on a permissive rung but denied on an allowlist rung', async () => {
+  const open = await (await ask({ user: 'phone-open', url: 'https://brand-new.example/' })).json();
+  const strict = await (await ask({ user: 'phone-a', url: 'https://brand-new.example/' })).json();
+  assert.equal(open.allow, true, 'allow-by-default at rung 5');
+  assert.equal(strict.allow, false, 'deny-by-default at rung 2');
+  assert.equal(strict.action, 'unknown');
+});
+await check('a doorway is blocked on an allowlist rung, allowed on a permissive one', async () => {
+  siteVerdicts.set(await sha('portal.example.com'), { level: 1, is_doorway: 1, reason: 'Open platform.' });
   const strict = await (await ask({ user: 'phone-a', url: 'https://portal.example.com/' })).json();
   const open = await (await ask({ user: 'phone-open', url: 'https://portal.example.com/' })).json();
-  assert.equal(strict.allow, false, 'clean rating must not smuggle a doorway through');
+  assert.equal(strict.allow, false, 'clean rating must not smuggle a doorway onto a strict rung');
   assert.equal(open.allow, true);
 });
 
-console.log('\n4. unknown devices degrade to the strictest rung, not to open');
+console.log('\n4. unknown devices degrade to the strictest rung (rung 1 = no web)');
 reset();
-await check('an unregistered proxy user gets the strictest rung', async () => {
+await check('an unregistered proxy user gets rung 1 and no web', async () => {
   siteVerdicts.set(await sha('news.example.com'), { level: 2, is_doorway: 0, reason: 'News.' });
   const r = await (await ask({ user: 'who-is-this', url: 'https://news.example.com/' })).json();
   assert.equal(r.device_level, 1);
   assert.equal(r.allow, false);
+  assert.equal(r.action, 'no_web');
   assert.equal(r.known_device, false);
 });
-await check('a missing user is also strictest', async () => {
+await check('a missing user is also rung 1', async () => {
   const r = await (await ask({ url: 'https://news.example.com/' })).json();
   assert.equal(r.device_level, 1);
+  assert.equal(r.allow, false);
 });
-await check('a level-1 site still resolves for an unknown device', async () => {
+await check('even a level-1 site is unreachable at rung 1 — there is no browser', async () => {
   siteVerdicts.set(await sha('torah.example.com'), { level: 1, is_doorway: 0, reason: 'Torah.' });
   const r = await (await ask({ user: 'who-is-this', url: 'https://torah.example.com/' })).json();
+  assert.equal(r.allow, false);
+  assert.equal(r.action, 'no_web');
+});
+
+console.log('\n6. images and search-engine landings follow the rung');
+reset();
+await check('an image request is stripped on the text-only rung', async () => {
+  const r = await (await ask({ user: 'phone-a', url: 'https://news.example.com/pic.jpg' })).json();
+  assert.equal(r.allow, false);
+  assert.equal(r.action, 'image_blocked');
+});
+await check('an image request loads on a rung with images on', async () => {
+  const r = await (await ask({ user: 'phone-open', url: 'https://news.example.com/pic.jpg' })).json();
   assert.equal(r.allow, true);
+});
+await check('image search is refused where the rung does not permit it', async () => {
+  const r = await (await ask({ user: 'phone-a', url: 'https://www.google.com/search?q=cats&udm=2' })).json();
+  assert.equal(r.allow, false);
+  assert.equal(r.action, 'image_search');
+});
+await check('image search is judged (not blocked outright) where the rung permits it', async () => {
+  geminiLevel = 2;
+  const r = await (await ask({ user: 'phone-open', url: 'https://www.google.com/search?q=cats&udm=2' })).json();
+  assert.equal(r.allow, true);
+  assert.equal(r.image_search, true);
+});
+await check('a search engine homepage loads so the box is reachable', async () => {
+  const r = await (await ask({ user: 'phone-a', url: 'https://www.google.com/' })).json();
+  assert.equal(r.allow, true);
+  assert.equal(r.action, 'allow');
 });
 
 console.log('\n5. malformed input');
