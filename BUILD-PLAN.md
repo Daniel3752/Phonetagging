@@ -1,8 +1,34 @@
 # Build Plan — Five-Rung Levels, Search/Image Filtering, Blocklists, App Policies
 
-Status: **design locked, not yet built.** This is the plan to implement the level model worked
-out with the operator. Nothing here is code yet. Read `PROXY.md` first for the architecture this
-builds on.
+Status: **BUILT (offline), not deployed.** The mechanism below is implemented and unit-tested; the
+live D1 is migrated. The Worker is NOT redeployed and the phone is untouched — deployment waits on
+the two deferred content pieces. Read `PROXY.md` first for the architecture this builds on.
+
+## Build status
+
+**Done (offline-tested, live D1 migrated):**
+- `levels.js` — five mode-based rungs, `NEVER=6`; `keywords.js` — pure search pre-filter; `proxy-api.js` — new decision order; `search.js` — `isSearchEngineHost`; `gemini.js` — temporary AI-rating bridge (prompt wording untouched).
+- Schema + `migrations/0006` (five rungs, `site_mode`, `keyword_rules`, `app_image_blocklist`, NEVER 5→6) and `0007` (five app policies + rung→policy map) — **applied to live D1**. Seed regenerated with `site_mode` and reseeded live (48 trusted / 41 filtered).
+- Squid helper — L1/L2 blocklist suffix-match + `sync-blocklists.sh` + installer/cron wiring.
+- `policy.js` — `appPolicyIdForLevel`; five empty per-rung app policies.
+- All suites green: `npm test` (levels 29, keywords 8, search 25, proxy 24, policy, smoke, control-plane, admin-levels).
+
+**Deferred — the two the operator asked to hold for a longer discussion:**
+- **AI instruction / rubric content.** The `gemini.js` prompts still speak the old 1..5 ladder; the bridge keeps it safe, but the rubric must be rewritten to the 6-point scale (and the bridge removed) **before deploy**. Same bucket: the **keyword term lists** (`keyword_rules` is empty).
+- **App allow-lists.** The five app policies are empty; which apps per rung, how the scheduler feeds Headwind, and `app_image_blocklist` enforcement (Spotify) are unbuilt.
+
+**Not yet done (needed before the Worker is deployed):**
+- Redeploy the Worker (`wrangler deploy`) — only after the rubric rewrite.
+- **Reconsider `dev_vortex`'s rung**: level 2 now means *Text-only* (was *General*). The live device is still level 2 — decide its real rung before deploy or the phone tightens unexpectedly.
+
+**Deviations from the original plan below, all deliberate:**
+- Search is judged **before** the per-site mode (not after), so a `trusted` search engine can't skip query filtering.
+- An unknown device degrades to **rung 1 = no web** (the new strictest), not to a minimal allowlist.
+- Search-engine *homepages* are allowed in `proxy-api.js` (where search is on), not via `isVisibleAtLevel`.
+
+---
+
+Original plan follows. Read `PROXY.md` first for the architecture this builds on.
 
 Companion repo: **`Daniel3752/shmiras-blocklists`** — the auto-updated domain blocklists this plan
 consumes (see §5).
