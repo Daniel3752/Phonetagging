@@ -102,6 +102,14 @@ def main():
         else:
             user = urllib.parse.unquote(fields[0])
             url = urllib.parse.unquote(fields[1])
+            # On an HTTPS CONNECT, Squid passes the target as "host:port" with no scheme — there is
+            # no URL yet, the tunnel hasn't been opened. Treat it as a request to that host so the
+            # site check can run at the CONNECT gate. After ssl-bump the decrypted GET arrives with
+            # the full "https://host/path?query", which is re-checked here — that is where a search
+            # query actually gets judged, so nothing is lost by coarse-checking the CONNECT.
+            if '://' not in url:
+                host = url.rsplit(':', 1)[0] if ':' in url else url
+                url = 'https://' + host + '/'
             # Squid sends "-" for an unauthenticated login; the Worker treats an unknown user as the
             # strictest rung rather than denying outright, so pass it through as-is.
             if user == '-':
