@@ -1,7 +1,7 @@
 // Boundary tests for the policy resolver. No network, no D1 — resolveEffectivePolicy is pure, and
 // the awkward cases (midnight-crossing windows, per-device time zones, overlapping schedules,
 // DST transitions) are exactly the ones worth pinning down before any of this reaches a phone.
-import { resolveEffectivePolicy, windowContains, localTime, parseTimeOfDay, formatTimeOfDay, DAY_BITS } from '../src/policy.js';
+import { resolveEffectivePolicy, windowContains, localTime, parseTimeOfDay, formatTimeOfDay, appPolicyIdForLevel, DAY_BITS } from '../src/policy.js';
 
 let failures = 0;
 function check(name, cond, extra = '') {
@@ -98,6 +98,12 @@ check('reject 24:00', parseTimeOfDay('24:00') === null);
 check('reject 12:60', parseTimeOfDay('12:60') === null);
 check('reject garbage', parseTimeOfDay('nope') === null);
 check('format round-trips', formatTimeOfDay(1110) === '18:30' && formatTimeOfDay(0) === '00:00');
+
+console.log('\nApp policy per rung');
+check('each rung maps to its app policy', appPolicyIdForLevel(3) === 'apps_rung_3');
+check('rung 1 and 5 map too', appPolicyIdForLevel(1) === 'apps_rung_1' && appPolicyIdForLevel(5) === 'apps_rung_5');
+check('a corrupt level clamps to the strictest rung, never a missing policy',
+  appPolicyIdForLevel(99) === 'apps_rung_1' && appPolicyIdForLevel('x') === 'apps_rung_1');
 
 console.log(failures ? `\n${failures} FAILURE(S)` : '\nAll checks passed.');
 process.exit(failures ? 1 : 0);

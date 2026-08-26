@@ -140,17 +140,26 @@ CREATE TABLE IF NOT EXISTS level_definitions (
   text_search INTEGER NOT NULL DEFAULT 1,
   image_search INTEGER NOT NULL DEFAULT 0,
   apply_social_blocklist INTEGER NOT NULL DEFAULT 1,  -- does the L2 social blocklist apply at this rung
+  app_policy_id TEXT,          -- the app policy that pairs with this rung (see policy.js)
   gateway_list_id TEXT,        -- optional per-rung allowlist id (DNS-era; unused by the proxy path)
   gateway_policy_id TEXT
 );
 
 INSERT OR IGNORE INTO level_definitions
-  (level, name, description, web_mode, images_allowed, text_search, image_search, apply_social_blocklist) VALUES
-  (1, 'No browser', 'No web at all. Apps only.',                                              'none',       0, 0, 0, 1),
-  (2, 'Text-only',  'Essential allowlist, images stripped, text search only.',                'allowlist',  0, 1, 0, 1),
-  (3, 'Essential',  'Essential allowlist, images and filtered image search.',                 'allowlist',  1, 1, 1, 1),
-  (4, 'General',    'Everything except social media and explicit; searches filtered.',        'permissive', 1, 1, 1, 1),
-  (5, 'Open',       'Everything except explicit; searches filtered for explicit only.',       'permissive', 1, 1, 1, 0);
+  (level, name, description, web_mode, images_allowed, text_search, image_search, apply_social_blocklist, app_policy_id) VALUES
+  (1, 'No browser', 'No web at all. Apps only.',                                        'none',       0, 0, 0, 1, 'apps_rung_1'),
+  (2, 'Text-only',  'Essential allowlist, images stripped, text search only.',          'allowlist',  0, 1, 0, 1, 'apps_rung_2'),
+  (3, 'Essential',  'Essential allowlist, images and filtered image search.',           'allowlist',  1, 1, 1, 1, 'apps_rung_3'),
+  (4, 'General',    'Everything except social media and explicit; searches filtered.',  'permissive', 1, 1, 1, 1, 'apps_rung_4'),
+  (5, 'Open',       'Everything except explicit; searches filtered for explicit only.', 'permissive', 1, 1, 1, 0, 'apps_rung_5');
+
+-- Five app policies, one per rung (empty until the app-control discussion — see BUILD-PLAN.md §7).
+INSERT OR IGNORE INTO policies (id, name, headwind_configuration_id, created_at) VALUES
+  ('apps_rung_1', 'Apps — Rung 1 (No browser)', NULL, 0),
+  ('apps_rung_2', 'Apps — Rung 2 (Text-only)',  NULL, 0),
+  ('apps_rung_3', 'Apps — Rung 3 (Essential)',  NULL, 0),
+  ('apps_rung_4', 'Apps — Rung 4 (General)',    NULL, 0),
+  ('apps_rung_5', 'Apps — Rung 5 (Open)',       NULL, 0);
 
 -- Keyword pre-filter rules for search queries. RATING is on the same 1..6 ladder (6 = NEVER). The
 -- proxy consults this before the model; a match short-circuits with no model call. Intentionally

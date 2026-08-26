@@ -4,6 +4,19 @@
 // which is what makes the awkward parts — midnight-crossing windows, per-device time zones,
 // overlapping schedules — testable without standing up any infrastructure. See test/policy.test.mjs.
 
+import { normalizeDeviceLevel } from './levels.js';
+
+// The app policy that pairs with a web rung. There are five app policies, one per rung, with the
+// deterministic ids the migration seeds (apps_rung_1 .. apps_rung_5), so a rung resolves to its
+// policy with no lookup. The rung is the single control: it picks the web tier AND the app policy.
+//
+// This is only the id convention. HOW that policy is fed to the scheduler/Headwind (baseline vs a
+// time-window override, and what apps each policy actually lists) is the app-control work that is
+// intentionally deferred — the policies ship EMPTY and are populated during that discussion.
+export function appPolicyIdForLevel(level) {
+  return `apps_rung_${normalizeDeviceLevel(level)}`;
+}
+
 // A schedule's day_mask is a 7-bit field, bit 0 = Sunday. Matched against the day the window
 // STARTS, which is what makes a wrapped window like Fri 22:00–06:00 land on Friday night rather
 // than Saturday morning.
