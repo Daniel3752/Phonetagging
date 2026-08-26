@@ -76,8 +76,19 @@ def ask_worker(user, url):
     try:
         with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
             body = json.loads(resp.read().decode())
+    except urllib.error.HTTPError as exc:
+        # Name the status and echo what the Worker said. "filter unavailable" alone sends you hunting
+        # through Squid internals when the answer is usually one of two things: 401 (the proxy key
+        # here does not match PROXY_KEY on the Worker) or 404 (the Worker predates /api/proxy/check
+        # and needs deploying).
+        detail = ''
+        try:
+            detail = exc.read().decode()[:120]
+        except Exception:
+            pass
+        return False, f'filter error HTTP {exc.code} {detail}'.strip()
     except (urllib.error.URLError, OSError, ValueError, json.JSONDecodeError) as exc:
-        return False, f'filter unavailable ({type(exc).__name__})'
+        return False, f'filter unreachable ({type(exc).__name__})'
 
     return bool(body.get('allow')), body.get('reason') or body.get('action') or 'blocked'
 
