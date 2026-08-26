@@ -70,6 +70,11 @@ def ask_worker(user, url):
         headers={
             'Content-Type': 'application/json',
             'Authorization': f'Bearer {PROXY_KEY}',
+            # Cloudflare blocks Python's default urllib agent outright with error 1010 (a bot
+            # signature block), which surfaces as an unexplained 403 and denies every request while
+            # the key and the route are both perfectly fine. Identify as this project instead.
+            'User-Agent': 'shmira-filter-proxy/1.0',
+            'Accept': 'application/json',
         },
         method='POST',
     )
