@@ -79,6 +79,7 @@ export function renderAdminPage() {
       <button data-tab="apps">Policies &amp; apps</button>
       <button data-tab="schedules">Schedules</button>
       <button data-tab="sites">Sites</button>
+      <button data-tab="searches">Searches</button>
       <button data-tab="audit">Audit</button>
     </nav>
 
@@ -97,6 +98,12 @@ export function renderAdminPage() {
           <div><label for="dPolicy">Baseline policy</label><select id="dPolicy"></select></div>
           <div><label for="dTz">Time zone</label><input id="dTz" placeholder="America/New_York" value="UTC"></div>
         </div>
+        <div class="row">
+          <div><label for="dLevel">Web strictness</label><select id="dLevel"></select></div>
+          <div><label for="dProxy">Proxy login</label><input id="dProxy" placeholder="dovid-phone"></div>
+        </div>
+        <p class="empty" style="margin:0 0 12px">The proxy login must match an account in
+          <code>/etc/squid/passwd</code>. Without one this phone falls back to the strictest rung.</p>
         <button id="saveDevice" type="button">Save phone</button>
         <div class="msg" id="deviceMsg"></div>
       </div>
@@ -186,6 +193,24 @@ export function renderAdminPage() {
       </div>
     </section>
 
+    <section data-panel="searches" style="display:none">
+      <div class="card">
+        <h2>Re-rate a search</h2>
+        <div class="row">
+          <div><label for="qText">Search words</label><input id="qText" placeholder="volcano facts"></div>
+          <div><label for="qLevel">Allow from rung</label><select id="qLevel"></select></div>
+        </div>
+        <button id="saveQuery" type="button">Save rating</button>
+        <div class="msg" id="queryMsg"></div>
+      </div>
+      <div class="card">
+        <h2>What is being searched for</h2>
+        <p class="empty">Most-tried first. This is the view that shows what people are actually
+          reaching for — a list of approved sites never will.</p>
+        <div id="searchTable"></div>
+      </div>
+    </section>
+
     <section data-panel="audit" style="display:none">
       <div class="card">
         <h2>Audit log</h2>
@@ -256,12 +281,18 @@ export function renderAdminPage() {
   }
 
   function render() {
-    id('deviceTable').innerHTML = table(['Phone', 'Baseline', 'Now running', 'Zone', 'Headwind'], state.devices, function (d) {
-      return '<tr><td>' + esc(d.label) + '</td><td>' + esc(policyName(d.policy_id)) + '</td><td>' +
+    id('deviceTable').innerHTML = table(['Phone', 'Web level', 'Proxy login', 'Baseline', 'Now running', 'Zone'], state.devices, function (d) {
+      return '<tr><td>' + esc(d.label) + '</td><td>' + esc(levelName(d.level)) + '</td><td>' +
+        (d.proxy_user ? esc(d.proxy_user) : '<span class="empty">none — strictest</span>') +
+        '</td><td>' + esc(policyName(d.policy_id)) + '</td><td>' +
         (d.last_applied_policy_id ? esc(policyName(d.last_applied_policy_id)) : '<span class="empty">not applied</span>') +
-        '</td><td>' + esc(d.timezone) + '</td><td>' +
-        (d.headwind_device_id ? esc(d.headwind_device_id) : '<span class="empty">unlinked</span>') + '</td></tr>';
+        '</td><td>' + esc(d.timezone) + '</td></tr>';
     });
+
+    // The ladder comes from the server (levels.js) rather than being written out here, so the console
+    // can never show rung names that differ from what is actually enforced.
+    fillLevels('dLevel');
+    fillLevels('qLevel');
 
     id('policyTable').innerHTML = table(['Policy', 'Headwind config', 'Apps'], state.policies, function (p) {
       var n = state.appRules.filter(function (r) { return r.policy_id === p.id; }).length;
@@ -323,6 +354,7 @@ export function renderAdminPage() {
       document.querySelectorAll('nav button').forEach(function (x) { x.classList.remove('on'); });
       b.classList.add('on');
       var tab = b.dataset.tab;
+      if (b.dataset.tab === 'searches') loadSearches();
       document.querySelectorAll('[data-panel]').forEach(function (p) {
         p.style.display = p.dataset.panel === tab ? 'block' : 'none';
       });
@@ -357,6 +389,31 @@ export function renderAdminPage() {
     }
   }
 
+  function levelName(n) {
+    var l = (state.levels || []).filter(function (x) { return x.level === n; })[0];
+    return l ? n + ' \u00b7 ' + l.name : String(n == null ? '?' : n);
+  }
+
+  function fillLevels(elId) {
+    var el = id(elId);
+    if (!el || el.dataset.filled) return;
+    el.innerHTML = (state.levels || []).map(function (l) {
+      return '<option value="' + l.level + '">' + esc(l.level + ' \u00b7 ' + l.name) + '</option>';
+    }).join('') + '<option value="5">5 \u00b7 Never</option>';
+    el.value = '2';
+    el.dataset.filled = '1';
+  }
+
+  function loadSearches() {
+    api('/api/admin/searches', null, 'GET').then(function (r) {
+      id('searchTable').innerHTML = table(['Search', 'Allowed from', 'Times tried', 'Source'],
+        r.searches || [], function (q) {
+          return '<tr><td>' + esc(q.query_sample || '') + '</td><td>' + esc(levelName(q.level)) +
+            '</td><td>' + esc(q.hit_count) + '</td><td>' + esc(q.source) + '</td></tr>';
+        });
+    }).catch(function () {});
+  }
+
   id('saveDevice').addEventListener('click', function () {
     submit('saveDevice', 'deviceMsg', function () {
       return api('/api/admin/devices', {
@@ -364,8 +421,19 @@ export function renderAdminPage() {
         headwind_device_id: id('dHw').value.trim() || null,
         policy_id: id('dPolicy').value,
         timezone: id('dTz').value.trim() || 'UTC',
+        level: Number(id('dLevel').value),
+        proxy_user: id('dProxy').value.trim() || null,
       });
     }, 'Phone saved.');
+  });
+
+  id('saveQuery').addEventListener('click', function () {
+    submit('saveQuery', 'queryMsg', function () {
+      return api('/api/admin/searches/level', {
+        query: id('qText').value.trim(),
+        level: Number(id('qLevel').value),
+      }).then(function (r) { loadSearches(); return r; });
+    }, 'Rating saved.');
   });
 
   id('savePolicy').addEventListener('click', function () {

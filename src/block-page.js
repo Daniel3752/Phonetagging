@@ -1,4 +1,4 @@
-// The request-access page.
+// The block / request-access page.
 //
 // With DNS-level filtering there is no injected block page: a blocked lookup just fails in the
 // browser, and Cloudflare never gets the chance to hand us the URL. So this page is reached
@@ -7,14 +7,28 @@
 // It still accepts Gateway's cf_site_uri when present, so it keeps working unchanged if full-URL
 // path blocking is switched on later (that mode does inject a block page).
 //
+// Under the proxy architecture Squid DOES hand us the URL (via deny_info), so the page can tell the
+// three denials apart instead of showing one undifferentiated wall:
+//
+//   * a site nobody has reviewed  -> offer to check it, which is the common case
+//   * a site rated above this phone's rung -> say so; there is nothing to request
+//   * a refused search -> say so; requesting "google.com" would not help, and offering a button
+//     that cannot work is worse than offering none
+//
 // Self-contained HTML (no external assets) so it works even though every other host is blocked.
-export function renderBlockPage() {
+export function renderBlockPage({ blockedUrl = '', kind = 'site' } = {}) {
+  // The URL is attacker-influenced — it arrives from whatever was typed into the address bar — so it
+  // is escaped before going anywhere near the document.
+  const safeUrl = String(blockedUrl).slice(0, 300)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  const isSearch = kind === 'search';
   return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Request a site</title>
+<title>${isSearch ? 'Search not allowed' : 'Request a site'}</title>
 <style>
   :root { color-scheme: light dark; }
   * { box-sizing: border-box; }
@@ -53,11 +67,17 @@ export function renderBlockPage() {
 </head>
 <body>
   <div class="wrap">
-    <p class="eyebrow">Request a site</p>
-    <h1>Ask for a site to be approved</h1>
-    <p class="site" id="site"></p>
+    <p class="eyebrow">${isSearch ? 'Search not allowed' : 'Request a site'}</p>
+    <h1>${isSearch ? 'That search isn\'t allowed' : 'Ask for a site to be approved'}</h1>
+    <p class="site" id="site">${isSearch ? '' : safeUrl}</p>
 
-    <div class="card" id="start">
+    ${isSearch ? `<div class="card no">
+      <h3>Not allowed</h3>
+      <p>The words in that search aren't permitted on this phone. Try searching for something else.</p>
+      <p>If you need this for a legitimate reason, ask the person who set up this phone.</p>
+    </div>` : ''}
+
+    <div class="card" id="start"${isSearch ? ' style="display:none"' : ''}>
       <p>New sites are checked automatically. Most ordinary sites are approved within a few seconds.</p>
       <label for="url">Site address</label>
       <input type="text" id="url" inputmode="url" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="example.com">
@@ -87,8 +107,12 @@ export function renderBlockPage() {
 
   // Gateway supplies cf_site_uri only when a full-URL HTTP block page injected it. Under DNS
   // filtering it is absent and the user types the site instead.
+  // Squid's deny_info supplies ?url=; Gateway's HTTP block page supplied cf_site_uri. Accept both so
+  // the page works under either enforcement layer.
   var params = new URLSearchParams(location.search);
-  var prefill = params.get('cf_site_uri') || '';
+  var raw = params.get('url') || params.get('cf_site_uri') || '';
+  var prefill = '';
+  try { prefill = raw ? new URL(raw).hostname : ''; } catch (e) { prefill = raw; }
 
   var cards = { start: id('start'), clean: id('clean'), blocked: id('blocked'), error: id('error') };
   var btn = id('btn'), msg = id('msg'), errmsg = id('errmsg'), input = id('url');

@@ -25,6 +25,7 @@ import { renderAdminPage } from './admin-page.js';
 import { addHostToAllowlist, removeHostFromAllowlist } from './gateway.js';
 import { sha256Hex, timingSafeEqual } from './crypto.js';
 import { renderBlockPage } from './block-page.js';
+import { parseSearchUrl } from './search.js';
 
 const FETCH_TIMEOUT_MS = 8000;
 const PAGE_TEXT_LIMIT = 4000;
@@ -90,7 +91,11 @@ export default {
     }
 
     if (url.pathname === '/blocked' && request.method === 'GET') {
-      return new Response(renderBlockPage(), {
+      // Squid passes the denied URL through deny_info. A refused SEARCH gets a different page from a
+      // blocked site: there is nothing to request, and a button that cannot help is worse than none.
+      const blockedUrl = url.searchParams.get('url') || url.searchParams.get('cf_site_uri') || '';
+      const kind = blockedUrl && parseSearchUrl(blockedUrl) ? 'search' : 'site';
+      return new Response(renderBlockPage({ blockedUrl, kind }), {
         headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' },
       });
     }

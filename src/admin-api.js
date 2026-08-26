@@ -9,6 +9,9 @@
 import { audit } from './scheduler.js';
 import { runScheduler } from './scheduler.js';
 import { parseTimeOfDay } from './policy.js';
+import { normalizeDeviceLevel, normalizeSiteLevel, LEVELS, NEVER_LEVEL } from './levels.js';
+import { searchCacheKey } from './search.js';
+import { sha256Hex } from './crypto.js';
 
 function json(data, status = 200) {
   return Response.json(data, { status, headers: { 'Cache-Control': 'no-store' } });
@@ -39,13 +42,15 @@ export async function handleAdmin(request, env, path) {
         all(env, 'SELECT * FROM app_rules ORDER BY policy_id, package_name'),
         all(env, 'SELECT * FROM schedules ORDER BY priority DESC, created_at DESC'),
       ]);
-      return json({ devices, policies, appRules, schedules });
+      // The ladder ships with the state so the page never hard-codes rung names — they live in
+      // levels.js, and a page that duplicated them would drift from what is actually enforced.
+      return json({ devices, policies, appRules, schedules, levels: LEVELS });
     }
 
     case 'GET /api/admin/verdicts':
       return json({
         verdicts: await all(env,
-          `SELECT hostname, verdict, reason, source, decided_at FROM url_verdicts
+          `SELECT hostname, verdict, level, is_doorway, reason, source, decided_at FROM url_verdicts
            WHERE scope = 'host' ORDER BY decided_at DESC LIMIT 200`),
       });
 
@@ -100,17 +105,39 @@ export async function handleAdmin(request, env, path) {
       if (!label) return json({ error: 'label is required' }, 400);
       if (!body.policy_id) return json({ error: 'policy_id is required' }, 400);
 
-      const id = body.id || newId('dev');
-      await env.DB.prepare(`
-        INSERT INTO devices (id, headwind_device_id, label, policy_id, timezone, enrolled_at)
-        VALUES (?, ?, ?, ?, ?, ?)
-        ON CONFLICT(id) DO UPDATE SET
-          headwind_device_id = excluded.headwind_device_id, label = excluded.label,
-          policy_id = excluded.policy_id, timezone = excluded.timezone
-      `).bind(id, body.headwind_device_id || null, label, body.policy_id, body.timezone || 'UTC', Date.now()).run();
+      // A missing or nonsensical level clamps to the strictest rung, never the loosest. Getting
+      // this backwards would mean a typo in a form silently opening a phone up.
+      const level = normalizeDeviceLevel(body.level ?? 2);
 
-      await audit(env, 'operator', 'device_saved', id, `${label} -> policy ${body.policy_id}`);
-      return json({ ok: true, id });
+      // The proxy login is how the filter tells one phone from another. It must match an account in
+      // /etc/squid/passwd; without it the device falls back to the strictest rung on every request.
+      const proxyUser = String(body.proxy_user || '').trim() || null;
+      if (proxyUser && !/^[a-zA-Z0-9._-]{2,64}$/.test(proxyUser)) {
+        return json({ error: 'proxy_user must be 2-64 chars: letters, digits, dot, dash, underscore' }, 400);
+      }
+
+      const id = body.id || newId('dev');
+      try {
+        await env.DB.prepare(`
+          INSERT INTO devices (id, headwind_device_id, label, policy_id, timezone, enrolled_at, level, proxy_user)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(id) DO UPDATE SET
+            headwind_device_id = excluded.headwind_device_id, label = excluded.label,
+            policy_id = excluded.policy_id, timezone = excluded.timezone,
+            level = excluded.level, proxy_user = excluded.proxy_user
+        `).bind(id, body.headwind_device_id || null, label, body.policy_id,
+                body.timezone || 'UTC', Date.now(), level, proxyUser).run();
+      } catch (err) {
+        // proxy_user is uniquely indexed: two phones sharing a login would silently share a rung,
+        // and whichever was loosest would win for both.
+        if (/UNIQUE|constraint/i.test(err.message || '')) {
+          return json({ error: 'that proxy login is already used by another phone' }, 409);
+        }
+        throw err;
+      }
+
+      await audit(env, 'operator', 'device_saved', id, `${label} -> level ${level}, policy ${body.policy_id}`);
+      return json({ ok: true, id, level });
     }
 
     // --- schedules ------------------------------------------------------------------------------
@@ -148,6 +175,84 @@ export async function handleAdmin(request, env, path) {
       await env.DB.prepare('DELETE FROM schedules WHERE id = ?').bind(body.id).run();
       await audit(env, 'operator', 'schedule_deleted', body.id, null);
       return json({ ok: true });
+    }
+
+    case 'POST /api/admin/devices/delete': {
+      if (!body.id) return json({ error: 'id is required' }, 400);
+      // Schedules naming this device go too. Leaving them behind would mean a later device reusing
+      // the id silently inheriting a stranger's time windows.
+      await env.DB.prepare('DELETE FROM schedules WHERE device_id = ?').bind(body.id).run();
+      await env.DB.prepare('DELETE FROM devices WHERE id = ?').bind(body.id).run();
+      await audit(env, 'operator', 'device_deleted', body.id, null);
+      return json({ ok: true });
+    }
+
+    // Move a phone between rungs. Separate from the full device save so the common operation — "make
+    // this stricter, now" — is one call that cannot accidentally blank another field.
+    case 'POST /api/admin/devices/level': {
+      if (!body.id) return json({ error: 'id is required' }, 400);
+      const level = normalizeDeviceLevel(body.level);
+      const res = await env.DB.prepare('UPDATE devices SET level = ? WHERE id = ?')
+        .bind(level, body.id).run();
+      if (!res.meta?.changes) return json({ error: 'no such device' }, 404);
+      await audit(env, 'operator', 'device_level_set', body.id, `level ${level}`);
+      return json({ ok: true, level });
+    }
+
+    // --- overriding the classifier ----------------------------------------------------------------
+
+    // Re-rate a site by hand. This is the correction path for a model that judged something wrong,
+    // and it is recorded as an operator decision so the classifier cannot quietly overturn it later.
+    case 'POST /api/admin/sites/level': {
+      const hostname = String(body.hostname || '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '').replace(/\.$/, '');
+      if (!hostname || !hostname.includes('.')) return json({ error: 'hostname is required' }, 400);
+      const level = normalizeSiteLevel(body.level);
+      const isDoorway = body.is_doorway === true || body.is_doorway === 1 ? 1 : 0;
+      const hash = await sha256Hex(hostname);
+
+      await env.DB.prepare(`
+        INSERT INTO url_verdicts (url_hash, url, hostname, scope, verdict, reason, source, decided_at, level, is_doorway)
+        VALUES (?, ?, ?, 'host', ?, ?, 'operator', ?, ?, ?)
+        ON CONFLICT(url_hash) DO UPDATE SET
+          verdict = excluded.verdict, reason = excluded.reason, source = 'operator',
+          decided_at = excluded.decided_at, level = excluded.level, is_doorway = excluded.is_doorway
+      `).bind(hash, `https://${hostname}/`, hostname,
+              level >= NEVER_LEVEL ? 'blocked' : 'clean',
+              String(body.reason || 'Set by operator').slice(0, 160), Date.now(), level, isDoorway).run();
+
+      await audit(env, 'operator', 'site_level_set', hostname, `level ${level}${isDoorway ? ' (doorway)' : ''}`);
+      return json({ ok: true, hostname, level });
+    }
+
+    // What is being searched for, most-tried first. The single most useful view in this console —
+    // it shows what people are actually trying to reach, which no list of approved sites ever will.
+    case 'GET /api/admin/searches':
+      return json({
+        searches: await all(env,
+          `SELECT query_sample, level, reason, source, hit_count, decided_at
+           FROM search_verdicts ORDER BY hit_count DESC, decided_at DESC LIMIT 200`),
+      });
+
+    // Re-rate a typed query by hand, same correction path as sites.
+    case 'POST /api/admin/searches/level': {
+      const query = String(body.query || '').trim();
+      if (!query) return json({ error: 'query is required' }, 400);
+      const level = normalizeSiteLevel(body.level);
+      // Hashed on the same normalised key the filter uses, or the override would sit beside the
+      // real entry rather than replacing it and would never be consulted.
+      const hash = await sha256Hex(searchCacheKey(query));
+
+      await env.DB.prepare(`
+        INSERT INTO search_verdicts (query_hash, query_sample, level, reason, source, decided_at, hit_count)
+        VALUES (?, ?, ?, ?, 'operator', ?, 1)
+        ON CONFLICT(query_hash) DO UPDATE SET
+          level = excluded.level, reason = excluded.reason, source = 'operator',
+          decided_at = excluded.decided_at
+      `).bind(hash, query.slice(0, 200), level,
+              String(body.reason || 'Set by operator').slice(0, 160), Date.now()).run();
+
+      await audit(env, 'operator', 'search_level_set', query.slice(0, 60), `level ${level}`);
+      return json({ ok: true, level });
     }
 
     // --- manual scheduler run, so the operator doesn't wait for the next cron tick ---------------

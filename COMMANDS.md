@@ -276,3 +276,63 @@ somewhere other than the user trust store.
 
 **Nothing resolves with Private DNS on** — strict mode with an unreachable resolver. Set
 `private_dns_mode off` to confirm that's what it is.
+
+---
+
+## Enrolling and un-enrolling a phone
+
+### Add a phone to the filter
+
+```bash
+# 1. On the server — create its proxy login
+htpasswd -B /etc/squid/passwd dovid-phone
+
+# 2. In the operator console (/admin) → Devices → Add or update a phone
+#    Set the label, baseline policy, web strictness rung and that same proxy login.
+#    Or by hand:
+npx wrangler d1 execute phone-url-filter-db --remote --command \
+  "UPDATE devices SET proxy_user = 'dovid-phone', level = 2 WHERE label = 'Dovid'"
+
+# 3. On the phone
+adb shell settings put global http_proxy 2.28.63.95:3128
+# then install /etc/squid/ssl/filter-ca.der as a CA certificate
+```
+
+The proxy login is the phone's identity. Without one it falls back to the **strictest** rung on
+every request — the phone still works, it just sees very little.
+
+### Take a phone off the filter
+
+```bash
+adb shell settings put global http_proxy :0
+htpasswd -D /etc/squid/passwd dovid-phone
+```
+
+### Remove management entirely
+
+```bash
+adb shell dpm remove-active-admin com.hmdm.launcher/.AdminReceiver
+adb shell pm uninstall com.hmdm.launcher
+```
+
+Device Owner usually refuses to be removed this way. If it does, factory reset instead:
+**Settings → System → Reset options → Erase all data**, or hold **Power + Volume Up** for recovery
+mode.
+
+**Check for a Google account first** — after a reset, Android demands the last account that was
+signed in, and without those credentials the phone is a brick:
+
+```bash
+adb shell dumpsys account | grep -i com.google
+```
+
+No output means you're safe to wipe.
+
+### Re-enrol after a reset
+
+```bash
+adb shell dpm set-device-owner com.hmdm.launcher/.AdminReceiver
+```
+
+Only works **before any account is added** — do it immediately after the reset, before the setup
+wizard gets that far.

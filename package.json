@@ -8,7 +8,7 @@
     "deploy": "wrangler deploy",
     "db:init": "wrangler d1 execute phone-url-filter-db --remote --file=./schema.sql",
     "db:migrate": "wrangler d1 migrations apply phone-url-filter-db --remote",
-    "test": "node test/policy.test.mjs && node test/levels.test.mjs && node test/search.test.mjs && node test/proxy-api.test.mjs && node test/smoke.mjs && node --experimental-sqlite test/control-plane.test.mjs"
+    "test": "node test/policy.test.mjs && node test/levels.test.mjs && node test/search.test.mjs && node test/proxy-api.test.mjs && node test/smoke.mjs && node --experimental-sqlite test/control-plane.test.mjs && node --experimental-sqlite test/admin-levels.test.mjs"
   },
   "devDependencies": {
     "wrangler": "^4.120.0"
