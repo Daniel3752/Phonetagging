@@ -21,6 +21,7 @@ import { MAX_DEVICE_LEVEL, NEVER_LEVEL, normalizeSiteLevel } from './levels.js';
 import { handleAdmin } from './admin-api.js';
 import { handleProxyCheck } from './proxy-api.js';
 import { runScheduler } from './scheduler.js';
+import { runPreClassifier } from './preclassify.js';
 import { renderAdminPage } from './admin-page.js';
 import { addHostToAllowlist, removeHostFromAllowlist } from './gateway.js';
 import { sha256Hex, timingSafeEqual } from './crypto.js';
@@ -144,6 +145,15 @@ export default {
         console.log('scheduler run', JSON.stringify(summary));
       }).catch((err) => {
         console.error('scheduler run failed outright:', err.message);
+      })
+    );
+    // Judge a few queued common domains ahead of anyone visiting, so the inline classifier stays a
+    // rare fallback. Isolated from the scheduler — a slow classification must not delay a policy flip.
+    ctx.waitUntil(
+      runPreClassifier(env).then((summary) => {
+        if (summary.picked) console.log('preclassify run', JSON.stringify(summary));
+      }).catch((err) => {
+        console.error('preclassify run failed outright:', err.message);
       })
     );
   },
