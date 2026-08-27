@@ -41,12 +41,18 @@ fetch_list() {
 }
 
 mkdir -p "$DIR"
+chmod 0755 "$DIR"
 
 for name in level1 level2; do
   tmp="$(mktemp)"
   if fetch_list "$name" "$tmp"; then
     if python3 -c "import json,sys; json.load(open(sys.argv[1]))" "$tmp" 2>/dev/null; then
       mv "$tmp" "$DIR/$name.json"
+      # mktemp creates 0600 root-owned files and mv preserves that. Squid's ACL helper runs as the
+      # unprivileged proxy user, so a 0600 list is unreadable to the only thing that reads it — and
+      # the helper treats an unreadable file exactly like a missing one, keeping an empty set. The
+      # sync then reports success while the explicit blocklist silently never fires.
+      chmod 0644 "$DIR/$name.json"
       echo "$(date -u +%FT%TZ) updated $name.json ($(wc -c < "$DIR/$name.json") bytes)"
     else
       echo "$(date -u +%FT%TZ) WARN $name.json was not valid JSON — keeping existing" >&2
