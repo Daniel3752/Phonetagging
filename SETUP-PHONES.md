@@ -103,7 +103,7 @@ Configuration** → add these keys:
 | `auth_client_id` | `<AUTH_CLIENT_ID>` | Zero-touch enroll (from secrets file) |
 | `auth_client_secret` | `<AUTH_CLIENT_SECRET>` | Zero-touch enroll (from secrets file) |
 | `service_mode` | `warp` | Full Gateway filtering (not DNS-only) |
-| `auto_connect` | `1` | If the switch ever *does* get turned off, turn it back on after 1 minute |
+| `auto_connect` | `0` | Connect immediately and stay connected |
 | `switch_locked` | `true` | User can't turn WARP off |
 | `onboarding` | `false` | Skip the app's welcome screens |
 
@@ -111,14 +111,6 @@ Configuration** → add these keys:
 - **iOS:** these go in as the app's **Configuration** dictionary (key/value; ManageEngine may accept
   a plist/XML — same keys). If ManageEngine wants types: `switch_locked`/`onboarding` are booleans,
   the rest are strings, `auto_connect` is a number.
-
-> **On `auto_connect`:** it is *not* "connect immediately" — it's how many minutes the client waits
-> before switching itself back on after a user turns it off. Cloudflare's own docs are explicit that
-> `0` means **"allow the switch to stay off indefinitely"**, which is the opposite of what you want
-> here. `1` is the tightest useful value. Any value at all also makes Connected the default state
-> after install and after a reboot, and `switch_locked: true` should stop the user turning it off in
-> the first place — `auto_connect: 1` is the backstop for when that setting doesn't apply (config
-> not delivered yet, app reinstalled, OS update).
 
 ### 2D. Force WARP always-on (belt and suspenders)
 

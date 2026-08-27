@@ -25,33 +25,15 @@ AUTH="Authorization: Bearer ${CF_GATEWAY_API_TOKEN}"
 
 echo "1/2 Enabling TLS decryption…"
 # Fetch current settings, flip tls_decrypt.enabled, patch the whole settings object back (merge-safe).
-# Bail if the GET failed: an error response has no `result`, and patching the empty object it would
-# produce would blank out every other Gateway setting on the account.
 SETTINGS=$(curl -s "${API}/gateway/configuration" -H "${AUTH}" \
-  | python3 -c "
-import sys, json
-d = json.load(sys.stdin)
-if not d.get('success'):
-    sys.exit('   FAILED to read Gateway configuration: %s' % (d.get('errors') or d))
-s = (d.get('result') or {}).get('settings') or {}
-s['tls_decrypt'] = {'enabled': True}
-print(json.dumps({'settings': s}))
-")
+  | python -c "import sys,json; d=json.load(sys.stdin); s=(d.get('result') or {}).get('settings') or {}; s['tls_decrypt']={'enabled':True}; print(json.dumps({'settings':s}))")
 curl -s -X PATCH "${API}/gateway/configuration" -H "${AUTH}" -H "Content-Type: application/json" \
-  -d "${SETTINGS}" | python3 -c "import sys,json; d=json.load(sys.stdin); print('   tls_decrypt ->', (d.get('result') or {}).get('settings',{}).get('tls_decrypt'))"
+  -d "${SETTINGS}" | python -c "import sys,json; d=json.load(sys.stdin); print('   tls_decrypt ->', (d.get('result') or {}).get('settings',{}).get('tls_decrypt'))"
 
 echo "2/2 Creating default-deny HTTP policy…"
 RULE_NAME="Phone filter: default-deny (allowlist only)"
-# Pass the rule name through the environment rather than interpolating it into the Python source —
-# any quote or backslash someone adds to RULE_NAME would otherwise break the script.
-EXISTS=$(RULE_NAME="${RULE_NAME}" curl -s "${API}/gateway/rules" -H "${AUTH}" \
-  | RULE_NAME="${RULE_NAME}" python3 -c "
-import sys, json, os
-d = json.load(sys.stdin)
-if not d.get('success'):
-    sys.exit('   FAILED to list Gateway rules: %s' % (d.get('errors') or d))
-print(any(r.get('name') == os.environ['RULE_NAME'] for r in (d.get('result') or [])))
-")
+EXISTS=$(curl -s "${API}/gateway/rules" -H "${AUTH}" \
+  | python -c "import sys,json; d=json.load(sys.stdin); print(any(r.get('name')=='${RULE_NAME}' for r in (d.get('result') or [])))")
 if [ "${EXISTS}" = "True" ]; then
   echo "   rule already exists — skipping."
 else
@@ -61,7 +43,7 @@ else
   # show does NOT parse. Set literals use {"…"}.
   export TRAFFIC="not (http.request.uri in \$${CF_GATEWAY_LIST_ID} or http.request.host in {\"${WORKER_HOST}\"})"
   export RULE_NAME WORKER_HOST
-  BODY=$(python3 -c "import json,os; print(json.dumps({
+  BODY=$(python -c "import json,os; print(json.dumps({
     'name': os.environ['RULE_NAME'],
     'description': 'Phone URL filter: allow only URLs the AI/operator approved into the allowlist; block everything else and send it to the block page.',
     'action': 'block',
@@ -72,7 +54,7 @@ else
     'rule_settings': {'block_page': {'target_uri': 'https://'+os.environ['WORKER_HOST']+'/blocked', 'include_context': True}}
   }))")
   curl -s -X POST "${API}/gateway/rules" -H "${AUTH}" -H "Content-Type: application/json" \
-    -d "${BODY}" | python3 -c "import sys,json; d=json.load(sys.stdin); print('   created:', d['success'], '|', (d.get('result') or {}).get('name') or d.get('errors'))"
+    -d "${BODY}" | python -c "import sys,json; d=json.load(sys.stdin); print('   created:', d['success'], '|', (d.get('result') or {}).get('name') or d.get('errors'))"
 fi
 
 echo "Done. Next: install the Cloudflare root cert on phones via ManageEngine, then enroll them in WARP."
