@@ -1,5 +1,17 @@
 # Setting up phones (Headwind MDM + Cloudflare Gateway DNS)
 
+> **⚠ Superseded for setup. Use [`FIRST-PHONE.md`](FIRST-PHONE.md).**
+>
+> This page describes the DNS-only architecture and states below that there is **no certificate to
+> install**. That was true until 25 Aug 2026, when the filtering proxy replaced DNS as the
+> enforcement layer — a CA certificate and a system proxy are now required per-device adb steps
+> (see [`PROXY.md`](PROXY.md)). Following this page during a real setup gives you contradictory
+> instructions at the point where the phone is already wiped.
+>
+> Still accurate and not repeated elsewhere: the Play Protect pre-flight checklist, the user
+> restrictions table and their rationale, the escape hatch, "what this can't do", and the iPhone
+> appendix. The DNS layer itself remains deployed as a fallback.
+
 Per-phone setup for Android. iOS is at the end and is not ready yet.
 
 Two things go onto each phone, once:
