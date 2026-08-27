@@ -13,13 +13,38 @@
 set -euo pipefail
 
 DIR="${SHMIRA_BLOCKLIST_DIR:-/etc/squid/blocklists}"
-BASE="${SHMIRA_BLOCKLIST_BASE:-https://raw.githubusercontent.com/Daniel3752/shmiras-blocklists/main/blocklists}"
+REPO="${SHMIRA_BLOCKLIST_REPO:-Daniel3752/shmiras-blocklists}"
+BRANCH="${SHMIRA_BLOCKLIST_BRANCH:-main}"
+BASE="${SHMIRA_BLOCKLIST_BASE:-https://raw.githubusercontent.com/$REPO/$BRANCH/blocklists}"
+
+# The blocklist repo is private, and raw.githubusercontent.com answers 404 — not 401 — for a private
+# path with no credentials. That looks exactly like a wrong URL, which is how this failed silently:
+# the sync appeared to run, nothing was written, and the explicit list simply never fired.
+#
+# With a token, fetch through the API's contents endpoint instead, which is the documented way to
+# read a private file. Without one, fall back to the raw URL so a public repo still works unchanged.
+#   echo 'SHMIRA_BLOCKLIST_TOKEN=ghp_...' >> /etc/squid/filter.env
+# A fine-grained token needs only Contents: read on that one repository.
+TOKEN="${SHMIRA_BLOCKLIST_TOKEN:-}"
+
+fetch_list() {
+  local name="$1" dest="$2"
+  if [[ -n "$TOKEN" ]]; then
+    curl -fsS --max-time 90 \
+      -H "Authorization: Bearer $TOKEN" \
+      -H "Accept: application/vnd.github.raw" \
+      -H "X-GitHub-Api-Version: 2022-11-28" \
+      "https://api.github.com/repos/$REPO/contents/blocklists/$name.json?ref=$BRANCH" -o "$dest"
+  else
+    curl -fsS --max-time 90 "$BASE/$name.json" -o "$dest"
+  fi
+}
 
 mkdir -p "$DIR"
 
 for name in level1 level2; do
   tmp="$(mktemp)"
-  if curl -fsS --max-time 90 "$BASE/$name.json" -o "$tmp"; then
+  if fetch_list "$name" "$tmp"; then
     if python3 -c "import json,sys; json.load(open(sys.argv[1]))" "$tmp" 2>/dev/null; then
       mv "$tmp" "$DIR/$name.json"
       echo "$(date -u +%FT%TZ) updated $name.json ($(wc -c < "$DIR/$name.json") bytes)"
@@ -29,6 +54,9 @@ for name in level1 level2; do
     fi
   else
     echo "$(date -u +%FT%TZ) WARN fetch failed for $name.json — keeping existing" >&2
+    if [[ -z "$TOKEN" ]]; then
+      echo "$(date -u +%FT%TZ) HINT the repo is private; set SHMIRA_BLOCKLIST_TOKEN in /etc/squid/filter.env" >&2
+    fi
     rm -f "$tmp"
   fi
 done
