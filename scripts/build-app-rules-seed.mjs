@@ -1,4 +1,4 @@
-// Generates migrations/0012_app_rules_update.sql — the per-rung app matrix.
+// Generates migrations/0013_app_rules_x_and_necessities.sql — the per-rung app matrix.
 //
 // RECORDS INTENT ONLY. App control is enforced by Headwind, which is not on the phone yet, and the
 // per-rung policies (apps_rung_1..5) carry no headwind_configuration_id until re-enrolment. Exact
@@ -10,11 +10,14 @@
 //
 // Rung shape, per the operator (this revision):
 //   - Rung 3 stays on the ALLOWLIST model: unlisted apps are simply not on the launcher. Its rows
-//     below are unchanged from the prior seed.
+//     below are unchanged from the prior seed, plus the new necessities bucket (see below).
 //   - Rung 4 additionally BLOCKS explicit-content apps AND social-media apps.
-//   - Rung 5 BLOCKS explicit-content apps only — social media is allowed there as an app. This
-//     reverses the earlier "X blocked on every rung" call: X now follows the same rule as the rest
-//     of the social bucket (blocked <=4, allowed at 5).
+//   - Rung 5 BLOCKS explicit-content apps only — social media is allowed there as an app, EXCEPT X,
+//     which stays blocked at every rung including 5: unlike the rest of the social bucket, X can
+//     surface explicit content, so it's grouped with the explicit-content bucket instead.
+//   - Rungs 1-3 additionally ALLOW a "necessities" bucket: Torah apps + everyday utility apps
+//     (mail, maps, rideshare, banking). No shtus in this bucket by definition — it's the plain
+//     necessities, allowed at every rung including rung 1.
 //
 // Run:  node scripts/build-app-rules-seed.mjs
 
@@ -39,7 +42,6 @@ const APPS = {
   'com.google.android.apps.bard': { label: 'Gemini',    states: { 1: 'blocked', 2: 'blocked', 3: 'blocked', 4: 'blocked', 5: 'allowed' } },
 
   // --- social media: blocked through rung 4, allowed at rung 5 ---
-  'com.twitter.android':   { label: 'X (was hard-blocked; now follows the social rule)', states: SOCIAL },
   'com.instagram.android': { label: 'Instagram', states: SOCIAL },
   'com.zhiliaoapp.musically': { label: 'TikTok',   states: SOCIAL },
   'com.snapchat.android':  { label: 'Snapchat',  states: SOCIAL },
@@ -51,6 +53,9 @@ const APPS = {
   'com.discord':           { label: 'Discord',   states: SOCIAL },
 
   // --- explicit-content / dating: blocked at every rung, including 5 ---
+  // X can surface explicit content even though it reads as "social" — blocked everywhere, not
+  // following the social bucket's rung-5 opening.
+  'com.twitter.android':      { label: 'X (blocked every rung, incl. 5 — can show explicit content)', states: EXPLICIT },
   'com.tinder':               { label: 'Tinder (CONFIRM package)',  states: EXPLICIT },
   'com.bumble.app':           { label: 'Bumble (CONFIRM package)',  states: EXPLICIT },
   'co.hinge.app':              { label: 'Hinge (CONFIRM package)',   states: EXPLICIT },
@@ -67,6 +72,15 @@ const APPS = {
 
   // --- requested one-off ---
   'com.onesecondeveryday.app': { label: '1 Second Everyday (CONFIRM package)', states: ALLOWED_ALL },
+
+  // --- necessities: Torah apps + everyday utilities, allowed at every rung incl. rung 1. Package
+  // names are best-guess PLACEHOLDERS — confirm against the device's real installed-apps list. ---
+  'org.sefaria.sefaria':         { label: 'Sefaria (Torah study, CONFIRM package)', states: ALLOWED_ALL },
+  'com.chabad.app':              { label: 'Chabad.org (Torah content, CONFIRM package)', states: ALLOWED_ALL },
+  'com.google.android.gm':       { label: 'Gmail (CONFIRM package)', states: ALLOWED_ALL },
+  'com.google.android.apps.maps':{ label: 'Google Maps (CONFIRM package)', states: ALLOWED_ALL },
+  'com.ubercab':                 { label: 'Uber (CONFIRM package)', states: ALLOWED_ALL },
+  'com.lyft.android':            { label: 'Lyft (CONFIRM package)', states: ALLOWED_ALL },
 };
 
 const rows = [];
@@ -82,9 +96,11 @@ const packages = Object.keys(APPS).map((p) => `'${p}'`).join(',');
 const sql = `-- Per-rung app matrix update (intent only; enforced by Headwind after re-enrolment). GENERATED
 -- by scripts/build-app-rules-seed.mjs. ${rows.length} rows across the five app policies.
 --
--- Rung 3 stays on the allowlist model (unchanged). Rung 4 blocks explicit-content AND social-media
--- apps. Rung 5 blocks explicit-content apps only (social allowed there) — this REVERSES the prior
--- "X blocked on every rung" row: X now follows the same social rule as the rest of that bucket.
+-- Rung 3 stays on the allowlist model (unchanged), plus the new necessities bucket. Rung 4 blocks
+-- explicit-content AND social-media apps. Rung 5 blocks explicit-content apps only (social allowed
+-- there) EXCEPT X, which stays blocked at every rung including 5 since it can surface explicit
+-- content. Rungs 1-3 additionally allow a necessities bucket: Torah apps + everyday utilities
+-- (mail, maps, rideshare), allowed at every rung including 1.
 -- Several package names are best-guess PLACEHOLDERS (see labels in the generator) and must be
 -- reconciled against Headwind's installed-apps list once the device is re-enrolled.
 --
@@ -98,5 +114,5 @@ VALUES
 ${values};
 `;
 
-writeFileSync(new URL('../migrations/0012_app_rules_update.sql', import.meta.url), sql);
-console.log(`Wrote migrations/0012_app_rules_update.sql with ${rows.length} rows across ${Object.keys(APPS).length} packages.`);
+writeFileSync(new URL('../migrations/0013_app_rules_x_and_necessities.sql', import.meta.url), sql);
+console.log(`Wrote migrations/0013_app_rules_x_and_necessities.sql with ${rows.length} rows across ${Object.keys(APPS).length} packages.`);
