@@ -54,11 +54,21 @@ pending. `app_rules`: 35 (the matrix). `search_verdicts.images_ok` added.
 2. **Reconsider `dev_vortex`'s rung** — it's level 2, which now means *Text-only* (was *General*).
 3. **Rewrite is done** — the AI rubric now emits the 2..6 ladder directly; no bridge remains.
 
+## App matrix (revised, intent only — `migrations/0012_app_rules_update.sql`)
+
+28 packages seeded across the five policies. Rung 3 stays on the allowlist model (rows unchanged
+from the first seed). Rung 4 blocks explicit-content AND social-media apps. Rung 5 blocks
+explicit-content apps only — social is allowed there as a native app, which **reverses** the earlier
+"X blocked on every rung" call: X now follows the same rule as the rest of the social bucket
+(blocked ≤4, allowed at 5). Added Moovit, Waze, Gett, Wolt, PayBox, Bit (Israeli/transit/payment
+utilities) and 1 Second Everyday — allowed at every rung including 1. Several package names are
+**best-guess placeholders** (24Six, Gett, Wolt, PayBox, Bit, 1 Second Everyday, and all the dating
+apps) and must be confirmed against Headwind's real installed-apps list at re-enrolment.
+
 ## Deferred (needs the phone / a reviewer)
 
 - **Headwind re-enrolment** (`dpm set-device-owner`) — gates all app enforcement.
-- **App package names** — reconcile against the device's installed-apps list; **24Six's package is a
-  placeholder** to confirm.
+- **App package names** — reconcile every placeholder above against the device's installed-apps list.
 - **Spotify + AI-app image stripping** — block the app image hosts; test on-device (pinning/QUIC).
   AI apps are rung-5 only; web-only on 2-4 with image-gen blocking is the honest ceiling, untested.
 - **Forced SafeSearch** (rungs 3-5) — DNS VIP mapping on the phone, not a proxy rule.
