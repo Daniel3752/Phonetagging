@@ -29,20 +29,21 @@ export const MAX_DEVICE_LEVEL = 5;
 export const NEVER_LEVEL = 6;
 
 // webMode:
-//   'none'       no web at all
-//   'allowlist'  deny-by-default; a site is visible only if rated at or below the rung
-//   'permissive' allow-by-default; every non-NEVER site is visible (blocklist handled upstream)
+//   'none'  no web at all (rung 1)
+//   'web'   the AI judges every site and search, and it is allowed only if its rating is at or
+//           below the rung. There is no manual allowlist and no allow-by-default — one uniform
+//           rating gate, with the bar sliding up per rung (rung 2 = ratings <=2 .. rung 5 = <=5).
 //
 // textSearch / imageSearch gate the search path (proxy-api.js); images gates whether the proxy
 // strips image content; blockSocial says the L2 social blocklist applies at this rung. Mirrors
 // level_definitions in the schema — the DB rows are the source of truth for enforcement ids, this is
 // the source of truth for the semantics, and the two are kept in step.
 export const LEVELS = [
-  { level: 1, name: 'No browser', webMode: 'none',       images: false, textSearch: false, imageSearch: false, blockSocial: true  },
-  { level: 2, name: 'Text-only',  webMode: 'allowlist',  images: false, textSearch: true,  imageSearch: false, blockSocial: true  },
-  { level: 3, name: 'Essential',  webMode: 'allowlist',  images: true,  textSearch: true,  imageSearch: true,  blockSocial: true  },
-  { level: 4, name: 'General',    webMode: 'permissive', images: true,  textSearch: true,  imageSearch: true,  blockSocial: true  },
-  { level: 5, name: 'Open',       webMode: 'permissive', images: true,  textSearch: true,  imageSearch: true,  blockSocial: false },
+  { level: 1, name: 'No browser', webMode: 'none', images: false, textSearch: false, imageSearch: false, blockSocial: true  },
+  { level: 2, name: 'Text-only',  webMode: 'web',  images: false, textSearch: true,  imageSearch: false, blockSocial: true  },
+  { level: 3, name: 'Essential',  webMode: 'web',  images: true,  textSearch: true,  imageSearch: true,  blockSocial: true  },
+  { level: 4, name: 'General',    webMode: 'web',  images: true,  textSearch: true,  imageSearch: true,  blockSocial: true  },
+  { level: 5, name: 'Open',       webMode: 'web',  images: true,  textSearch: true,  imageSearch: true,  blockSocial: false },
 ];
 
 export function levelDefinition(level) {
@@ -66,31 +67,18 @@ export function normalizeSiteLevel(value) {
   return n;
 }
 
-// The core rule: may a device on `deviceLevel` see this site, considering ONLY the allowlist/rating
-// question? Blocklist denials (explicit, social) are applied earlier in proxy-api.js and never reach
-// here.
+// The core rule, uniform across every web rung: a site (or a search) is visible only if its rating
+// is at or below the device's rung. NEVER (6) exceeds every rung, so explicit stays blocked even at
+// the most open one. Rung 1 has no web, so nothing is visible there.
 //
-// Gates, in order:
-//   1. webMode 'none'  → nothing is visible.
-//   2. NEVER rating    → nothing on any rung; explicit stays blocked even at the most open rung.
-//   3. webMode 'permissive' → every remaining site is visible (allow-by-default). Open user-content
-//                        platforms and social are kept out here by the L2 blocklist upstream, not by
-//                        this function.
-//   4. webMode 'allowlist' → a DOORWAY (open user-content platform, image board) needs an explicit
-//                        allow and is never resolved by rating alone on a strict rung. A search
-//                        ENGINE is different: its homepage is reached via the search path in
-//                        proxy-api.js, not here, so this staying false does not block search.
-//                        Everything else is visible only if rated at or below the rung.
+// Blocklist denials (explicit, social) are applied earlier in proxy-api.js / the Squid helper and
+// never reach here; an UNKNOWN site (no verdict row) is classified inline before this is called, so
+// by the time we get here there is always a rating to test.
 export function isVisibleAtLevel(verdict, deviceLevel, definition) {
   const level = normalizeDeviceLevel(deviceLevel);
-  const rating = normalizeSiteLevel(verdict?.level);
   const def = definition || levelDefinition(level);
-
   if (!def || def.webMode === 'none') return false;
-  if (rating === NEVER_LEVEL) return false;
-  if (def.webMode === 'permissive') return true;
-  if (verdict?.is_doorway) return false;
-  return rating <= level;
+  return normalizeSiteLevel(verdict?.level) <= level;
 }
 
 // Every ALLOWLIST rung whose devices should resolve a site with this rating — i.e. which per-level
@@ -98,12 +86,10 @@ export function isVisibleAtLevel(verdict, deviceLevel, definition) {
 // allow-by-default), so they never appear here; a site is reachable there by default, not by list
 // membership.
 //
-// Returns [] for a NEVER rating and for a doorway — a doorway needs an explicit per-rung allow and
-// never lands in an allowlist by rating. The caller uses this to populate the per-rung allowlists.
+// Every web rung whose devices may see a site with this rating — i.e. every rung at or above the
+// rating. Returns [] for a NEVER rating. Used where a per-rung expansion of a verdict is handy.
 export function levelsThatAllow(verdict) {
   const rating = normalizeSiteLevel(verdict?.level);
-  if (rating === NEVER_LEVEL || verdict?.is_doorway) return [];
-  return LEVELS
-    .filter((l) => l.webMode === 'allowlist' && l.level >= rating)
-    .map((l) => l.level);
+  if (rating === NEVER_LEVEL) return [];
+  return LEVELS.filter((l) => l.webMode === 'web' && l.level >= rating).map((l) => l.level);
 }

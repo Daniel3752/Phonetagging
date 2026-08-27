@@ -31,7 +31,10 @@ import urllib.request
 
 WORKER_URL = os.environ.get('SHMIRA_WORKER_URL', 'https://phone-url-filter.daniel08-madar.workers.dev')
 PROXY_KEY = os.environ.get('SHMIRA_PROXY_KEY', '')
-TIMEOUT = float(os.environ.get('SHMIRA_TIMEOUT', '4.0'))
+# Generous, because the Worker may classify a brand-new domain INLINE (fetch its homepage + a model
+# call) on the first hit — several seconds. A slow answer holds one page; a too-short timeout would
+# deny every genuinely-new site. Cached hits still return in milliseconds.
+TIMEOUT = float(os.environ.get('SHMIRA_TIMEOUT', '12.0'))
 
 # --- Blocklists ----------------------------------------------------------------------------------
 #
@@ -165,13 +168,18 @@ def ask_worker(user, url):
             detail = exc.read().decode()[:120]
         except Exception:
             pass
-        return False, f'filter error HTTP {exc.code} {detail}'.strip(), None
+        return False, f'filter error HTTP {exc.code} {detail}'.strip(), None, False
     except (urllib.error.URLError, OSError, ValueError, json.JSONDecodeError) as exc:
-        return False, f'filter unreachable ({type(exc).__name__})', None
+        return False, f'filter unreachable ({type(exc).__name__})', None, False
 
     level = body.get('device_level')
     level = level if isinstance(level, int) else None
-    return bool(body.get('allow')), body.get('reason') or body.get('action') or 'blocked', level
+    return (
+        bool(body.get('allow')),
+        body.get('reason') or body.get('action') or 'blocked',
+        level,
+        body.get('images_off') is True,
+    )
 
 
 def _host_of(url):
@@ -181,21 +189,44 @@ def _host_of(url):
         return ''
 
 
-def decide(user, url):
-    """The full local decision: L1 blocklist (all rungs) → Worker → L2 blocklist (rungs 1-4).
+# When a search comes back "text OK, images shtus" (images_off), the search engine's own result
+# THUMBNAIL hosts are suppressed for that user for a short window, so the results render as text with
+# no pictures. Only the thumbnail hosts are touched — ordinary site images are unaffected.
+THUMB_SUPPRESS_SECS = 45.0
+_thumb_suppress: "dict[str, float]" = {}  # user -> expiry time
 
-    L1 is checked first and locally so an explicit host is denied without a Worker round trip, and so
-    the Worker's allow-by-default on the permissive rungs can never let a known-explicit site through.
-    L2 is rung-dependent, so it is applied after the Worker answers with device_level."""
+
+def _is_search_thumb_host(host):
+    return (
+        host.startswith('encrypted-tbn') or          # Google image/result thumbnails
+        host == 'th.bing.com' or                      # Bing thumbnails
+        (host.startswith('tse') and host.endswith('.mm.bing.net'))
+    )
+
+
+def decide(user, url):
+    """The full local decision: search-thumbnail suppression → L1 blocklist (all rungs) → Worker →
+    L2 blocklist (rungs 1-4).
+
+    L1 is checked locally and first so an explicit host is denied without a Worker round trip and can
+    never slip through the Worker's default-allow on a permissive rung. L2 is rung-dependent, so it is
+    applied after the Worker answers with device_level."""
     host = _host_of(url)
+
+    # A result thumbnail while this user's last search asked for images-off.
+    if host and _is_search_thumb_host(host) and _thumb_suppress.get(user, 0) > time.time():
+        return False, 'search images stripped'
 
     if host and _domain_blocked(host, _blocklists['level1']):
         return False, 'blocklist: explicit'
 
-    allow, reason, level = ask_worker(user, url)
+    allow, reason, level, images_off = ask_worker(user, url)
 
-    # Social is blocked on every rung except the most open (5). The Worker allows these hosts by
-    # default on the permissive rungs, so the blocklist is what actually keeps them out at rung 4.
+    # Arm thumbnail suppression for this user when a search was allowed text-only.
+    if allow and images_off:
+        _thumb_suppress[user] = time.time() + THUMB_SUPPRESS_SECS
+
+    # Social is blocked on every rung except the most open (5).
     if allow and host and level is not None and level <= 4 and _domain_blocked(host, _blocklists['level2']):
         return False, 'blocklist: social'
 

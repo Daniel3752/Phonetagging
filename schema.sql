@@ -147,11 +147,11 @@ CREATE TABLE IF NOT EXISTS level_definitions (
 
 INSERT OR IGNORE INTO level_definitions
   (level, name, description, web_mode, images_allowed, text_search, image_search, apply_social_blocklist, app_policy_id) VALUES
-  (1, 'No browser', 'No web at all. Apps only.',                                        'none',       0, 0, 0, 1, 'apps_rung_1'),
-  (2, 'Text-only',  'Essential allowlist, images stripped, text search only.',          'allowlist',  0, 1, 0, 1, 'apps_rung_2'),
-  (3, 'Essential',  'Essential allowlist, images and filtered image search.',           'allowlist',  1, 1, 1, 1, 'apps_rung_3'),
-  (4, 'General',    'Everything except social media and explicit; searches filtered.',  'permissive', 1, 1, 1, 1, 'apps_rung_4'),
-  (5, 'Open',       'Everything except explicit; searches filtered for explicit only.', 'permissive', 1, 1, 1, 0, 'apps_rung_5');
+  (1, 'No browser', 'No web at all. Apps only.',                                       'none', 0, 0, 0, 1, 'apps_rung_1'),
+  (2, 'Text-only',  'AI-judged web at the strictest bar, images stripped.',            'web',  0, 1, 0, 1, 'apps_rung_2'),
+  (3, 'Essential',  'AI-judged clean web (essential + broad general), images on.',     'web',  1, 1, 1, 1, 'apps_rung_3'),
+  (4, 'General',    'AI-judged full clean web: no shtus, no social, no explicit.',     'web',  1, 1, 1, 1, 'apps_rung_4'),
+  (5, 'Open',       'Everything except explicit; shtus and social permitted.',         'web',  1, 1, 1, 0, 'apps_rung_5');
 
 -- Five app policies, one per rung (empty until the app-control discussion — see BUILD-PLAN.md §7).
 INSERT OR IGNORE INTO policies (id, name, headwind_configuration_id, created_at) VALUES
@@ -193,10 +193,26 @@ CREATE TABLE IF NOT EXISTS search_verdicts (
   query_hash TEXT PRIMARY KEY,
   query_sample TEXT,
   level INTEGER NOT NULL,
+  -- 0 = the query's TEXT answer is fine but its IMAGE results could be shtus, so the proxy shows the
+  -- text results with images stripped. 1 = images fine. See gemini.js and proxy-api.js.
+  images_ok INTEGER NOT NULL DEFAULT 1,
   reason TEXT,
   source TEXT NOT NULL DEFAULT 'gemini',
   decided_at INTEGER NOT NULL,
   hit_count INTEGER NOT NULL DEFAULT 1
 );
+
+-- The background pre-classifier's worklist: common domains to judge ahead of anyone visiting, so the
+-- inline path stays a rare fallback. A cron walks a small batch per tick (free-tier paced). See
+-- src/scheduler.js. status: 'pending' | 'done' | 'error'.
+CREATE TABLE IF NOT EXISTS classify_queue (
+  domain TEXT PRIMARY KEY,
+  status TEXT NOT NULL DEFAULT 'pending',
+  attempts INTEGER NOT NULL DEFAULT 0,
+  added_at INTEGER NOT NULL,
+  done_at INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_classify_queue_status ON classify_queue (status, attempts);
 
 CREATE INDEX IF NOT EXISTS idx_search_verdicts_level ON search_verdicts (level, decided_at DESC);

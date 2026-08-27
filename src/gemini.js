@@ -16,16 +16,12 @@ import { NEVER_LEVEL } from './levels.js';
 const GEMINI_MODEL = 'gemini-flash-lite-latest';
 const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
-// TEMPORARY BRIDGE between the model's rating scale and the internal one, and the ONLY place the two
-// scales meet. The prompts below still speak the old 1..5 ladder where 5 = "Never" (its wording is
-// the deferred rubric rewrite — see BUILD-PLAN.md §0/§4). Internally the ladder is now five real
-// device rungs 1..5 plus NEVER = 6, so a model "5" must NOT be read as "visible at rung 5" — that
-// would show explicit content at the most open rung. Map it to NEVER instead; 1..4 pass through.
-// When the rubric is rewritten to emit the 6-point scale directly, delete this and the mapping call.
-function aiRatingToInternal(level) {
+// The prompts emit the internal ladder directly: 2..5 is the lowest rung that may see the
+// site/query, and 6 is NEVER (blocked at every rung, including the most open). Anything outside 2..6
+// — or a malformed response — fails CLOSED to NEVER, so an unjudged item never slips through.
+function clampRating(level) {
   const n = Number(level);
-  if (!Number.isInteger(n) || n < 1 || n >= 5) return NEVER_LEVEL; // 5, out-of-range, malformed → NEVER
-  return n; // 1..4 are already the internal min-rung
+  return Number.isInteger(n) && n >= 2 && n <= NEVER_LEVEL ? n : NEVER_LEVEL;
 }
 
 // Transient failures (rate limiting, momentary server issues) shouldn't fail a classification
@@ -80,26 +76,27 @@ export function isHardDoorway(hostname) {
 // plus its homepage title and text — this is NOT per-page and NOT per-image scanning. Favors
 // strictness: a borderline site just stays blocked until the operator allows it by hand, so the
 // cost of a false "block" is low, while a false "allow" opens the entire domain.
-const SITE_INSTRUCTIONS = `You are a content filter for supervised phones in an Orthodox Jewish (Haredi) community, rating whole websites onto a strictness ladder. Subscribers pick a rung; a site is shown to everyone at or above the rung you assign.
+const SITE_INSTRUCTIONS = `You are a content filter for supervised phones in an Orthodox Jewish (Haredi) community, rating whole websites onto a strictness ladder. A device is set to a rung 2-5; a site is shown to everyone whose rung is at or above the rating you assign. So the rating is the LOWEST rung allowed to see the site.
 
-You are judging the WHOLE SITE from its hostname and homepage, not one page. The rating you give applies to every page on that domain, so judge by what the site is FOR and what a user would predictably reach from it.
+You are judging the WHOLE SITE from its hostname and homepage, not one page. The rating applies to every page on that domain, so judge by what the site is FOR and what a user would predictably reach from it.
 
-Assign "level":
-1 - Essential. Torah and Jewish content, education, schools, government, banking, medical, utilities, transport, reference works. Nothing a person on the strictest setting should be denied.
-2 - General. News, business, technology, dictionaries, non-clothing shopping, software, maps. Ordinary useful sites with no imagery concerns.
-3 - Mainstream. Ordinary sites that routinely show people: sports, travel, general retail including modest clothing, recipes, hobbies.
-4 - Permissive. Sites carrying immodest but non-explicit imagery: fashion and swimwear retail, entertainment and celebrity media, general-audience video, mainstream media with such photography.
-5 - Never. Pornography, nudity or sexual content; dating and hookup services; gambling and betting; extreme violence or gore; drug, self-harm or hate promotion; anti-religious or heretical content aimed at Orthodox Jews; proxies, VPNs, Tor gateways, alternative DNS resolvers or anything else for circumventing filtering.
+Assign "level" (2 to 6):
+2 - Essential and clean-general. Torah and Jewish content, education, schools, government, banking, medical, utilities, transport, reference works, dictionaries, maps, weather, software docs, and plainly clean general-interest sites with no imagery concerns.
+3 - Broader general / informational. Ordinary informational sites a notch beyond the essentials: general knowledge, science, history, hobbies, DIY, non-clothing shopping, business and technology news - useful and clean, just not core.
+4 - General, non-shtus. Mainstream sites including entertainment, celebrity and culture media, sports, travel, general retail, recipes - anything a broad audience uses that is NOT immodest and NOT explicit. Ordinary photos of clothed people are fine here.
+5 - Immodest / shtus (non-explicit). Sites whose predictable content is immodest though not explicit: fashion and swimwear retail, beauty and modelling, celebrity/paparazzi imagery, general media that leans on such photography.
+6 - NEVER. Pornography, nudity or sexual content; dating and hookup services; gambling and betting; extreme violence or gore; drug, self-harm or hate promotion; anti-religious or heretical content aimed at Orthodox Jews; proxies, VPNs, Tor gateways, alternative DNS resolvers or anything else for circumventing filtering.
 
-Set "is_doorway": true when the site's main function is reaching content it does not itself control - a search engine of any kind, image or video search, an open user-content platform, an image board, a link aggregator, a forum network, or a social feed. This is INDEPENDENT of the level: a doorway may look entirely clean and still be a doorway. When unsure whether something is a doorway, say true.
+Set "is_doorway": true when the site's main function is reaching content it does not itself control - a search engine, image/video search, an open user-content platform, an image board, a link aggregator, a forum network, or a social feed. Record it regardless of the level.
 
 Rules:
 - Being secular, boring or unrelated to Judaism is NOT a reason to rate a site higher.
-- Rate by what the site is for, not by an unusual worst case buried inside it.
-- When genuinely torn between two rungs, choose the higher (stricter) one. A site rated too strictly gets a short manual review; a site rated too loosely is open to everyone below.
-- Anything you cannot confidently place from the hostname, title and text given is level 5.
+- Rate by what the site is FOR, not by an unusual worst case buried inside it.
+- The ladder never starts below 2 - there is no rung 1 web. A truly essential clean site is 2.
+- When genuinely torn between two rungs, choose the higher (stricter) one. Too strict gets a short manual review; too loose opens the site to everyone below.
+- Anything you cannot confidently place from the hostname, title and text given is 6.
 
-The "reason" field must be a single short sentence, at most 15 words, stating only the final reason (e.g. "Mainstream sports news." or "Dating service.").`;
+The "reason" field must be a single short sentence, at most 15 words (e.g. "Mainstream sports news." or "Fashion retail with immodest imagery.").`;
 
 async function callGemini(env, requestBody) {
   if (!env.GEMINI_API_KEY) throw new Error('no-api-key');
@@ -126,8 +123,12 @@ export async function classifySite(env, { hostname, title, text }) {
   // Doorways are decided here, not by the model — see HARD_DOORWAYS. Rated 4 rather than 5 because
   // a search engine is not itself objectionable; it is simply only appropriate where doorways are
   // permitted, and levels.js keeps it out of every other rung.
+  // Open-content platforms (image boards, UGC, social, aggregators) predictably reach shtus, so
+  // they land on the most-open rung only. Recognised search ENGINES are allowed to load their
+  // search box at every web rung by isSearchEngineHost in proxy-api.js before this rating is ever
+  // consulted, so rating them here as rung-5 costs nothing and keeps the image boards out of 2-4.
   if (isHardDoorway(hostname)) {
-    return { level: 4, isDoorway: true, reason: 'Search or open user-content platform.' };
+    return { level: 5, isDoorway: true, reason: 'Search or open user-content platform.' };
   }
 
   const prompt = `${SITE_INSTRUCTIONS}\n\nWebsite: ${hostname}\nHomepage title: ${title || '(none)'}\nHomepage text (truncated): ${text || '(none)'}`;
@@ -145,9 +146,9 @@ export async function classifySite(env, { hostname, title, text }) {
 
   const parsed = JSON.parse(responseText);
 
-  // Map onto the internal scale (1..4 pass, 5/malformed → NEVER). A malformed rating fails closed:
-  // the alternative is an unjudged site silently entering a rung it was never cleared for.
-  const level = aiRatingToInternal(parsed.level);
+  // 2..6 pass through; malformed fails closed to NEVER rather than letting an unjudged site enter a
+  // rung it was never cleared for.
+  const level = clampRating(parsed.level);
   return { level, isDoorway: parsed.is_doorway === true, reason: trimReason(parsed.reason) };
 }
 
@@ -157,6 +158,7 @@ const QUERY_RESPONSE_SCHEMA = {
   type: 'object',
   properties: {
     level: { type: 'integer' },
+    images_ok: { type: 'boolean' },
     reason: { type: 'string' },
   },
   required: ['level'],
@@ -171,26 +173,29 @@ const QUERY_RESPONSE_SCHEMA = {
 //
 // Rated on the same 1-5 ladder as sites, so one device level governs both and the two checks cannot
 // drift apart.
-const QUERY_INSTRUCTIONS = `You are a content filter for supervised phones in an Orthodox Jewish (Haredi) community. You are rating a SEARCH QUERY — words someone typed into a search box — onto a strictness ladder. Subscribers pick a rung; a query is permitted for everyone at or above the rung you assign.
+const QUERY_INSTRUCTIONS = `You are a content filter for supervised phones in an Orthodox Jewish (Haredi) community. You are rating a SEARCH QUERY — words someone typed into a search box — onto a strictness ladder. A device is set to a rung 2-5; a query is permitted for everyone whose rung is at or above the rating you assign. So the rating is the LOWEST rung allowed to run it.
 
-Assign "level":
-1 - Essential. Torah and Jewish topics, schoolwork, health, government, banking, travel logistics, practical how-to.
-2 - General. News, business, technology, reference, products, sport, recipes, ordinary curiosity.
-3 - Mainstream. Entertainment, celebrities, music, films, general culture — nothing sought for its own suggestiveness.
-4 - Permissive. Queries likely to surface immodest but non-explicit imagery: fashion, swimwear, beauty, "photos of <public figure>", modelling.
-5 - Never. Anything seeking sexual or explicit material however phrased, including euphemism, slang, misspelling or another language; dating or hookups; gambling; graphic violence; drugs; self-harm; how to bypass or disable internet filters.
+Assign "level" (2 to 6):
+2 - Essential and clean-general. Torah and Jewish topics, schoolwork, health, government, banking, travel logistics, practical how-to, and plainly clean general knowledge (facts, weather, "how X works", definitions).
+3 - Broader general / informational. Open-ended curiosity, science, history, hobbies, DIY, product research, ordinary questions that are clean but less essential.
+4 - Entertainment and culture (non-shtus). Celebrities, music, films, TV, sports, gaming, general and mainstream shopping — sought for interest, not for suggestive imagery.
+5 - Immodest / shtus (non-explicit). Queries whose likely results are immodest though not explicit: fashion, swimwear, lingerie, beauty and modelling, "photos of <woman/public figure>", or seeking women by appearance.
+6 - NEVER. Anything seeking sexual or explicit material however phrased — euphemism, slang, misspelling or another language; dating or hookups; gambling; graphic violence; drugs; self-harm; how to bypass or disable internet filters.
+
+Also set "images_ok" (boolean): true normally. Set it FALSE when the query's TEXT answer is legitimate but its IMAGE results could be immodest/shtus — e.g. a medical or anatomical question, "what does <person/thing> look like", appearance-related questions. When false the reader is shown the text results with images stripped, so a useful answer is still delivered without the risky pictures. For a plainly clean query (no image concern) leave it true; for a query rated 5 or 6 it does not matter.
 
 Rules:
-- Judge the INTENT of the words, not whether they are individually innocent. Deliberately oblique phrasing for explicit material is level 5.
-- An ordinary word that happens to have a suggestive secondary meaning is not level 5 unless the phrasing points that way.
-- Shopping for ordinary clothing is level 3. Shopping for swimwear or lingerie is level 4.
+- Judge the INTENT of the words, not whether they are individually innocent. Deliberately oblique phrasing for explicit material is 6.
+- An ordinary word with a suggestive secondary meaning is not 6 unless the phrasing points that way.
+- Shopping for ordinary (modest) clothing is 4. Swimwear, lingerie or immodest clothing is 5.
 - A query in any language gets the same treatment as its English equivalent.
+- The ladder never starts below 2 — there is no rung 1 search.
 - When genuinely torn between two rungs, choose the higher (stricter) one.
 
 The "reason" field must be a single short sentence, at most 12 words (e.g. "Ordinary schoolwork topic." or "Seeking explicit material.").`;
 
-// Judges a typed search query. Throws on any Gemini failure; the caller fails closed (blocks the
-// search) rather than letting an unjudged query through.
+// Judges a typed search query. Returns { level, imagesOk, reason }. Throws on any Gemini failure;
+// the caller fails closed (blocks the search) rather than letting an unjudged query through.
 export async function classifySearchQuery(env, { query, engine, isImageSearch }) {
   const context = [
     `Search engine: ${engine || 'unknown'}`,
@@ -210,8 +215,8 @@ export async function classifySearchQuery(env, { query, engine, isImageSearch })
   if (!responseText) throw new Error('Empty Gemini response');
 
   const parsed = JSON.parse(responseText);
-  // Same bridge and fail-closed as sites: 1..4 pass, a model "5"/malformed → NEVER, so an unjudged
-  // or explicit query blocks rather than slipping through at the most open rung.
-  const level = aiRatingToInternal(parsed.level);
-  return { level, reason: trimReason(parsed.reason) };
+  // Fail-closed clamp: 2..6 pass through, anything malformed becomes NEVER so an unjudged query
+  // blocks rather than slipping through. images_ok defaults to true unless the model set it false.
+  const level = clampRating(parsed.level);
+  return { level, imagesOk: parsed.images_ok !== false, reason: trimReason(parsed.reason) };
 }

@@ -188,11 +188,10 @@ async function handleVerdict(request, env) {
     level = normalizeSiteLevel(result.level);
     isDoorway = result.isDoorway === true;
     reason = result.reason;
-    // Until the per-level enforcement lists exist, a single shared allowlist still backs the
-    // default-deny policy, so "allowed at all" means "reachable from the most permissive rung".
-    // The rating and the doorway flag are recorded regardless, so switching enforcement over is a
-    // read of columns that are already populated rather than a re-classification of the corpus.
-    safe = level <= MAX_DEVICE_LEVEL && !isDoorway;
+    // "clean" here is the coarse block-page signal (approved / still blocked); the proxy re-checks
+    // the exact rung by rating. A site counts as broadly clean when it is non-shtus (rated 4 or
+    // better) and not an open-content doorway; shtus (5) and NEVER (6) stay blocked.
+    safe = level <= 4 && !isDoorway;
   } catch {
     return json({ verdict: 'error', reason: 'Could not check this site right now.' });
   }

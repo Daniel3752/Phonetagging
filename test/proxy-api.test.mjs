@@ -40,8 +40,11 @@ const DB = {
     q.all = async () => ({ results: /FROM keyword_rules/.test(sql) ? [] : [] });
     q.run = async () => {
       if (/INSERT INTO search_verdicts/.test(sql)) {
-        searchVerdicts.set(q.args[0], { level: q.args[2], reason: q.args[3] });
+        // columns: query_hash, query_sample, level, images_ok, reason, ...
+        searchVerdicts.set(q.args[0], { level: q.args[2], images_ok: q.args[3], reason: q.args[4] });
       }
+      // url_verdicts writes from inline classification are not stored by this fake — a re-hit simply
+      // re-classifies, which no test depends on.
       return { success: true };
     };
     return q;
@@ -116,42 +119,46 @@ await check('a model outage blocks the search and caches nothing', async () => {
   assert.equal(searchVerdicts.size, 0, 'a transient failure must not become a cached verdict');
 });
 
-console.log('\n3. ordinary requests are judged on the site');
+console.log('\n3. sites are judged by rating; unknown domains are classified inline');
 reset();
-await check('an unclassified site is denied, and marked requestable', async () => {
-  const r = await (await ask({ user: 'phone-a', url: 'https://brand-new-site.com/page' })).json();
-  assert.equal(r.allow, false);
-  assert.equal(r.action, 'unknown');
-});
-await check('a site at the rung is allowed', async () => {
+await check('a pre-rated clean site is allowed at its rung', async () => {
   siteVerdicts.set(await sha('news.example.com'), { level: 2, is_doorway: 0, reason: 'News.' });
   const r = await (await ask({ user: 'phone-a', url: 'https://news.example.com/story/1' })).json();
   assert.equal(r.allow, true);
 });
-await check('a site above the rung is blocked, not requestable', async () => {
-  siteVerdicts.set(await sha('fashion.example.com'), { level: 4, is_doorway: 0, reason: 'Fashion.' });
-  const r = await (await ask({ user: 'phone-a', url: 'https://fashion.example.com/' })).json();
-  assert.equal(r.allow, false);
-  assert.equal(r.action, 'blocked');
+await check('a pre-rated shtus site is blocked below rung 5 but allowed at rung 5', async () => {
+  siteVerdicts.set(await sha('fashion.example.com'), { level: 5, is_doorway: 0, reason: 'Fashion.' });
+  const strict = await (await ask({ user: 'phone-a', url: 'https://fashion.example.com/' })).json();
+  const open = await (await ask({ user: 'phone-open', url: 'https://fashion.example.com/' })).json();
+  assert.equal(strict.allow, false, 'shtus is hidden below rung 5');
+  assert.equal(open.allow, true, 'shtus shows at rung 5');
 });
 await check('a NEVER-rated site is blocked even on the most open rung', async () => {
   siteVerdicts.set(await sha('bad.example.com'), { level: 6, is_doorway: 0, reason: 'Explicit.' });
   const r = await (await ask({ user: 'phone-open', url: 'https://bad.example.com/' })).json();
   assert.equal(r.allow, false);
 });
-await check('an unknown site is allowed on a permissive rung but denied on an allowlist rung', async () => {
-  const open = await (await ask({ user: 'phone-open', url: 'https://brand-new.example/' })).json();
-  const strict = await (await ask({ user: 'phone-a', url: 'https://brand-new.example/' })).json();
-  assert.equal(open.allow, true, 'allow-by-default at rung 5');
-  assert.equal(strict.allow, false, 'deny-by-default at rung 2');
-  assert.equal(strict.action, 'unknown');
+await check('an unknown clean domain is classified inline and allowed', async () => {
+  reset(); geminiLevel = 2; // the classifier judges it essential/clean
+  const before = geminiCalls;
+  const r = await (await ask({ user: 'phone-a', url: 'https://brand-new.example/page' })).json();
+  assert.equal(r.allow, true);
+  assert.ok(geminiCalls > before, 'an unknown domain costs a classification');
 });
-await check('a doorway is blocked on an allowlist rung, allowed on a permissive one', async () => {
-  siteVerdicts.set(await sha('portal.example.com'), { level: 1, is_doorway: 1, reason: 'Open platform.' });
-  const strict = await (await ask({ user: 'phone-a', url: 'https://portal.example.com/' })).json();
-  const open = await (await ask({ user: 'phone-open', url: 'https://portal.example.com/' })).json();
-  assert.equal(strict.allow, false, 'clean rating must not smuggle a doorway onto a strict rung');
-  assert.equal(open.allow, true);
+await check('an unknown shtus domain is classified inline and gated by rung', async () => {
+  reset(); geminiLevel = 5; // the classifier judges it shtus
+  const strict = await (await ask({ user: 'phone-a', url: 'https://shtus-new.example/' })).json();
+  const open = await (await ask({ user: 'phone-open', url: 'https://shtus-new.example/' })).json();
+  assert.equal(strict.allow, false, 'shtus blocked below rung 5');
+  assert.equal(open.allow, true, 'shtus allowed at rung 5');
+});
+await check('subdomains share the whole-domain verdict', async () => {
+  reset();
+  siteVerdicts.set(await sha('example.org'), { level: 2, is_doorway: 0, reason: 'Reference.' });
+  const before = geminiCalls;
+  const r = await (await ask({ user: 'phone-a', url: 'https://static.cdn.example.org/asset' })).json();
+  assert.equal(r.allow, true, 'a subdomain inherits the registrable-domain verdict');
+  assert.equal(geminiCalls, before, 'no new classification for a known domain');
 });
 
 console.log('\n4. unknown devices degrade to the strictest rung (rung 1 = no web)');
