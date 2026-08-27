@@ -1,4 +1,4 @@
-// Generates migrations/0013_app_rules_x_and_necessities.sql — the per-rung app matrix.
+// Generates migrations/0014_app_rules_bank_apps.sql — the per-rung app matrix.
 //
 // RECORDS INTENT ONLY. App control is enforced by Headwind, which is not on the phone yet, and the
 // per-rung policies (apps_rung_1..5) carry no headwind_configuration_id until re-enrolment. Exact
@@ -81,6 +81,14 @@ const APPS = {
   'com.google.android.apps.maps':{ label: 'Google Maps (CONFIRM package)', states: ALLOWED_ALL },
   'com.ubercab':                 { label: 'Uber (CONFIRM package)', states: ALLOWED_ALL },
   'com.lyft.android':            { label: 'Lyft (CONFIRM package)', states: ALLOWED_ALL },
+
+  // --- bank apps: allowed at every rung incl. rung 1. Major Israeli retail banks; package names
+  // are best-guess PLACEHOLDERS — confirm against the device's real installed-apps list. ---
+  'com.ideomobile.hapoalim':      { label: 'Bank Hapoalim (CONFIRM package)', states: ALLOWED_ALL },
+  'com.ideomobile.leumi':         { label: 'Bank Leumi (CONFIRM package)', states: ALLOWED_ALL },
+  'com.discountbank.mobile':      { label: 'Israel Discount Bank (CONFIRM package)', states: ALLOWED_ALL },
+  'com.mizrahitefahot.mobile':    { label: 'Mizrahi-Tefahot Bank (CONFIRM package)', states: ALLOWED_ALL },
+  'com.fibi.bank':                { label: 'FIBI / Bank Hapoalim intl (CONFIRM package)', states: ALLOWED_ALL },
 };
 
 const rows = [];
@@ -114,5 +122,5 @@ VALUES
 ${values};
 `;
 
-writeFileSync(new URL('../migrations/0013_app_rules_x_and_necessities.sql', import.meta.url), sql);
-console.log(`Wrote migrations/0013_app_rules_x_and_necessities.sql with ${rows.length} rows across ${Object.keys(APPS).length} packages.`);
+writeFileSync(new URL('../migrations/0014_app_rules_bank_apps.sql', import.meta.url), sql);
+console.log(`Wrote migrations/0014_app_rules_bank_apps.sql with ${rows.length} rows across ${Object.keys(APPS).length} packages.`);

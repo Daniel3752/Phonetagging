@@ -54,26 +54,26 @@ pending. `app_rules`: 35 (the matrix). `search_verdicts.images_ok` added.
 2. **Reconsider `dev_vortex`'s rung** — it's level 2, which now means *Text-only* (was *General*).
 3. **Rewrite is done** — the AI rubric now emits the 2..6 ladder directly; no bridge remains.
 
-## App matrix (revised again, intent only — `migrations/0013_app_rules_x_and_necessities.sql`)
+## App matrix (revised again, intent only — `migrations/0014_app_rules_bank_apps.sql`)
 
-34 packages seeded across the five policies (170 rows), superseding `0012`. Rung 3 stays on the
+39 packages seeded across the five policies (195 rows), superseding `0013`. Rung 3 stays on the
 allowlist model. Rung 4 blocks explicit-content AND social-media apps. Rung 5 blocks
 explicit-content apps only — social is allowed there as a native app, **except X**: unlike the rest
 of the social bucket, X can surface explicit content, so it stays blocked at every rung including 5
 (this reverses the `0012` call that had X following the social bucket). Added Moovit, Waze, Gett,
 Wolt, PayBox, Bit (Israeli/transit/payment utilities) and 1 Second Everyday — allowed at every rung
 including 1. Added a **necessities bucket** for rungs 1-3 (also allowed at 4-5): Torah apps
-(Sefaria, Chabad.org) + everyday utilities (Gmail, Google Maps, Uber, Lyft) — "the necessities +
-Torah apps and stuff, no shtus," allowed at every rung including 1. Several package names are
-**best-guess placeholders** (24Six, Gett, Wolt, PayBox, Bit, 1 Second Everyday, all the dating apps,
-and the whole necessities bucket) and must be confirmed against Headwind's real installed-apps list
-at re-enrolment — the operator has no fixed opinion on exact packages for these yet.
+(Sefaria, Chabad.org) + everyday utilities (Gmail, Google Maps, Uber, Lyft) + the five major Israeli
+retail bank apps (Hapoalim, Leumi, Discount, Mizrahi-Tefahot, FIBI) — "the necessities + Torah apps
+and stuff, no shtus," allowed at every rung including 1. Several package names are **best-guess
+placeholders** (24Six, Gett, Wolt, PayBox, Bit, 1 Second Everyday, all the dating apps, and the
+whole necessities/bank bucket) and must be confirmed against Headwind's real installed-apps list at
+re-enrolment — the operator has no fixed opinion on exact packages for these yet.
 
 ## Deferred (needs the phone / a reviewer)
 
 - **Headwind re-enrolment** (`dpm set-device-owner`) — gates all app enforcement.
 - **App package names** — reconcile every placeholder above against the device's installed-apps list.
-- **Bank app** — not yet added to the necessities bucket; no bank named yet.
 - **Spotify + AI-app image stripping** — block the app image hosts; test on-device (pinning/QUIC).
   AI apps are rung-5 only; web-only on 2-4 with image-gen blocking is the honest ceiling, untested.
 - **Forced SafeSearch** (rungs 3-5) — DNS VIP mapping on the phone, not a proxy rule.
