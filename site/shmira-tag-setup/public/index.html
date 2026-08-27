@@ -2,748 +2,513 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Shmira Setup Guide</title>
+<title>Phone Setup — Shmira</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Source+Sans+3:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-
+<meta name="description" content="Back up, reset, and enroll a phone in the Shmira tag — what restores automatically, what needs a manual step, and what Headwind changes about app reinstalling.">
 <style>
-  :root {
-    --paper: #f5f2ea;
-    --paper-raised: #fbf9f4;
-    --ink: #1c2420;
-    --ink-soft: #3b453f;
-    --muted: #6e6a5c;
-    --teal: #1f5f5b;
-    --teal-deep: #143f3c;
-    --teal-tint: #e4efed;
-    --gold: #a1701f;
-    --gold-tint: #f2e6cd;
-    --line: #ddd5c2;
-    --line-strong: #c7bda3;
-    --danger: #a3402f;
-    --ok: #2f6e3f;
-    --shadow: 0 1px 2px rgba(28,36,32,0.06), 0 8px 24px -12px rgba(28,36,32,0.18);
-    --radius: 10px;
-    color-scheme: light;
-  }
-
-  @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) {
-      --paper: #14191a;
-      --paper-raised: #1a2122;
-      --ink: #eae6da;
-      --ink-soft: #c7c2b3;
-      --muted: #948f7d;
-      --teal: #5aa79f;
-      --teal-deep: #7fc0b8;
-      --teal-tint: #1c2c2a;
-      --gold: #d4a758;
-      --gold-tint: #2b2415;
-      --line: #2b3230;
-      --line-strong: #3c433f;
-      --danger: #d97a63;
-      --ok: #7cba85;
-      --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 8px 24px -12px rgba(0,0,0,0.5);
-      color-scheme: dark;
-    }
-  }
-
-  :root[data-theme="dark"] {
-    --paper: #14191a;
-    --paper-raised: #1a2122;
-    --ink: #eae6da;
-    --ink-soft: #c7c2b3;
-    --muted: #948f7d;
-    --teal: #5aa79f;
-    --teal-deep: #7fc0b8;
-    --teal-tint: #1c2c2a;
-    --gold: #d4a758;
-    --gold-tint: #2b2415;
-    --line: #2b3230;
-    --line-strong: #3c433f;
-    --danger: #d97a63;
-    --ok: #7cba85;
-    --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 8px 24px -12px rgba(0,0,0,0.5);
-    color-scheme: dark;
-  }
-
+  :root { color-scheme: dark; }
   * { box-sizing: border-box; }
-  html { -webkit-text-size-adjust: 100%; }
-
+  html { scroll-behavior: smooth; }
   body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #0e1733;
+    color: #eef0f6;
     margin: 0;
-    background: var(--paper);
-    color: var(--ink);
-    font-family: "Source Sans 3", ui-sans-serif, system-ui, sans-serif;
-    font-size: 16px;
     line-height: 1.6;
+    overflow-x: hidden;
   }
+  h1, h2, h3, .brand-word { font-family: Georgia, "Iowan Old Style", "Palatino Linotype", "Book Antiqua", serif; font-weight: 600; letter-spacing: 0.01em; }
+  a { color: #e3c565; text-decoration: none; }
+  a:hover { color: #f0d685; }
+  a:focus-visible, button:focus-visible, summary:focus-visible, input:focus-visible { outline: 2px solid #d4af37; outline-offset: 2px; }
 
-  a { color: var(--teal-deep); text-decoration-thickness: 1px; text-underline-offset: 2px; }
-  a:focus-visible, button:focus-visible, summary:focus-visible, input:focus-visible {
-    outline: 2px solid var(--teal-deep);
-    outline-offset: 2px;
-  }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 0 24px; }
 
-  h1, h2, h3 {
-    font-family: "Fraunces", ui-serif, Georgia, serif;
-    font-weight: 600;
-    text-wrap: balance;
-    color: var(--ink);
-    letter-spacing: -0.01em;
-  }
-
-  code, .mono {
-    font-family: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
-  }
-
-  .shell {
-    max-width: 1180px;
-    margin: 0 auto;
-    padding: 0 clamp(18px, 4vw, 48px) 96px;
-  }
-
-  /* ---- Header ---- */
-  header.top {
-    padding: clamp(28px, 5vw, 56px) clamp(18px, 4vw, 48px) 20px;
-    max-width: 1180px;
-    margin: 0 auto;
-    border-bottom: 1px solid var(--line);
-  }
-  .eyebrow {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    font-family: "IBM Plex Mono", monospace;
-    font-size: 12.5px;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--teal-deep);
-    background: var(--teal-tint);
-    border: 1px solid color-mix(in srgb, var(--teal) 30%, var(--line));
-    border-radius: 999px;
-    padding: 5px 12px 5px 10px;
-    margin-bottom: 18px;
-  }
-  .eyebrow svg { width: 13px; height: 13px; }
-  header.top h1 {
-    font-size: clamp(2rem, 4vw, 2.9rem);
-    margin: 0 0 12px;
-    line-height: 1.08;
-  }
-  header.top p.lede {
-    max-width: 62ch;
-    font-size: 1.08rem;
-    color: var(--ink-soft);
-    margin: 0 0 22px;
-  }
-  .who-note {
-    display: flex;
-    gap: 10px;
-    align-items: flex-start;
-    max-width: 62ch;
-    font-size: 0.95rem;
-    color: var(--muted);
-    border-left: 3px solid var(--gold);
-    padding: 2px 0 2px 14px;
-  }
-
-  /* ---- Layout: rail + content ---- */
-  .layout {
-    display: grid;
-    grid-template-columns: 232px minmax(0, 1fr);
-    gap: clamp(24px, 4vw, 56px);
-    padding-top: clamp(28px, 4vw, 44px);
-  }
-  @media (max-width: 860px) {
-    .layout { grid-template-columns: 1fr; }
-  }
-
-  nav.rail {
+  nav.top {
+    border-bottom: 1px solid rgba(212, 175, 55, 0.16);
+    background: rgba(14, 23, 51, 0.86);
+    backdrop-filter: blur(8px);
     position: sticky;
-    top: 24px;
-    align-self: start;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
+    top: 0;
+    z-index: 20;
   }
+  nav.top .wrap { display: flex; align-items: center; justify-content: space-between; height: 68px; gap: 16px; }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .brand img { width: 30px; height: 30px; display: block; }
+  .brand-word { color: #f2e6c4; font-size: 1.15rem; }
+  .brand-sub {
+    font-size: 0.7rem; letter-spacing: 0.1em; text-transform: uppercase; color: #8590b3;
+    border-left: 1px solid rgba(212, 175, 55, 0.3); padding-left: 10px; margin-left: 2px;
+  }
+  .navlinks { display: flex; gap: 22px; align-items: center; }
+  .navlinks a { color: #b9c2de; font-size: 0.92rem; }
+  .navlinks a:hover { color: #f2e6c4; }
+
+  .btn { display: inline-flex; align-items: center; gap: 8px; padding: 13px 26px; border-radius: 3px; font-size: 0.95rem; font-weight: 600; border: 1px solid transparent; cursor: pointer; }
+  .btn-gold { background: linear-gradient(135deg, #e9cf7a, #c99b2e); color: #10193a; }
+  .btn-gold:hover { filter: brightness(1.06); color: #10193a; }
+  .btn-outline { border-color: rgba(212, 175, 55, 0.45); color: #e3c565; background: transparent; }
+  .btn-outline:hover { border-color: #e3c565; background: rgba(212, 175, 55, 0.06); }
+
+  section { padding: 64px 0; position: relative; }
+  section.tight { padding: 40px 0; }
+  .eyebrow { text-transform: uppercase; letter-spacing: 0.14em; font-size: 0.72rem; color: #c9a94a; font-weight: 700; margin: 0 0 14px; }
+
+  .card { background: linear-gradient(180deg, rgba(34, 53, 100, 0.55), rgba(34, 53, 100, 0.3)); border: 1px solid rgba(212, 175, 55, 0.18); border-radius: 6px; padding: 22px 24px; }
+  .card.raised { border-color: rgba(212, 175, 55, 0.38); box-shadow: 0 18px 40px rgba(0, 0, 0, 0.28); }
+  .card h3 { margin: 0 0 8px; font-size: 1.02rem; color: #f2e6c4; }
+  .card p { color: #b9c2de; font-size: 0.92rem; margin: 0; }
+  .card p + p { margin-top: 10px; }
+  hr.hairline { border: none; border-top: 1px solid rgba(212, 175, 55, 0.18); margin: 0; }
+
+  .tag { display: inline-block; font-size: 0.66rem; letter-spacing: 0.1em; text-transform: uppercase; font-weight: 700; padding: 3px 8px; border-radius: 999px; border: 1px solid rgba(212, 175, 55, 0.35); color: #c9a94a; vertical-align: middle; }
+  .tag.plain { border-color: rgba(150, 165, 205, 0.3); color: #9daac9; }
+  .tag.warn { border-color: rgba(229, 115, 115, 0.4); color: #f0a3a3; }
+
+  /* ── Phase rail ── */
+  .layout { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 48px; align-items: start; }
+  @media (max-width: 860px) { .layout { grid-template-columns: 1fr; } }
+  nav.rail { position: sticky; top: 92px; display: flex; flex-direction: column; gap: 2px; }
   @media (max-width: 860px) {
-    nav.rail {
-      position: static;
-      flex-direction: row;
-      overflow-x: auto;
-      gap: 8px;
-      padding-bottom: 10px;
-      margin-bottom: 8px;
-      border-bottom: 1px solid var(--line);
-    }
+    nav.rail { position: static; flex-direction: row; overflow-x: auto; gap: 6px; padding-bottom: 10px; margin-bottom: 4px; border-bottom: 1px solid rgba(212, 175, 55, 0.16); }
   }
-  nav.rail a {
-    display: flex;
-    align-items: baseline;
-    gap: 10px;
-    padding: 10px 10px;
-    border-radius: 8px;
-    color: var(--ink-soft);
-    text-decoration: none;
-    font-size: 0.92rem;
-    white-space: nowrap;
+  nav.rail a { display: flex; align-items: baseline; gap: 9px; padding: 9px 10px; border-radius: 4px; color: #9daac9; font-size: 0.88rem; white-space: nowrap; }
+  nav.rail a:hover { background: rgba(212, 175, 55, 0.08); color: #f2e6c4; }
+  nav.rail .n { font-size: 0.74rem; color: #7c86a6; }
+  nav.rail .rail-label { font-size: 0.68rem; letter-spacing: 0.1em; text-transform: uppercase; color: #7c86a6; padding: 2px 10px 8px; }
+
+  /* ── Steps ── */
+  .steps { display: grid; gap: 18px; margin: 20px 0 8px; }
+  .step { display: flex; gap: 14px; align-items: flex-start; padding: 12px; border-radius: 6px; }
+  .step:hover { background: rgba(212, 175, 55, 0.04); }
+  .step .num { flex: 0 0 30px; width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; background: linear-gradient(135deg, #e9cf7a, #c99b2e); color: #10193a; font-weight: 700; font-size: 0.85rem; }
+  .step .num.done { background: #33427a; color: #b9c2de; }
+  .step h4 { margin: 3px 0 5px; font-size: 1rem; color: #f2e6c4; display: flex; align-items: center; gap: 8px; }
+  .step h4.checked { color: #9daac9; text-decoration: line-through; text-decoration-color: #33427a; }
+  .step p { margin: 0; color: #9daac9; font-size: 0.9rem; }
+  .step label { display: flex; gap: 14px; align-items: flex-start; cursor: pointer; width: 100%; }
+
+  input[type=checkbox] {
+    appearance: none; -webkit-appearance: none; box-sizing: border-box;
+    width: 18px; height: 18px; flex: 0 0 18px; margin: 4px 0 0;
+    border: 2px solid #7c86a6; border-radius: 3px; background: transparent; position: relative; cursor: pointer;
   }
-  nav.rail a:hover { background: var(--teal-tint); }
-  nav.rail a .n {
-    font-family: "IBM Plex Mono", monospace;
-    font-size: 0.78rem;
-    color: var(--muted);
-    min-width: 1.4em;
-  }
-  nav.rail .rail-label {
-    font-family: "IBM Plex Mono", monospace;
-    font-size: 11px;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--muted);
-    padding: 4px 10px 8px;
+  input[type=checkbox]:hover { border-color: #b9c2de; }
+  input[type=checkbox]:focus { border-color: #d4af37; }
+  input[type=checkbox]:checked { background: #d4af37; border-color: #d4af37; }
+  input[type=checkbox]:checked::after {
+    content: ''; position: absolute; left: 4px; top: 0px; width: 4px; height: 9px;
+    border: solid #10193a; border-width: 0 2.5px 2.5px 0; transform: rotate(45deg);
   }
 
-  main { min-width: 0; }
+  h1.hero { font-size: clamp(1.9rem, 4vw, 2.6rem); line-height: 1.16; margin: 0 0 16px; color: #f5eed4; }
+  p.lede { font-size: 1.05rem; color: #b9c2de; max-width: 58ch; margin: 0 0 20px; }
+  .who-note { display: flex; gap: 10px; max-width: 58ch; font-size: 0.9rem; color: #9daac9; border-left: 2px solid #d4af37; padding: 2px 0 2px 14px; }
 
-  section.phase {
-    scroll-margin-top: 20px;
-    padding-bottom: clamp(40px, 6vw, 64px);
-    border-bottom: 1px solid var(--line);
-    margin-bottom: clamp(40px, 6vw, 64px);
-  }
-  section.phase:last-of-type { border-bottom: none; margin-bottom: 0; }
+  h2.phase-title { font-size: clamp(1.3rem, 2.4vw, 1.6rem); margin: 0 0 8px; color: #f5eed4; }
+  p.phase-sub { color: #9daac9; max-width: 60ch; margin: 0 0 6px; }
 
-  .phase-head {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    margin-bottom: 6px;
-  }
-  .phase-num {
-    font-family: "Fraunces", serif;
-    font-weight: 600;
-    font-size: 1rem;
-    color: var(--paper);
-    background: var(--teal-deep);
-    width: 34px;
-    height: 34px;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-  }
-  .phase-head h2 { margin: 0; font-size: clamp(1.4rem, 2.6vw, 1.8rem); }
-  .phase-sub {
-    margin: 0 0 26px 50px;
-    color: var(--muted);
-    max-width: 62ch;
+  code {
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+    font-size: 0.85em; color: #e3c565; background: rgba(16, 28, 64, 0.75);
+    border: 1px solid rgba(212, 175, 55, 0.18); border-radius: 3px; padding: 2px 6px; white-space: nowrap;
   }
 
-  .phase-body { margin-left: 50px; max-width: 68ch; }
-  @media (max-width: 560px) { .phase-body, .phase-sub { margin-left: 0; } }
+  .cmd-block { position: relative; background: #0b1330; border: 1px solid rgba(212, 175, 55, 0.3); border-radius: 5px; padding: 14px 46px 14px 16px; margin: 12px 0; overflow-x: auto; }
+  .cmd-block .cmd-tag { display: block; font-size: 0.68rem; letter-spacing: 0.08em; text-transform: uppercase; color: #7c86a6; margin-bottom: 6px; }
+  .cmd-block pre { margin: 0; white-space: pre; font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; font-size: 0.86rem; color: #f0d685; }
+  .copy-btn { position: absolute; top: 10px; right: 10px; background: rgba(212,175,55,0.1); border: 1px solid rgba(212,175,55,0.3); color: #e3c565; font-family: inherit; font-size: 11px; padding: 5px 9px; border-radius: 4px; cursor: pointer; }
+  .copy-btn:hover { background: rgba(212,175,55,0.18); }
 
-  .phase-body > p { max-width: 65ch; }
+  details.faq { border-bottom: 1px solid rgba(212, 175, 55, 0.14); padding: 14px 0; }
+  details.faq summary { cursor: pointer; list-style: none; color: #f2e6c4; font-weight: 600; font-size: 0.95rem; display: flex; justify-content: space-between; gap: 16px; }
+  details.faq summary::-webkit-details-marker { display: none; }
+  details.faq summary::after { content: '+'; color: #c9a94a; font-size: 1.2rem; line-height: 1; }
+  details.faq[open] summary::after { content: '\2013'; }
+  details.faq .body { color: #b9c2de; font-size: 0.9rem; margin: 12px 0 0; max-width: 68ch; }
+  details.faq .body p { margin: 0 0 10px; }
+  details.faq .body p:last-child { margin-bottom: 0; }
 
-  h3.sub {
-    font-size: 1.05rem;
-    margin: 30px 0 10px;
-    color: var(--ink);
-  }
-
-  /* ---- Checklist ---- */
-  ul.checklist {
-    list-style: none;
-    margin: 14px 0 20px;
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-  }
-  ul.checklist li {
-    display: flex;
-    align-items: flex-start;
-    gap: 12px;
-    padding: 10px 12px;
-    border-radius: 8px;
-  }
-  ul.checklist li:hover { background: var(--paper-raised); }
-  ul.checklist input[type="checkbox"] {
-    appearance: none;
-    -webkit-appearance: none;
-    width: 19px;
-    height: 19px;
-    margin: 2px 0 0;
-    flex-shrink: 0;
-    border: 1.5px solid var(--line-strong);
-    border-radius: 5px;
-    background: var(--paper-raised);
-    display: grid;
-    place-content: center;
-    cursor: pointer;
-  }
-  ul.checklist input[type="checkbox"]::before {
-    content: "";
-    width: 10px;
-    height: 10px;
-    transform: scale(0);
-    transition: transform 0.1s ease;
-    box-shadow: inset 1em 1em var(--paper);
-    clip-path: polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0%, 43% 62%);
-    background: var(--teal-deep);
-  }
-  ul.checklist input[type="checkbox"]:checked {
-    background: var(--teal-deep);
-    border-color: var(--teal-deep);
-  }
-  ul.checklist input[type="checkbox"]:checked::before { transform: scale(1); }
-  ul.checklist label { cursor: pointer; }
-  ul.checklist li.checked label { color: var(--muted); text-decoration: line-through; text-decoration-color: var(--line-strong); }
-  ul.checklist .desc { display: block; font-size: 0.9rem; color: var(--muted); margin-top: 2px; }
-  ul.checklist li.checked .desc { text-decoration: none; }
-
-  /* ---- Callouts ---- */
-  .callout {
-    display: flex;
-    gap: 12px;
-    border: 1px solid var(--line);
-    background: var(--paper-raised);
-    border-radius: var(--radius);
-    padding: 14px 16px;
-    margin: 18px 0;
-    font-size: 0.94rem;
-  }
-  .callout .icon { flex-shrink: 0; margin-top: 1px; }
-  .callout.gold { border-color: color-mix(in srgb, var(--gold) 35%, var(--line)); background: var(--gold-tint); }
-  .callout.gold .icon { color: var(--gold); }
-  .callout.teal { border-color: color-mix(in srgb, var(--teal) 30%, var(--line)); background: var(--teal-tint); }
-  .callout.teal .icon { color: var(--teal-deep); }
-  .callout p { margin: 0; }
-  .callout strong { color: var(--ink); }
-
-  /* ---- Command blocks ---- */
-  .cmd-block {
-    position: relative;
-    background: var(--teal-deep);
-    color: #eef4f2;
-    border-radius: var(--radius);
-    padding: 14px 46px 14px 16px;
-    margin: 14px 0;
-    font-size: 0.87rem;
-    overflow-x: auto;
-  }
-  :root[data-theme="dark"] .cmd-block, @media (prefers-color-scheme: dark) { }
-  .cmd-block pre { margin: 0; white-space: pre; }
-  .cmd-block .tag {
-    display: block;
-    font-family: "IBM Plex Mono", monospace;
-    font-size: 0.72rem;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    color: #a9c9c4;
-    margin-bottom: 6px;
-  }
-  .copy-btn {
-    position: absolute;
-    top: 10px;
-    right: 10px;
-    background: rgba(255,255,255,0.1);
-    border: 1px solid rgba(255,255,255,0.18);
-    color: #eef4f2;
-    font-family: "IBM Plex Mono", monospace;
-    font-size: 11px;
-    padding: 5px 9px;
-    border-radius: 6px;
-    cursor: pointer;
-  }
-  .copy-btn:hover { background: rgba(255,255,255,0.18); }
-
-  .aside-tech summary {
-    cursor: pointer;
-    font-family: "IBM Plex Mono", monospace;
-    font-size: 0.85rem;
-    color: var(--teal-deep);
-    padding: 10px 0;
-    list-style: none;
-  }
-  .aside-tech summary::-webkit-details-marker { display: none; }
-  .aside-tech summary::before { content: "▸ "; }
-  .aside-tech[open] summary::before { content: "▾ "; }
-  .aside-tech {
-    border: 1px dashed var(--line-strong);
-    border-radius: var(--radius);
-    padding: 4px 16px 12px;
-    margin: 20px 0;
-    background: var(--paper-raised);
-  }
-
-  /* ---- Restore matrix table ---- */
-  .table-wrap { overflow-x: auto; margin: 18px 0 8px; border: 1px solid var(--line); border-radius: var(--radius); }
-  table.matrix {
-    border-collapse: collapse;
-    width: 100%;
-    min-width: 560px;
-    font-size: 0.92rem;
-  }
-  table.matrix caption { text-align: left; padding: 12px 14px 0; font-size: 0.85rem; color: var(--muted); }
-  table.matrix th, table.matrix td {
-    text-align: left;
-    padding: 11px 14px;
-    border-bottom: 1px solid var(--line);
-    vertical-align: top;
-  }
-  table.matrix thead th {
-    font-family: "IBM Plex Mono", monospace;
-    font-size: 0.72rem;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    color: var(--muted);
-    background: var(--paper-raised);
-  }
+  .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; border: 1px solid rgba(212, 175, 55, 0.18); border-radius: 6px; }
+  table.matrix { border-collapse: collapse; width: 100%; min-width: 580px; font-size: 0.88rem; }
+  table.matrix caption { text-align: left; padding: 12px 16px 0; font-size: 0.8rem; color: #7c86a6; }
+  table.matrix th, table.matrix td { text-align: left; padding: 11px 16px; border-bottom: 1px solid rgba(212, 175, 55, 0.14); vertical-align: top; }
+  table.matrix thead th { font-size: 0.68rem; letter-spacing: 0.08em; text-transform: uppercase; color: #7c86a6; background: rgba(16, 28, 64, 0.5); }
   table.matrix tbody tr:last-child td { border-bottom: none; }
-  .pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    font-family: "IBM Plex Mono", monospace;
-    font-size: 0.74rem;
-    letter-spacing: 0.02em;
-    padding: 3px 8px;
-    border-radius: 999px;
-    white-space: nowrap;
-  }
-  .pill.yes { background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok); }
-  .pill.no { background: color-mix(in srgb, var(--danger) 15%, transparent); color: var(--danger); }
-  .pill.manual { background: var(--gold-tint); color: var(--gold); }
+  table.matrix td:first-child { color: #eef0f6; }
+  table.matrix td:nth-child(2) { color: #9daac9; }
 
-  /* ---- Footer ---- */
-  footer.done {
-    margin-top: 8px;
-    padding-top: 28px;
-    border-top: 1px solid var(--line);
-    color: var(--muted);
-    font-size: 0.9rem;
-  }
-  footer.done a { color: var(--teal-deep); }
+  .pill { display: inline-flex; align-items: center; gap: 5px; font-size: 0.7rem; letter-spacing: 0.02em; padding: 3px 9px; border-radius: 999px; white-space: nowrap; font-weight: 600; }
+  .pill.yes { background: rgba(129, 199, 132, 0.14); color: #a8dcab; }
+  .pill.no { background: rgba(229, 115, 115, 0.14); color: #f0a3a3; }
+  .pill.manual { background: rgba(212, 175, 55, 0.14); color: #e0c04f; }
 
-  @media (prefers-reduced-motion: reduce) {
-    * { transition: none !important; animation: none !important; }
-  }
+  .watermark { position: absolute; pointer-events: none; opacity: 0.05; z-index: 0; }
+
+  footer { border-top: 1px solid rgba(212, 175, 55, 0.14); padding: 40px 0 56px; color: #7c86a6; font-size: 0.85rem; }
+  footer .wrap { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+  footer a { color: #8590b3; }
+  footer a:hover { color: #c9a94a; }
+
+  @media (max-width: 640px) { section { padding: 44px 0; } }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
 </style>
-
-
 </head>
 <body>
-<header class="top">
-  <span class="eyebrow">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l7 3v6c0 4.5-3 8-7 9-4-1-7-4.5-7-9V6l7-3z"/></svg>
-    getshmira · device setup
-  </span>
-  <h1>Setting up the tag on a phone</h1>
-  <p class="lede">
-    Three phases: back everything up, reset the phone and enroll it, then restore what belongs on it.
-    Do them in order — the reset in phase two erases the phone completely, so nothing after that point
-    can save something you skipped backing up first.
-  </p>
-  <p class="who-note">
-    Written so a parent can follow it phone-in-hand. The dashed technical boxes are for whoever's
-    running the enrollment — safe to skip if that's not you.
-  </p>
-</header>
 
-<div class="shell">
-  <div class="layout">
+<nav class="top">
+  <div class="wrap">
+    <a class="brand" href="https://getshmira.com/">
+      <img src="https://getshmira.com/logo.png?v=1g2zm2o" alt="Shmira">
+      <span class="brand-word">Shmira</span>
+      <span class="brand-sub">Phone Setup</span>
+    </a>
+    <div class="navlinks">
+      <a href="https://getshmira.com/help">Help</a>
+      <a class="btn btn-outline" href="https://getshmira.com/">← getshmira.com</a>
+    </div>
+  </div>
+</nav>
+
+<section style="padding-top:56px; padding-bottom:32px; overflow:hidden;">
+  <svg class="watermark" width="480" height="504" viewBox="0 0 200 210" style="right:-120px; top:-40px;">
+    <polygon points="100,40 156.3,137.5 43.7,137.5" fill="none" stroke="#d4af37" stroke-width="1.6"/>
+    <polygon points="100,170 43.7,72.5 156.3,72.5" fill="none" stroke="#d4af37" stroke-width="1.6"/>
+  </svg>
+  <div class="wrap" style="position:relative;">
+    <p class="eyebrow">Android · Headwind enrollment</p>
+    <h1 class="hero">Setting up the tag on a phone</h1>
+    <p class="lede">
+      Three phases: back everything up, reset the phone and enroll it, then restore what belongs on it.
+      Do them in order — the reset in phase two erases the phone completely, so nothing after that
+      point can save what you skipped backing up first.
+    </p>
+    <p class="who-note">
+      Written so a parent can follow it phone-in-hand. The <strong>+</strong> sections are technical
+      detail for whoever's running the enrollment — safe to skip if that's not you.
+    </p>
+  </div>
+</section>
+<hr class="hairline">
+
+<div class="wrap">
+  <div class="layout" style="padding-top:36px;">
     <nav class="rail" aria-label="Setup phases">
       <span class="rail-label">On this page</span>
-      <a href="#phase-1"><span class="n mono">01</span> Back up</a>
-      <a href="#phase-2"><span class="n mono">02</span> Reset &amp; enroll</a>
-      <a href="#phase-3"><span class="n mono">03</span> Restore</a>
-      <a href="#matrix"><span class="n mono">—</span> What restores</a>
+      <a href="#phase-1"><span class="n">01</span> Back up</a>
+      <a href="#phase-2"><span class="n">02</span> Reset &amp; enroll</a>
+      <a href="#phase-3"><span class="n">03</span> Restore</a>
+      <a href="#matrix"><span class="n">—</span> What restores</a>
+      <a href="#faq"><span class="n">—</span> Questions</a>
     </nav>
 
     <main>
       <!-- ================= PHASE 1 ================= -->
-      <section class="phase" id="phase-1">
-        <div class="phase-head">
-          <span class="phase-num mono">1</span>
-          <h2>Back everything up</h2>
+      <section class="tight" id="phase-1" style="padding-top:0;">
+        <h2 class="phase-title">1 · Back everything up</h2>
+        <p class="phase-sub">Ten minutes now saves every photo, chat, and app record. Do all of this before you touch Settings → Reset.</p>
+
+        <div class="card raised" style="margin:18px 0 26px;">
+          <h3>⚠ The reset in phase 2 is a real factory reset</h3>
+          <p>It erases the phone — photos, messages, app logins, everything — back to how it left the
+          store. Android has no undo for that. This phase is the only chance to save what's on it.</p>
         </div>
-        <p class="phase-sub">Ten minutes now saves every photo, chat, and app. Do all four before you touch Settings → Reset.</p>
 
-        <div class="phase-body">
-          <div class="callout gold">
-            <span class="icon">⚠</span>
-            <p><strong>The reset in phase 2 is a real factory reset.</strong> It erases the phone —
-            photos, messages, app logins, everything — back to how it left the store. Android has no
-            "undo" for that. This phase is the only chance to save what's on the phone.</p>
-          </div>
-
-          <h3 class="sub">Turn on Google's device backup</h3>
-          <ul class="checklist" data-group="g1">
-            <li>
+        <div class="steps">
+          <div class="step">
+            <label>
               <input type="checkbox" id="c1">
-              <label for="c1">Settings → Google → Backup → make sure <em>Backup by Google One</em> is on, then tap <strong>Back up now</strong> and wait for it to finish
-                <span class="desc">This carries contacts, call history, SMS, Wi-Fi passwords, device settings, and — for apps that support it — some app data.</span>
-              </label>
-            </li>
-            <li>
+              <span>
+                <h4>Turn on Google's device backup</h4>
+                <p>Settings → Google → Backup → make sure <em>Backup by Google One</em> is on, then tap
+                <strong>Back up now</strong> and wait for it to finish. This carries contacts, call
+                history, SMS, Wi-Fi passwords, device settings, and — for apps that support it —
+                some in-app data.</p>
+              </span>
+            </label>
+          </div>
+          <div class="step">
+            <label>
               <input type="checkbox" id="c2">
-              <label for="c2">Confirm it's signed into the Google account the family will sign back into after the reset
-                <span class="desc">Same account in, same account back out — that's what lets everything reattach automatically.</span>
-              </label>
-            </li>
-          </ul>
-
-          <h3 class="sub">Back up WhatsApp separately</h3>
-          <p>Google's backup does <strong>not</strong> include WhatsApp chat history — WhatsApp keeps its own.</p>
-          <ul class="checklist" data-group="g2">
-            <li>
+              <span>
+                <h4>Confirm it's the account you'll sign back into</h4>
+                <p>Same Google account in, same one back out — that's what lets contacts, settings,
+                and (see phase 3) allowed apps reattach automatically.</p>
+              </span>
+            </label>
+          </div>
+          <div class="step">
+            <label>
               <input type="checkbox" id="c3">
-              <label for="c3">Open WhatsApp → Settings → Chats → Chat backup → <strong>Back up now</strong>
-                <span class="desc">Backs up to Google Drive, tied to the same Google account. Do this right before the reset so nothing recent is missed.</span>
-              </label>
-            </li>
-          </ul>
-
-          <h3 class="sub">Copy photos and videos to a computer, too</h3>
-          <p>
-            Don't rely on cloud backup alone for photos — free Google storage runs out, and a spotty
-            connection can leave a backup half-finished without any obvious warning. A direct copy is
-            the belt-and-suspenders version.
-          </p>
-          <ul class="checklist" data-group="g3">
-            <li>
+              <span>
+                <h4>Back up WhatsApp separately</h4>
+                <p>Google's backup does <strong>not</strong> include chat history — open WhatsApp →
+                Settings → Chats → Chat backup → <strong>Back up now</strong>. Do this right before
+                the reset so nothing recent is missed.</p>
+              </span>
+            </label>
+          </div>
+          <div class="step">
+            <label>
               <input type="checkbox" id="c4">
-              <label for="c4">Plug the phone into a computer with the USB cable
-                <span class="desc">On the phone, tap the "Charging this device via USB" notification and switch it to <strong>File Transfer / MTP</strong>.</span>
-              </label>
-            </li>
-            <li>
-              <input type="checkbox" id="c5">
-              <label for="c5">On the computer, open the phone like a drive and copy the <code>DCIM</code>, <code>Pictures</code>, <code>Movies</code>, and <code>Download</code> folders somewhere safe
-                <span class="desc">A folder on the computer or a USB drive both work. This copy doesn't depend on any account or storage limit.</span>
-              </label>
-            </li>
-          </ul>
+              <span>
+                <h4>Copy photos and videos to a computer, too</h4>
+                <p>Don't rely on cloud backup alone — free Google storage runs out, and a spotty
+                connection can leave a backup half-finished with no obvious warning. Plug the phone in
+                by USB, switch it to <strong>File Transfer / MTP</strong> when prompted, and copy the
+                <code>DCIM</code>, <code>Pictures</code>, <code>Movies</code>, and <code>Download</code>
+                folders to a computer or USB drive. That copy doesn't depend on any account or storage cap.</p>
+              </span>
+            </label>
+          </div>
+        </div>
 
-          <details class="aside-tech">
-            <summary>Technical — see exactly what's installed before you reset</summary>
+        <details class="faq" id="check-before-reset">
+          <summary>+ How do I check what's actually on the phone — and what will actually be backed up — before I reset it?</summary>
+          <div class="body">
             <p>
-              If you want a real inventory instead of trusting memory: enable Developer Options
-              (Settings → About phone → tap <em>Build number</em> seven times), turn on
-              <strong>USB debugging</strong>, plug the phone into a computer with
-              <a href="https://developer.android.com/tools/adb" target="_blank" rel="noopener">adb</a>
-              installed, and run:
+              These are two different questions, and stock Android's UI doesn't answer either one
+              cleanly. Settings → Google → Backup shows a last-backup date and a rough size, not an
+              itemized list.
             </p>
+            <p><strong>To see every app currently installed:</strong> enable Developer Options
+            (Settings → About phone → tap <em>Build number</em> seven times), turn on
+            <strong>USB debugging</strong>, plug the phone into a computer with
+            <a href="https://developer.android.com/tools/adb" target="_blank" rel="noopener">adb</a>
+            installed, and run:</p>
             <div class="cmd-block">
-              <span class="tag">list every user-installed app</span>
+              <span class="cmd-tag">every user-installed app</span>
               <pre>adb shell pm list packages -3</pre>
               <button class="copy-btn" data-copy="adb shell pm list packages -3">Copy</button>
             </div>
+            <p><strong>To see which of those apps will actually be included in the backup</strong> —
+            not every app qualifies; an app opts in or out of Android's Auto Backup in its own
+            manifest, and there's no setting screen that lists this — run:</p>
+            <div class="cmd-block">
+              <span class="cmd-tag">backup eligibility per app, plus current transport status</span>
+              <pre>adb shell dumpsys backup</pre>
+              <button class="copy-btn" data-copy="adb shell dumpsys backup">Copy</button>
+            </div>
             <p>
-              That prints one <code>package:com.example.app</code> line per app. It's the same list
-              Google's backup already restores automatically on sign-in — this is just for a paper
-              record, or to sanity-check the restore in phase 3 against what was actually there before.
+              The output lists each package with its backup participation. Apps that opt out — most
+              banking apps, some games — show up here even though they were never going to make it
+              into the Google backup regardless of how you back up. That's the honest list of what
+              phase 1's Google-backup step will and won't carry; the WhatsApp and photo/video steps
+              exist precisely to cover the two biggest things that never show up in that output.
             </p>
-          </details>
-        </div>
+          </div>
+        </details>
       </section>
+      <hr class="hairline">
 
       <!-- ================= PHASE 2 ================= -->
-      <section class="phase" id="phase-2">
-        <div class="phase-head">
-          <span class="phase-num mono">2</span>
-          <h2>Reset the phone and enroll it</h2>
-        </div>
+      <section class="tight" id="phase-2">
+        <h2 class="phase-title">2 · Reset the phone and enroll it</h2>
         <p class="phase-sub">Only start this once every box above is checked.</p>
 
-        <div class="phase-body">
-          <ul class="checklist" data-group="g4">
-            <li>
+        <div class="steps">
+          <div class="step">
+            <label>
+              <input type="checkbox" id="c5">
+              <span>
+                <h4>Settings → System → Reset options → Erase all data</h4>
+                <p>Confirm the factory reset. The phone reboots to the "Welcome" setup screen, exactly
+                as it was the day it was bought.</p>
+              </span>
+            </label>
+          </div>
+          <div class="step">
+            <label>
               <input type="checkbox" id="c6">
-              <label for="c6">Settings → System → Reset options → <strong>Erase all data (factory reset)</strong>, confirm
-                <span class="desc">The phone reboots to the "Welcome" setup screen, exactly as it was the day it was bought.</span>
-              </label>
-            </li>
-            <li>
+              <span>
+                <h4>Scan the enrollment QR on the Welcome screen</h4>
+                <p>Tap the same spot six times to bring up the QR scanner, then scan the code from the
+                Headwind server. The agent installs and becomes Device Owner — full detail and the
+                Play Protect check to run first are in the technical guide linked below.</p>
+              </span>
+            </label>
+          </div>
+          <div class="step">
+            <label>
               <input type="checkbox" id="c7">
-              <label for="c7">On the Welcome screen, follow the QR provisioning flow to enroll the tag as Device Owner
-                <span class="desc">Full steps and the Play-Protect gotcha to check first are in the enrollment guide — see the link at the bottom of this page.</span>
-              </label>
-            </li>
-            <li>
-              <input type="checkbox" id="c8">
-              <label for="c8">Sign into the <strong>same</strong> Google account used for the backup in phase 1
-                <span class="desc">This is what triggers Android to start pulling contacts, apps, and settings back down automatically.</span>
-              </label>
-            </li>
-          </ul>
-
-          <div class="callout teal">
-            <span class="icon">ⓘ</span>
-            <p>Enrollment has to happen <strong>during</strong> the out-of-box setup flow, before the phone
-            reaches its home screen — that's the only window Android allows Device Owner provisioning.
-            If the phone already reached the home screen, it needs another factory reset to get a second try.</p>
+              <span>
+                <h4>Sign into the same Google account from phase 1</h4>
+                <p>This is what starts contacts, settings, and — governed by the tag's own policy, see
+                below — allowed apps coming back.</p>
+              </span>
+            </label>
           </div>
         </div>
+
+        <div class="card" style="margin-top:22px;">
+          <h3>ⓘ Enrollment only works during setup</h3>
+          <p>Device Owner provisioning has to happen <strong>before</strong> the phone reaches its home
+          screen — that's the only window Android allows it. If the phone already reached the home
+          screen, it needs another factory reset for a second try.</p>
+        </div>
       </section>
+      <hr class="hairline">
 
       <!-- ================= PHASE 3 ================= -->
-      <section class="phase" id="phase-3">
-        <div class="phase-head">
-          <span class="phase-num mono">3</span>
-          <h2>Restore what belongs on it</h2>
-        </div>
-        <p class="phase-sub">Most of this happens by itself the moment the account signs in. A few things need a manual step.</p>
+      <section class="tight" id="phase-3">
+        <h2 class="phase-title">3 · Restore what belongs on it</h2>
+        <p class="phase-sub">Some of this happens by itself. Some needs a manual step — and once the tag is enrolled, "automatic" means something narrower than it used to.</p>
 
-        <div class="phase-body">
-          <ul class="checklist" data-group="g5">
-            <li>
+        <div class="steps">
+          <div class="step">
+            <label>
+              <input type="checkbox" id="c8">
+              <span>
+                <h4>Let the phone sit on Wi-Fi, screen on, for a few minutes</h4>
+                <p>Contacts, call history, SMS, and Wi-Fi passwords restore in the background. Apps
+                come back too — but only the ones the tag's policy allows at this phone's rung, pushed
+                by Headwind itself. See the callout below for why that's different from a normal phone.</p>
+              </span>
+            </label>
+          </div>
+          <div class="step">
+            <label>
               <input type="checkbox" id="c9">
-              <label for="c9">Let the phone sit on Wi-Fi, screen on, for a few minutes after setup finishes
-                <span class="desc">Contacts, call history, SMS, Wi-Fi passwords, and the apps allowed at this phone's rung install themselves in the background.</span>
-              </label>
-            </li>
-            <li>
+              <span>
+                <h4>Open WhatsApp and choose Restore</h4>
+                <p>This is a manual prompt inside WhatsApp itself when it detects the Google Drive
+                backup — it won't happen on its own like the rest of this list.</p>
+              </span>
+            </label>
+          </div>
+          <div class="step">
+            <label>
               <input type="checkbox" id="c10">
-              <label for="c10">Open WhatsApp and choose <strong>Restore</strong> when it offers the Google Drive backup
-                <span class="desc">This is a manual prompt inside WhatsApp itself — it won't happen on its own like the rest of the list.</span>
-              </label>
-            </li>
-            <li>
-              <input type="checkbox" id="c11">
-              <label for="c11">Plug the phone back into the computer and copy the photo/video folders back over
-                <span class="desc">Only needed if Google Photos backup wasn't fully caught up before the reset — otherwise those come back with everything else.</span>
-              </label>
-            </li>
-            <li>
-              <input type="checkbox" id="c12">
-              <label for="c12">Check the phone against the paper list from phase 1, if you made one, and install anything missing from the Play Store
-                <span class="desc">Paid apps restore free of charge under the same account — the purchase is remembered, not the download.</span>
-              </label>
-            </li>
-          </ul>
+              <span>
+                <h4>Copy photos back from the computer, if needed</h4>
+                <p>Only necessary if Google Photos backup wasn't fully caught up before the reset —
+                otherwise those come back with everything else.</p>
+              </span>
+            </label>
+          </div>
+        </div>
+
+        <div class="card raised" style="margin-top:24px;" id="headwind-reinstall">
+          <h3>⚠ Does it reinstall apps even with Headwind on? Not quite the way a normal phone does.</h3>
+          <p>
+            On a normal phone, signing into your Google account after a reset silently reinstalls
+            everything you had before. Once Headwind is enrolled as <strong>Device Owner</strong>,
+            that stops being the whole story, in two ways:
+          </p>
+          <p>
+            <strong>1. QR/managed provisioning skips the usual restore screen.</strong> The setup flow
+            used to make a phone a Device Owner is a deliberately stripped-down path — it does not run
+            the normal "copy apps &amp; data from backup" step consumer setup shows. Signing in
+            afterward still syncs contacts and settings, but the blanket "reinstall my whole app list"
+            behavior isn't part of that path the way it is on an unmanaged phone.
+          </p>
+          <p>
+            <strong>2. Even where an app does get pushed, it's Headwind deciding, not Google.</strong>
+            Only apps <code>allowed</code> in this phone's current rung (see <code>app_rules</code> in
+            the tag's policy) get installed — regardless of what was on the phone before the reset, and
+            regardless of what's sitting in the Google backup. An app that isn't on the allowlist for
+            this rung will <strong>not</strong> quietly come back just because it used to be installed.
+            That's not a gap — it's the tag doing exactly what it's for.
+          </p>
+          <p>
+            Exact behavior can vary a little by Android OEM, which is exactly why
+            <code>SETUP-PHONES.md</code> has you verify this on one throwaway phone before enrolling
+            anybody for real.
+          </p>
         </div>
       </section>
+      <hr class="hairline">
 
       <!-- ================= MATRIX ================= -->
-      <section class="phase" id="matrix" style="border-bottom:none;">
-        <div class="phase-head">
-          <span class="phase-num mono" aria-hidden="true" style="background:var(--gold);">?</span>
-          <h2>What actually comes back, and what doesn't</h2>
+      <section class="tight" id="matrix">
+        <h2 class="phase-title">What actually comes back, and what doesn't</h2>
+        <p class="phase-sub">The honest version, assuming phase 1 was done in full and the tag is already enrolled.</p>
+
+        <div class="table-wrap" style="margin-top:18px;">
+          <table class="matrix">
+            <caption>Rows below reflect a Headwind-enrolled phone, not a plain consumer reset.</caption>
+            <thead>
+              <tr><th>On the phone</th><th>Comes back how</th><th>Restores?</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Contacts, call history, SMS</td><td>Automatic, on Google sign-in</td><td><span class="pill yes">yes</span></td></tr>
+              <tr><td>Wi-Fi passwords, device &amp; display settings</td><td>Automatic, on Google sign-in</td><td><span class="pill yes">yes</span></td></tr>
+              <tr><td>Apps <em>allowed</em> at this phone's current rung</td><td>Automatic — Headwind pushes them per policy</td><td><span class="pill yes">yes</span></td></tr>
+              <tr><td>Apps that were installed before but <em>aren't</em> on this rung's allowlist</td><td>Nothing — deliberately not reinstalled by the tag's policy</td><td><span class="pill no">no, by design</span></td></tr>
+              <tr><td>Paid / purchased apps, once allowed again</td><td>Automatic, free re-download — the purchase is tied to the account</td><td><span class="pill yes">yes</span></td></tr>
+              <tr><td>Data <em>inside</em> most ordinary apps (notes, game progress, settings)</td><td>Automatic, if the app opted into Android's backup system</td><td><span class="pill yes">usually</span></td></tr>
+              <tr><td>Photos &amp; videos synced to Google Photos before the reset</td><td>Automatic, downloads back down over Wi-Fi</td><td><span class="pill yes">yes</span></td></tr>
+              <tr><td>Photos &amp; videos <em>not yet</em> synced</td><td>Only from the manual computer/USB copy in phase 1</td><td><span class="pill manual">manual only</span></td></tr>
+              <tr><td>WhatsApp chat history</td><td>Manual — restore prompt inside WhatsApp itself</td><td><span class="pill manual">manual only</span></td></tr>
+              <tr><td>Banking apps, and anything needing re-login/2FA</td><td>App reinstalls (if allowed); sign in again inside it</td><td><span class="pill manual">re-login needed</span></td></tr>
+              <tr><td>Data from apps that opt out of backup (banking, some games)</td><td>Nothing — that app's local data is gone</td><td><span class="pill no">no</span></td></tr>
+              <tr><td>Signal messages</td><td>Only with a Signal-specific local backup made beforehand — not covered by this guide</td><td><span class="pill no">no</span></td></tr>
+            </tbody>
+          </table>
         </div>
-        <p class="phase-sub">The honest version — Android's automatic backup is good, not complete.</p>
 
-        <div class="phase-body" style="max-width:none;">
-          <div class="table-wrap">
-            <table class="matrix">
-              <caption>Assuming phase 1 was done in full and the same Google account is used both sides.</caption>
-              <thead>
-                <tr><th>On the phone</th><th>Comes back how</th><th>Restores?</th></tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td>Contacts, call history, SMS</td>
-                  <td>Automatic, on Google sign-in</td>
-                  <td><span class="pill yes">yes</span></td>
-                </tr>
-                <tr>
-                  <td>Wi-Fi passwords, device &amp; display settings</td>
-                  <td>Automatic, on Google sign-in</td>
-                  <td><span class="pill yes">yes</span></td>
-                </tr>
-                <tr>
-                  <td>The apps that were installed</td>
-                  <td>Automatic — Android reinstalls the list from the backup</td>
-                  <td><span class="pill yes">yes</span></td>
-                </tr>
-                <tr>
-                  <td>Paid / purchased apps</td>
-                  <td>Automatic, free re-download — the purchase is tied to the account</td>
-                  <td><span class="pill yes">yes</span></td>
-                </tr>
-                <tr>
-                  <td>Data <em>inside</em> most ordinary apps (notes, game progress, settings)</td>
-                  <td>Automatic, if the app opted into Android's backup system</td>
-                  <td><span class="pill yes">usually</span></td>
-                </tr>
-                <tr>
-                  <td>Photos &amp; videos synced to Google Photos before the reset</td>
-                  <td>Automatic, downloads back down over Wi-Fi</td>
-                  <td><span class="pill yes">yes</span></td>
-                </tr>
-                <tr>
-                  <td>Photos &amp; videos <em>not yet</em> synced</td>
-                  <td>Only from the manual computer/USB copy in phase 1</td>
-                  <td><span class="pill manual">manual only</span></td>
-                </tr>
-                <tr>
-                  <td>WhatsApp chat history</td>
-                  <td>Manual — restore prompt inside WhatsApp itself</td>
-                  <td><span class="pill manual">manual only</span></td>
-                </tr>
-                <tr>
-                  <td>Banking apps, and anything requiring re-login/2FA</td>
-                  <td>App reinstalls; sign in again inside it</td>
-                  <td><span class="pill manual">re-login needed</span></td>
-                </tr>
-                <tr>
-                  <td>Data from apps that opt out of backup (common for banking, some games)</td>
-                  <td>Nothing — that app's own local data is gone</td>
-                  <td><span class="pill no">no</span></td>
-                </tr>
-                <tr>
-                  <td>Signal messages</td>
-                  <td>Only if a Signal-specific local backup was made beforehand — not covered by this guide's steps</td>
-                  <td><span class="pill no">no</span></td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-
-          <div class="callout gold" style="margin-top:22px;">
-            <span class="icon">⚠</span>
-            <p><strong>If an app matters and isn't in the rows above</strong> — check that app's own
-            Settings for an export or backup option before the reset. Android's system backup only
-            covers apps that built support for it; it can't be forced from outside.</p>
-          </div>
+        <div class="card" style="margin-top:20px;">
+          <h3>If an app matters and isn't in these rows</h3>
+          <p>Check that app's own Settings for an export or backup option before the reset — Android's
+          system backup only covers apps that built support for it, and it can't be forced from outside.</p>
         </div>
       </section>
+      <hr class="hairline">
 
-      <footer class="done">
-        Full enrollment detail — the Play Protect check, the QR flow, and the Device Owner steps — lives
-        in <a href="https://github.com/daniel3752/phonetagging/blob/main/SETUP-PHONES.md">SETUP-PHONES.md</a>.
-        This page is the plain-language version for whoever's holding the phone.
-      </footer>
+      <!-- ================= FAQ / QUICK ANSWERS ================= -->
+      <section class="tight" id="faq">
+        <h2 class="phase-title">Quick answers</h2>
+        <details class="faq" open>
+          <summary>Can I check a phone's apps before resetting it?</summary>
+          <div class="body">
+            <p>Yes — see the <a href="#check-before-reset">"how do I check what's on the phone" box</a>
+            in phase 1. Short version: <code>adb shell pm list packages -3</code> lists everything
+            installed; <code>adb shell dumpsys backup</code> shows which of those apps actually
+            participate in Android's backup — which is usually the more useful question, since not
+            every installed app opts in.</p>
+          </div>
+        </details>
+        <details class="faq">
+          <summary>Will it reinstall apps even with Headwind on?</summary>
+          <div class="body">
+            <p>Only the ones the tag's current policy allows for that phone — see the
+            <a href="#headwind-reinstall">callout in phase 3</a>. Enrollment changes what "automatic
+            restore" means: it's no longer "whatever was there before," it's "whatever this rung
+            allows," pushed by Headwind rather than by Google's own restore flow.</p>
+          </div>
+        </details>
+      </section>
     </main>
   </div>
 </div>
 
+<footer>
+  <div class="wrap">
+    <span>Full enrollment detail — the Play Protect check, the QR flow, and the Device Owner steps —
+    lives in <a href="https://github.com/daniel3752/phonetagging/blob/main/SETUP-PHONES.md">SETUP-PHONES.md</a>.</span>
+  </div>
+  <div class="wrap">
+    <span>&copy; 2026 Shmira</span>
+    <span><a href="https://getshmira.com/help">Help</a> &middot; <a href="https://getshmira.com/">getshmira.com</a></span>
+  </div>
+</footer>
+
 <script>
 (function () {
   try {
-    var boxes = document.querySelectorAll('.checklist input[type="checkbox"]');
+    var boxes = document.querySelectorAll('.steps input[type="checkbox"]');
     var saved = {};
-    try { saved = JSON.parse(localStorage.getItem('shmira-setup-checks') || '{}'); } catch (e) { saved = {}; }
-
+    try { saved = JSON.parse(localStorage.getItem('shmira-tag-setup-checks') || '{}'); } catch (e) { saved = {}; }
     function paint(box) {
-      var li = box.closest('li');
-      if (li) li.classList.toggle('checked', box.checked);
+      var h4 = box.closest('.step').querySelector('h4');
+      if (h4) h4.classList.toggle('checked', box.checked);
     }
-
     boxes.forEach(function (box) {
-      if (saved[box.id]) { box.checked = true; }
+      if (saved[box.id]) box.checked = true;
       paint(box);
       box.addEventListener('change', function () {
         paint(box);
-        try {
-          saved[box.id] = box.checked;
-          localStorage.setItem('shmira-setup-checks', JSON.stringify(saved));
-        } catch (e) {}
+        try { saved[box.id] = box.checked; localStorage.setItem('shmira-tag-setup-checks', JSON.stringify(saved)); } catch (e) {}
       });
     });
   } catch (e) {}
@@ -765,6 +530,5 @@
   } catch (e) {}
 })();
 </script>
-
 </body>
 </html>
