@@ -17,9 +17,14 @@ Standalone — not connected to Shmira.
 3. The block page offers **"Check this site."** That calls the worker, which fetches the page and
    asks **Gemini** whether it's appropriate.
    - **Clean** → the full URL is added to the Gateway allowlist automatically; the user reloads and
-     it works (~2–5s). Decided once per URL, cached forever, applies to every phone.
+     it works (~2–5s). Decided once per URL, cached forever, applies to every phone. If the URL
+     redirected, the destination is allowlisted too, so the reload doesn't land back on the wall.
    - **Not clean** → stays blocked. No notifications, no queue. If someone needs it, the operator
      allows it by hand.
+   - **Nothing readable to judge** (an image, a video, a PDF, an empty body) → stays blocked, and is
+     *not* cached. There is no page text, so a verdict would rest on the URL string alone;
+     auto-allowing on that basis is the one mistake this filter must not make. The operator route
+     is the only way through.
 4. **Turning it off** for a phone = unenroll it in ManageEngine. No code involved.
 
 Single-operator model: **you** are the only administrator. No per-phone accounts, guardians, SMS, or
@@ -36,7 +41,8 @@ decryption + the cert on each phone are required.
 | `src/gemini.js` | Gemini page classifier (`classifyUrl`) |
 | `src/gateway.js` | Cloudflare Gateway API client — writes the allowlist |
 | `src/block-page.js` | Self-contained HTML block page |
-| `schema.sql` | D1 `url_verdicts` cache table |
+| `src/crypto.js` | SHA-256 cache keys + constant-time operator-key compare |
+| `schema.sql` | D1 `url_verdicts` cache table and the `/api/verdict` rate-limit table |
 | `scripts/setup-gateway.sh` | One-time Gateway config (TLS decryption + default-deny policy) |
 
 Deployed worker: `https://phone-url-filter.daniel08-madar.workers.dev`
@@ -62,6 +68,21 @@ Non-secret vars live in `wrangler.toml` (`CF_ACCOUNT_ID`, `CF_GATEWAY_LIST_ID`).
 - `OPERATOR_KEY` — bearer token gating `/api/admin/allow`
 
 Deploy: `npm run deploy` · Apply schema: `npm run db:init`
+
+`db:init` is idempotent (`CREATE TABLE IF NOT EXISTS`) — re-run it after pulling, so the
+`verdict_rate_limit` table exists. The worker still runs without it, just unthrottled.
+
+## Notes on the two open endpoints
+
+`/blocked` and `/api/verdict` have to be reachable without authentication — a phone hits them before
+anything has approved anything. Two consequences are handled in the worker rather than in Gateway:
+
+- **`/api/verdict` fetches a URL you hand it.** URLs are rejected unless they are public `http(s)`:
+  loopback, RFC1918, link-local (including `169.254.169.254`), unique-local IPv6, and `.local` /
+  `.internal` names are all refused, so the endpoint can't be used as a proxy into anything private.
+- **Each miss costs a Gemini call and a Gateway list write.** Checks are capped per source IP
+  (60 per 10 minutes) via the `verdict_rate_limit` table. Cached verdicts are counted too, since a
+  cached *clean* answer re-asserts the Gateway allowlist entry. The limiter fails open.
 
 ## Remaining setup (per phone, via ManageEngine)
 

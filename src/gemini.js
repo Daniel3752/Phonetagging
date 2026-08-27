@@ -15,6 +15,26 @@ const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models
 const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
 const RETRY_DELAYS_MS = [800, 2000];
 
+// Gemini refusing to process a page is not an inconclusive result here — for a content filter it is
+// the strongest available signal that the page is explicit. Raised as its own error type so the
+// caller can record a real 'blocked' verdict instead of the retryable "couldn't check" it would
+// otherwise show for exactly the worst sites.
+export class SafetyBlockedError extends Error {
+  constructor(detail) {
+    super(`Gemini refused to classify the page: ${detail}`);
+    this.name = 'SafetyBlockedError';
+  }
+}
+
+// finishReason values that mean the model stopped because of content, not because it was done.
+const SAFETY_FINISH_REASONS = new Set([
+  'SAFETY',
+  'PROHIBITED_CONTENT',
+  'BLOCKLIST',
+  'SPII',
+  'IMAGE_SAFETY',
+]);
+
 const MAX_REASON_LENGTH = 160;
 function trimReason(reason) {
   if (!reason) return null;
@@ -83,9 +103,26 @@ export async function classifyUrl(env, { url, title, text }) {
     },
   });
 
-  const responseText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+  // The prompt itself was refused (the page text tripped Gemini's own filters).
+  const blockReason = data.promptFeedback?.blockReason;
+  if (blockReason) throw new SafetyBlockedError(`prompt blocked (${blockReason})`);
+
+  const candidate = data.candidates?.[0];
+  const finishReason = candidate?.finishReason;
+  if (finishReason && SAFETY_FINISH_REASONS.has(finishReason)) {
+    throw new SafetyBlockedError(`generation stopped (${finishReason})`);
+  }
+
+  const responseText = candidate?.content?.parts?.[0]?.text;
   if (!responseText) throw new Error('Empty Gemini response');
 
-  const parsed = JSON.parse(responseText);
+  let parsed;
+  try {
+    parsed = JSON.parse(responseText);
+  } catch {
+    // Structured output should make this impossible, but a malformed body must never read as
+    // "safe" by accident — fail closed, and let the caller retry rather than caching it.
+    throw new Error('Unparseable Gemini response');
+  }
   return { safe: parsed.safe === true, reason: trimReason(parsed.reason) };
 }

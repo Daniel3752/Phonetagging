@@ -37,7 +37,6 @@ export function renderBlockPage() {
   .ok h3 { color: #a8dcab; }
   .no h3 { color: #f0c96b; }
   .err h3 { color: #e08a8a; }
-  .msg { margin-top: 12px; min-height: 1.2em; color: #e08a8a; font-size: .9rem; }
 </style>
 </head>
 <body>
@@ -49,7 +48,6 @@ export function renderBlockPage() {
     <div class="card" id="start">
       <p>New sites are checked automatically. Most ordinary sites are approved within a few seconds. Tap below to check this one.</p>
       <button id="btn" type="button">Check this site</button>
-      <div class="msg" id="msg"></div>
     </div>
 
     <div class="card raised ok" id="clean">
@@ -59,50 +57,79 @@ export function renderBlockPage() {
 
     <div class="card raised no" id="blocked">
       <h3>Not allowed</h3>
-      <p>This site isn't on the approved list. If you need it for a legitimate reason, ask the person who set up this phone — they can allow it.</p>
+      <p id="blockedreason"></p>
+      <p>If you need it for a legitimate reason, ask the person who set up this phone &mdash; they can allow it.</p>
     </div>
 
     <div class="card raised err" id="error">
       <h3>Couldn't check this site</h3>
       <p id="errmsg"></p>
+      <button id="retry" type="button">Try again</button>
     </div>
   </div>
 
 <script>
 (function () {
+  function id(x) { return document.getElementById(x); }
+
   var params = new URLSearchParams(location.search);
   var site = params.get('cf_site_uri') || '';
-  document.getElementById('site').textContent = site || '(unknown site)';
+  id('site').textContent = site || '(unknown site)';
 
   var cards = { start: id('start'), clean: id('clean'), blocked: id('blocked'), error: id('error') };
-  var btn = id('btn'), msg = id('msg'), errmsg = id('errmsg');
-  function id(x) { return document.getElementById(x); }
+  var btn = id('btn'), retry = id('retry'), errmsg = id('errmsg');
+  var blockedreason = id('blockedreason');
+  var DEFAULT_BLOCKED = "This site isn't on the approved list.";
+
   function show(name) { for (var k in cards) cards[k].style.display = (k === name ? 'block' : 'none'); }
 
-  btn.addEventListener('click', async function () {
+  function fail(message) {
+    errmsg.textContent = message;
+    // The retry button lives inside the error card. It used to live in the start card, which show()
+    // hides — so a failed check left no way to try again without reloading the block page.
+    show('error');
+    btn.disabled = false;
+    btn.textContent = 'Check this site';
+  }
+
+  async function check() {
     if (!site) {
-      errmsg.textContent = "This page is missing the site address — ask whoever set up filtering to turn on 'Send policy context' for the block page.";
-      show('error'); return;
+      fail("This page is missing the site address — ask whoever set up filtering to turn on 'Send policy context' for the block page.");
+      return;
     }
-    btn.disabled = true; btn.textContent = 'Checking…'; msg.textContent = '';
+    show('start');
+    btn.disabled = true; btn.textContent = 'Checking…';
     try {
       var res = await fetch('/api/verdict', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url: site }),
       });
-      var data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Something went wrong.');
-      if (data.verdict === 'clean') { show('clean'); }
-      else if (data.verdict === 'blocked') { show('blocked'); }
-      else {
-        errmsg.textContent = data.reason || "Couldn't check this site right now. Try again in a moment.";
-        show('error'); btn.disabled = false; btn.textContent = 'Check this site';
+      // A non-JSON body means something other than the worker answered (captive portal, proxy
+      // error). Don't let JSON.parse throw an unhelpful SyntaxError at the user.
+      var text = await res.text();
+      var data;
+      try { data = JSON.parse(text); } catch (_) { data = null; }
+      if (!data) {
+        fail("Couldn't reach the filtering server. Check your connection and try again.");
+        return;
       }
+      if (data.verdict === 'clean') { show('clean'); return; }
+      if (data.verdict === 'blocked') {
+        // Carries the useful case too: "not a readable web page", which tells the user why tapping
+        // check again will never help and that the operator is the only route.
+        blockedreason.textContent = data.reason || DEFAULT_BLOCKED;
+        show('blocked');
+        return;
+      }
+      fail(data.reason || data.error || "Couldn't check this site right now. Try again in a moment.");
     } catch (e) {
-      errmsg.textContent = e.message || "Couldn't reach the filtering server. Check your connection.";
-      show('error'); btn.disabled = false; btn.textContent = 'Check this site';
+      fail((e && e.message) || "Couldn't reach the filtering server. Check your connection.");
     }
-  });
+  }
+
+  btn.addEventListener('click', check);
+  retry.addEventListener('click', check);
 })();
 </script>
 </body>
