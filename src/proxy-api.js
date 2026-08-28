@@ -31,11 +31,11 @@ function json(data, status = 200) {
 }
 
 function requireProxyKey(request, env) {
-  const expected = env.PROXY_KEY || env.OPERATOR_KEY;
+  const expected = String(env.PROXY_KEY || env.OPERATOR_KEY || '').trim();
   if (!expected) return json({ error: 'proxy_not_configured' }, 503);
   const m = /^Bearer\s+(.+)$/i.exec((request.headers.get('Authorization') || '').trim());
   const provided = m ? m[1] : '';
-  if (!provided || !timingSafeEqual(provided, expected)) return json({ error: 'unauthorized' }, 401);
+  if (!provided || !timingSafeEqual(provided.trim(), expected)) return json({ error: 'unauthorized' }, 401);
   return null;
 }
 

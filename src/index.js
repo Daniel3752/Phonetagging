@@ -77,7 +77,11 @@ function requireOperator(request, env) {
   if (!env.OPERATOR_KEY) return json({ error: 'operator_not_configured' }, 503);
   const m = /^Bearer\s+(.+)$/i.exec((request.headers.get('Authorization') || '').trim());
   const provided = m ? m[1] : '';
-  if (!provided || !timingSafeEqual(provided, env.OPERATOR_KEY)) {
+  // Trim both sides. A secret set from a Windows clipboard or `echo` routinely picks up a trailing
+  // \r or newline, and timingSafeEqual rejects on length before it compares anything — producing an
+  // unauthorized that looks identical to a wrong key, with no way to inspect the stored value.
+  // Surrounding whitespace carries no entropy, so accepting it costs nothing.
+  if (!provided || !timingSafeEqual(provided.trim(), String(env.OPERATOR_KEY).trim())) {
     return json({ error: 'unauthorized' }, 401);
   }
   return null;
