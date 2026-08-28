@@ -1,0 +1,12 @@
+-- Each phone gets its own proxy login, and now its own generated password stored beside it.
+--
+-- Stored in plain text on purpose. This credential is an IDENTITY, not a key: anyone holding it
+-- gets browsing filtered at that phone's own rung and nothing more, and the person using the phone
+-- necessarily learns it — Chrome prompts them for it. What it must support instead is being read
+-- back months later, when a phone is reset or Chrome drops it and the operator has to type it in
+-- again. A hash could not do that.
+--
+-- The real protections are elsewhere: one unique generated password per phone (so a leak is
+-- confined to that device), /etc/squid/passwd holding only bcrypt hashes, and the Headwind
+-- restrictions that stop the proxy being turned off at all.
+ALTER TABLE devices ADD COLUMN proxy_password TEXT;

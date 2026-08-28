@@ -11,7 +11,7 @@ import { runScheduler } from './scheduler.js';
 import { parseTimeOfDay } from './policy.js';
 import { normalizeDeviceLevel, normalizeSiteLevel, LEVELS, NEVER_LEVEL } from './levels.js';
 import { searchCacheKey } from './search.js';
-import { sha256Hex } from './crypto.js';
+import { sha256Hex , generateProxyPassword, proxyUserFromLabel } from './crypto.js';
 
 function json(data, status = 200) {
   return Response.json(data, { status, headers: { 'Cache-Control': 'no-store' } });
@@ -111,22 +111,34 @@ export async function handleAdmin(request, env, path) {
 
       // The proxy login is how the filter tells one phone from another. It must match an account in
       // /etc/squid/passwd; without it the device falls back to the strictest rung on every request.
-      const proxyUser = String(body.proxy_user || '').trim() || null;
-      if (proxyUser && !/^[a-zA-Z0-9._-]{2,64}$/.test(proxyUser)) {
+      // Left blank, it is derived from the label so no phone is accidentally saved without identity.
+      const proxyUser = String(body.proxy_user || '').trim() || proxyUserFromLabel(label);
+      if (!/^[a-zA-Z0-9._-]{2,64}$/.test(proxyUser)) {
         return json({ error: 'proxy_user must be 2-64 chars: letters, digits, dot, dash, underscore' }, 400);
       }
 
       const id = body.id || newId('dev');
+
+      // Generate a password per phone rather than letting the operator pick one — a chosen password
+      // gets reused across phones, and reuse is the only way one leaked login becomes a fleet-wide
+      // one. Kept if the device already has one, so re-saving a phone to change its level does not
+      // silently invalidate the credential already typed into its Chrome.
+      const existing = await env.DB.prepare('SELECT proxy_password FROM devices WHERE id = ?')
+        .bind(id).first();
+      const proxyPassword = String(body.proxy_password || '').trim()
+        || existing?.proxy_password
+        || generateProxyPassword();
       try {
         await env.DB.prepare(`
-          INSERT INTO devices (id, headwind_device_id, label, policy_id, timezone, enrolled_at, level, proxy_user)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          INSERT INTO devices (id, headwind_device_id, label, policy_id, timezone, enrolled_at, level, proxy_user, proxy_password)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(id) DO UPDATE SET
             headwind_device_id = excluded.headwind_device_id, label = excluded.label,
             policy_id = excluded.policy_id, timezone = excluded.timezone,
-            level = excluded.level, proxy_user = excluded.proxy_user
+            level = excluded.level, proxy_user = excluded.proxy_user,
+            proxy_password = excluded.proxy_password
         `).bind(id, body.headwind_device_id || null, label, body.policy_id,
-                body.timezone || 'UTC', Date.now(), level, proxyUser).run();
+                body.timezone || 'UTC', Date.now(), level, proxyUser, proxyPassword).run();
       } catch (err) {
         // proxy_user is uniquely indexed: two phones sharing a login would silently share a rung,
         // and whichever was loosest would win for both.
@@ -137,7 +149,14 @@ export async function handleAdmin(request, env, path) {
       }
 
       await audit(env, 'operator', 'device_saved', id, `${label} -> level ${level}, policy ${body.policy_id}`);
-      return json({ ok: true, id, level });
+      // The htpasswd line is returned ready to paste: the worker cannot reach /etc/squid/passwd, so
+      // creating the squid account stays a manual step and this is the part people get wrong.
+      return json({
+        ok: true, id, level,
+        proxy_user: proxyUser,
+        proxy_password: proxyPassword,
+        htpasswd: `htpasswd -B -b /etc/squid/passwd ${proxyUser} '${proxyPassword}'`,
+      });
     }
 
     // --- schedules ------------------------------------------------------------------------------

@@ -102,10 +102,13 @@ export function renderAdminPage() {
           <div><label for="dLevel">Web strictness</label><select id="dLevel"></select></div>
           <div><label for="dProxy">Proxy login</label><input id="dProxy" placeholder="dovid-phone"></div>
         </div>
-        <p class="empty" style="margin:0 0 12px">The proxy login must match an account in
-          <code>/etc/squid/passwd</code>. Without one this phone falls back to the strictest rung.</p>
+        <p class="empty" style="margin:0 0 12px">Leave the login blank to derive it from the label. A
+          password is generated automatically and kept on re-save. After saving, run the
+          <code>htpasswd</code> line shown below on the proxy — the phone has no web until that
+          account exists, and a phone with no login falls back to the strictest rung.</p>
         <button id="saveDevice" type="button">Save phone</button>
         <div class="msg" id="deviceMsg"></div>
+        <div id="deviceCreds"></div>
       </div>
     </section>
 
@@ -281,9 +284,13 @@ export function renderAdminPage() {
   }
 
   function render() {
-    id('deviceTable').innerHTML = table(['Phone', 'Web level', 'Proxy login', 'Baseline', 'Now running', 'Zone'], state.devices, function (d) {
+    id('deviceTable').innerHTML = table(['Phone', 'Web level', 'Proxy login', 'Password', 'Baseline', 'Now running', 'Zone'], state.devices, function (d) {
       return '<tr><td>' + esc(d.label) + '</td><td>' + esc(levelName(d.level)) + '</td><td>' +
         (d.proxy_user ? esc(d.proxy_user) : '<span class="empty">none — strictest</span>') +
+        '</td><td>' +
+        // Shown, not hidden. Chrome asks whoever holds the phone for this, so it is not a secret
+        // that can be kept from them — and the operator needs to read it back when Chrome forgets.
+        (d.proxy_password ? '<code>' + esc(d.proxy_password) + '</code>' : '<span class="empty">—</span>') +
         '</td><td>' + esc(policyName(d.policy_id)) + '</td><td>' +
         (d.last_applied_policy_id ? esc(policyName(d.last_applied_policy_id)) : '<span class="empty">not applied</span>') +
         '</td><td>' + esc(d.timezone) + '</td></tr>';
@@ -423,6 +430,20 @@ export function renderAdminPage() {
         timezone: id('dTz').value.trim() || 'UTC',
         level: Number(id('dLevel').value),
         proxy_user: id('dProxy').value.trim() || null,
+      }).then(function (r) {
+        // The one step the worker cannot do itself. Put it in front of the operator at the moment
+        // they need it, rather than in a document they will be reading on a different screen.
+        if (r && r.htpasswd) {
+          id('deviceCreds').innerHTML =
+            '<p style="margin:0 0 8px"><strong>' + esc(r.proxy_user) + '</strong> &nbsp; ' +
+            '<code>' + esc(r.proxy_password) + '</code></p>' +
+            '<p class="empty" style="margin:0 0 6px">Run this on the proxy, then set the phone:</p>' +
+            '<pre><code>' + esc(r.htpasswd) + '</code></pre>' +
+            '<pre><code>adb shell settings put global http_proxy ' +
+            esc(location.hostname === 'localhost' ? 'mdm.getshmira.com:3128' : 'mdm.getshmira.com:3128') +
+            '</code></pre>';
+        }
+        return r;
       });
     }, 'Phone saved.');
   });

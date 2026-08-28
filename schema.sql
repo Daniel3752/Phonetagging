@@ -88,7 +88,13 @@ CREATE TABLE IF NOT EXISTS devices (
   dns_hostname TEXT,
   -- The proxy username Squid authenticates, mapped to this device. Identity on the wire for free —
   -- the DNS architecture needed a Cloudflare location per phone to achieve the same thing.
-  proxy_user TEXT
+  proxy_user TEXT,
+  -- Its generated password, stored in plain text on purpose. This credential is an identity, not a
+  -- key: it buys filtered browsing at this phone's own rung and nothing else, and whoever holds the
+  -- phone necessarily learns it because Chrome prompts them for it. What it has to support is being
+  -- read back later — after a reset, or when Chrome forgets it — which a hash could not do. Squid's
+  -- own /etc/squid/passwd stores the bcrypt hash; this is the operator's copy.
+  proxy_password TEXT
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_devices_proxy_user ON devices (proxy_user);
