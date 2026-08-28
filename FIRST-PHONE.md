@@ -1,7 +1,12 @@
 # First phone — the runbook
 
-> Stage 0 was verified complete on 27 Aug 2026: squid 5.9 active on 3128, CA generated, key set.
-> What remains per phone is a proxy login (0.3), the end-to-end proof (0.5), and Stage 2.
+> **Stage 0 is done and proven** (27 Aug 2026). Verified end-to-end through squid on the server:
+> allowed sites `200`, blocked sites and blocked *searches* `302` to the block page. Blocklists
+> synced (35,825 explicit domains), `PROXY_KEY` rotated, D1 migration ledger reconciled.
+>
+> **One thing is unproven and gates everything:** Android's `settings put global http_proxy` takes
+> `host:port` only — there is no field for the proxy credentials `squid.conf` requires. Until a real
+> phone is seen authenticating, do not factory-reset anyone's device. See "The open question" below.
 
 **This document is authoritative for setting up a phone.** `SETUP-PHONES.md` describes the earlier
 DNS-only architecture and says "there is no certificate to install"; that stopped being true on
@@ -86,8 +91,21 @@ curl -x http://<device-name>:<password>@127.0.0.1:3128 -I https://en.wikipedia.o
 curl -x http://<device-name>:<password>@127.0.0.1:3128 -I https://pornhub.com
 ```
 
-First should succeed, second should be refused. If both fail, the key does not match. If both
-succeed, the external ACL is not being consulted — check `/var/log/squid/cache.log`.
+curl will not trust the interception CA by default, so pass it explicitly:
+
+```bash
+openssl x509 -inform der -in /etc/squid/ssl/filter-ca.der -out /tmp/ca.pem
+curl --cacert /tmp/ca.pem -x http://<name>:<pass>@127.0.0.1:3128 -o /dev/null -w '%{http_code}\n' https://en.wikipedia.org
+```
+
+**A block is `302`, not `403`.** `squid.conf` sets `deny_info` to the worker's `/blocked` page, so a
+refused request redirects there rather than erroring. Reading a 302 as failure is the easy mistake.
+
+Expected across a set: allowed `200`/`301`, blocked `302`. If everything is `302` the key does not
+match; if nothing is, the external ACL is not being consulted — check `/var/log/squid/cache.log`.
+
+Verified on 27 Aug: wikipedia `301`, example.com `200`, pornhub `302`, search "weather" `200`,
+search "swimsuit models" `302`. Per-search rating works.
 
 ---
 
@@ -186,10 +204,16 @@ adb shell settings get global http_proxy   # your server:3128
 
 ## Known sharp edges
 
-- **Do not run `npm run db:migrate` against production.** The ledger records only `0001`–`0004`, but
-  `0005`–`0014` are applied. A migrate run fails on `0006` (bare `ALTER TABLE ADD COLUMN` on columns
-  that exist) and, past that, `0010` would duplicate all 49 keyword rules into an AUTOINCREMENT
-  table. Reconcile the ledger first.
+- **The D1 migration ledger was out of sync and is now fixed** (28 Aug). It recorded only
+  `0001`–`0004` while `0005`–`0014` were applied by hand, so `npm run db:migrate` would have failed
+  on `0006` (bare `ALTER TABLE ADD COLUMN` on existing columns) and, past that, `0010` would have
+  duplicated all 49 keyword rules into an AUTOINCREMENT table. Every migration's effects were
+  verified present before the ledger was reconciled. `db:migrate` is safe again — keep it that way
+  by applying migrations *through* it rather than with `d1 execute --file`.
+- **Blocklist files must be world-readable.** `mktemp` makes them `0600` root-owned and the ACL
+  helper runs as `proxy`; an unreadable list is indistinguishable from a missing one, so the sync
+  reports success while the explicit list silently never fires. `sync-blocklists.sh` now chmods
+  them — verify with `sudo -u proxy head -c 40 /etc/squid/blocklists/level1.json`.
 - **Port 3128 should become 443 before this is real.** Networks routinely block odd ports, and a
   filter that dies on someone else's wifi is a filter that gets removed. 443 on that box currently
   serves the Headwind panel, so this needs a second IP or a split.
@@ -203,3 +227,34 @@ adb shell settings get global http_proxy   # your server:3128
 - **The access log is off by design.** Turn it on to debug, then off.
 - **A factory reset removes everything.** No factory-reset protection without an enterprise Google
   binding. Strong guardrail, not a cage.
+
+---
+
+## The open question — proxy auth on Android
+
+`squid.conf` requires `proxy_auth REQUIRED` and passes `%LOGIN` to the ACL helper as the device's
+identity. That login is the whole basis of per-device levels.
+
+But Android's global proxy setting is `host:port` and nothing else:
+
+```
+adb shell settings put global http_proxy mdm.getshmira.com:3128
+```
+
+There is nowhere to put a username or password. Chrome may prompt for them and remember, which would
+be workable if fragile; anything that cannot show a dialog simply fails. This has never been observed
+on a real phone.
+
+**If it does not work, the fix is per-device ports rather than per-device passwords.** Squid can
+listen on several ports and identify the device by which one the request arrived on:
+
+```
+http_port 3128 ssl-bump ...      # phone A
+http_port 3129 ssl-bump ...      # phone B
+acl phone_a myportname 3128
+```
+
+The port becomes the identity, `http_access deny !authenticated` goes away, and the phone needs only
+what Android can already express. The cost is that it collides with moving to 443 — one port per
+device means one 443 per device, so that route needs an IPv4 per phone (~€1/month each) or one IPv6
+per phone. Fine for tens of devices; a few hundred needs client certificates instead.
