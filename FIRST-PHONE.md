@@ -4,9 +4,9 @@
 > allowed sites `200`, blocked sites and blocked *searches* `302` to the block page. Blocklists
 > synced (35,825 explicit domains), `PROXY_KEY` rotated, D1 migration ledger reconciled.
 >
-> **One thing is unproven and gates everything:** Android's `settings put global http_proxy` takes
-> `host:port` only — there is no field for the proxy credentials `squid.conf` requires. Until a real
-> phone is seen authenticating, do not factory-reset anyone's device. See "The open question" below.
+> **Android proxy auth is proven** (27 Aug, Vortex V23 / Android 12 Go). `http_proxy` accepts only
+> `host:port`, but Chrome prompts for the credentials on first use and pages load once they are
+> entered. The `%LOGIN` identity model stands; per-device ports are not needed.
 
 **This document is authoritative for setting up a phone.** `SETUP-PHONES.md` describes the earlier
 DNS-only architecture and says "there is no certificate to install"; that stopped being true on
@@ -230,31 +230,29 @@ adb shell settings get global http_proxy   # your server:3128
 
 ---
 
-## The open question — proxy auth on Android
+## Proxy auth on Android — resolved
 
 `squid.conf` requires `proxy_auth REQUIRED` and passes `%LOGIN` to the ACL helper as the device's
-identity. That login is the whole basis of per-device levels.
+identity. Android's global proxy setting carries only `host:port`, with no field for credentials,
+which looked like it might sink the whole identity model.
 
-But Android's global proxy setting is `host:port` and nothing else:
+**It works.** Verified 27 Aug on the Vortex (Android 12 Go): Chrome prompts for the proxy username
+and password on first use, and pages load normally once entered.
 
-```
-adb shell settings put global http_proxy mdm.getshmira.com:3128
-```
+Two consequences to plan around:
 
-There is nowhere to put a username or password. Chrome may prompt for them and remember, which would
-be workable if fragile; anything that cannot show a dialog simply fails. This has never been observed
-on a real phone.
+- **Whoever uses the phone learns its proxy password.** They gain little — the credential only buys
+  filtered access at that device's own rung — but it is not a secret you can keep from the user, so
+  do not reuse it anywhere and generate it per phone rather than choosing it.
+- **If the prompt returns after a reboot,** a phone handed to someone who does not know the password
+  has no web until it is entered. Test this before handing a phone over; if it does not persist, the
+  fallback is per-device ports (`acl <name> myportname <port>`), which removes auth entirely at the
+  cost of one port — and therefore one IP — per device.
 
-**If it does not work, the fix is per-device ports rather than per-device passwords.** Squid can
-listen on several ports and identify the device by which one the request arrived on:
+### "Connected, no internet"
 
-```
-http_port 3128 ssl-bump ...      # phone A
-http_port 3129 ssl-bump ...      # phone B
-acl phone_a myportname 3128
-```
-
-The port becomes the identity, `http_access deny !authenticated` goes away, and the phone needs only
-what Android can already express. The cost is that it collides with moving to 443 — one port per
-device means one 443 per device, so that route needs an IPv4 per phone (~€1/month each) or one IPv6
-per phone. Fine for tens of devices; a few hundred needs client certificates instead.
+Expected on this setup, and usually cosmetic. Android decides that by fetching
+`connectivitycheck.gstatic.com/generate_204`, a system probe that does **not** use the HTTP proxy and
+does need working DNS. The proxy resolves on the phone's behalf, so browsing works while the probe
+fails. Confirm by browsing; silence it afterwards with
+`adb shell settings put global captive_portal_mode 0`.

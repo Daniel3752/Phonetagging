@@ -85,7 +85,17 @@ full URL. See `PROXY.md` for the design, what was verified, and the deployment r
 The Cloudflare DNS setup above still works and is still deployed. Keep it until the proxy is proven
 on real phones; it is a working fallback, and the two are not mutually exclusive.
 
-### Verified on the Vortex this session
+### Verified on the Vortex, 27 Aug 2026 — the proxy path, end to end
+
+- **Android proxy auth works.** Chrome prompts for the proxy username/password and pages load once
+  entered. This was the open question that gated the whole architecture; `%LOGIN` as device identity
+  stands, and per-device ports are not needed.
+- **Server side proven through squid**: allowed sites `200`/`301`, blocked sites and blocked *search
+  queries* `302` to the block page (`deny_info`, not a `403`).
+- **"Connected, no internet"** appears because Android's connectivity probe bypasses the proxy and
+  needs DNS, which is broken on that network. Browsing works regardless.
+
+### Verified on the Vortex, 25 Aug session
 
 - **Chrome on Android honours a system HTTP proxy.** `mitm.it` loaded and Wikipedia raised a
   certificate warning — both only possible through the proxy.
