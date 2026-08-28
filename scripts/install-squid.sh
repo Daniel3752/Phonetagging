@@ -76,14 +76,29 @@ install -m 644 "$HERE/squid.conf" /etc/squid/squid.conf
 # Hosts tunnelled without interception, so apps that reject an installed certificate keep working.
 # Starts deliberately small: on a locked-down phone there is very little installed, so the list is
 # short and mostly static. It grows only when you permit another app.
+#
+# The .googleapis.com / .gstatic.com / accounts.google.com / android.clients.google.com /
+# play.google.com / google-ohttp-relay-safebrowsing.fastly-edge.com entries exist for one reason:
+# Google account sign-in and Play Store run as background system processes that cannot answer an
+# interactive proxy auth prompt, so squid.conf's google_system_hosts ACL already exempts them from
+# authentication — but that only decides whether a login is required, not whether ssl_bump
+# intercepts the connection. Several of these (signaler-pa.googleapis.com in particular, Play
+# Services' push-signaling channel) pin their certificate, so a request that no longer needs a
+# login still fails if it gets bumped. Both lists have to name the same hosts, or account setup /
+# Play Store breaks on one endpoint at a time as new subdomains get exercised.
 if [[ ! -f /etc/squid/splice.txt ]]; then
   cat > /etc/squid/splice.txt <<'SPLICE'
 # One hostname per line. A leading dot matches subdomains.
 # Everything listed here is COMPLETELY unfiltered — splice only what you trust.
 .whatsapp.net
 .whatsapp.com
-.googleapis.com
 .gvt1.com
+.googleapis.com
+.gstatic.com
+accounts.google.com
+android.clients.google.com
+play.google.com
+google-ohttp-relay-safebrowsing.fastly-edge.com
 SPLICE
 fi
 
