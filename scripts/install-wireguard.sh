@@ -47,6 +47,21 @@ EXT_IF=$(ip route show default | awk '{print $5; exit}')
 if [[ -z "$EXT_IF" ]]; then echo "Could not determine the external interface." >&2; exit 1; fi
 echo "    external interface: $EXT_IF"
 
+# The box's own public IP: tunnel traffic addressed to the panel (same box, tcp/443) must reach
+# Tomcat directly, not be swallowed by the generic redirect into Squid — and Squid's own local
+# connections to the panel need the OUTPUT redirect, since PREROUTING never sees local packets.
+SERVER_IP=$(ip -4 -o addr show "$EXT_IF" | awk '{print $4}' | cut -d/ -f1 | head -1)
+echo "    server public IP: $SERVER_IP"
+
+# A pre-existing UNSCOPED tcp/443 -> 8443 redirect (the panel's) sits ahead of the wg0 rules and
+# would swallow every tunneled HTTPS request. It must be scoped to the external interface:
+#   iptables -t nat -R PREROUTING <num> -i $EXT_IF -p tcp --dport 443 -j REDIRECT --to-ports 8443
+if iptables -t nat -S PREROUTING | grep -q -- '--dport 443 .*-j REDIRECT --to-ports 8443' && \
+   ! iptables -t nat -S PREROUTING | grep -q -- "-i $EXT_IF .*--dport 443 .*8443"; then
+  echo "    !! WARNING: an unscoped tcp/443->8443 redirect exists in nat PREROUTING."
+  echo "       Scope it to $EXT_IF or it will swallow all tunneled HTTPS (see WIREGUARD.md)."
+fi
+
 echo "==> $WG_DIR/$WG_IF.conf"
 if [[ -f "$WG_DIR/$WG_IF.conf" ]]; then
   echo "    already present, leaving it alone (peers live in it — see new-wg-phone.sh)"
@@ -67,12 +82,20 @@ PrivateKey = $(cat "$WG_DIR/server.key")
 #    fallback is instant instead of waiting on a timeout.
 #  * everything else NATs out, so DNS, push notifications and pinned apps just work (their TLS
 #    still transits squid via the redirect and gets spliced per splice.txt).
+# Panel traffic first: requests from the tunnel to this box's own tcp/443 go straight to Tomcat
+# (the Headwind agent syncing), everything else into the filter. Order matters — the specific
+# rule must be appended before the generic one. The OUTPUT rule covers Squid's own locally
+# generated connections to the panel, which PREROUTING never sees.
+PostUp = iptables -t nat -A PREROUTING -i $WG_IF -p tcp -d $SERVER_IP --dport 443 -j REDIRECT --to-ports 8443
+PostUp = iptables -t nat -A OUTPUT -p tcp -d $SERVER_IP --dport 443 -j REDIRECT --to-ports 8443
 PostUp = iptables -t nat -A PREROUTING -i $WG_IF -p tcp --dport 80 -j REDIRECT --to-port $HTTP_REDIR_PORT
 PostUp = iptables -t nat -A PREROUTING -i $WG_IF -p tcp --dport 443 -j REDIRECT --to-port $TLS_REDIR_PORT
 PostUp = iptables -A FORWARD -i $WG_IF -p udp --dport 443 -j REJECT
 PostUp = iptables -A FORWARD -i $WG_IF -j ACCEPT
 PostUp = iptables -A FORWARD -o $WG_IF -m state --state ESTABLISHED,RELATED -j ACCEPT
 PostUp = iptables -t nat -A POSTROUTING -s $WG_SUBNET -o $EXT_IF -j MASQUERADE
+PostDown = iptables -t nat -D PREROUTING -i $WG_IF -p tcp -d $SERVER_IP --dport 443 -j REDIRECT --to-ports 8443
+PostDown = iptables -t nat -D OUTPUT -p tcp -d $SERVER_IP --dport 443 -j REDIRECT --to-ports 8443
 PostDown = iptables -t nat -D PREROUTING -i $WG_IF -p tcp --dport 80 -j REDIRECT --to-port $HTTP_REDIR_PORT
 PostDown = iptables -t nat -D PREROUTING -i $WG_IF -p tcp --dport 443 -j REDIRECT --to-port $TLS_REDIR_PORT
 PostDown = iptables -D FORWARD -i $WG_IF -p udp --dport 443 -j REJECT
