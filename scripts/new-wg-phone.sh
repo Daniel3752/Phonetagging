@@ -30,8 +30,9 @@ if grep -q "# phone: $NAME\$" "$WG_CONF"; then
   exit 1
 fi
 
-# Next free host address: .1 is the server; peers start at .2.
-LAST=$(grep -oE "AllowedIPs = $SUBNET_PREFIX\.[0-9]+/32" "$WG_CONF" | grep -oE '[0-9]+/32' | cut -d/ -f1 | sort -n | tail -1)
+# Next free host address: .1 is the server; peers start at .2. The `|| true` matters: with zero
+# peers grep finds nothing and exits 1, which under set -e would kill the script silently.
+LAST=$(grep -oE "AllowedIPs = $SUBNET_PREFIX\.[0-9]+/32" "$WG_CONF" | grep -oE '[0-9]+/32' | cut -d/ -f1 | sort -n | tail -1 || true)
 NEXT=$(( ${LAST:-1} + 1 ))
 if (( NEXT > 254 )); then echo "Subnet $SUBNET_PREFIX.0/24 is full." >&2; exit 1; fi
 PHONE_IP="$SUBNET_PREFIX.$NEXT"
