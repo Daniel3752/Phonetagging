@@ -82,6 +82,11 @@ PrivateKey = $(cat "$WG_DIR/server.key")
 #    fallback is instant instead of waiting on a timeout.
 #  * everything else NATs out, so DNS, push notifications and pinned apps just work (their TLS
 #    still transits squid via the redirect and gets spliced per splice.txt).
+# The panel's own public redirect (tcp/443 -> Tomcat 8443, scoped to the external interface so it
+# can never swallow tunnel traffic). It lives here because nothing else on this box persists
+# iptables rules across reboots — wg0 comes up at boot and recreates the whole set.
+PostUp = iptables -t nat -A PREROUTING -i $EXT_IF -p tcp --dport 443 -j REDIRECT --to-ports 8443
+PostDown = iptables -t nat -D PREROUTING -i $EXT_IF -p tcp --dport 443 -j REDIRECT --to-ports 8443
 # Panel traffic first: requests from the tunnel to this box's own tcp/443 go straight to Tomcat
 # (the Headwind agent syncing), everything else into the filter. Order matters — the specific
 # rule must be appended before the generic one. The OUTPUT rule covers Squid's own locally
