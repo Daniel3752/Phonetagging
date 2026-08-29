@@ -1,0 +1,129 @@
+# Next session — start here
+
+You are picking up a phone content-filter project mid-deployment. The **first real
+phone was set up during the previous session** and is in a user's hands. Read this
+whole file before touching anything, then read the docs it points to. Do not change
+production or the live phone without understanding the current state.
+
+## What this project is
+
+Remote app-control + AI web-filtering for managed Android phones, on a 1–5 "rung"
+strictness ladder. Three layers:
+
+- **Enforcement:** a self-hosted **Squid proxy with TLS interception** on the MDM box.
+  It authenticates each phone by a per-device proxy login, asks the Worker for a
+  verdict per request, and blocks/allows. This is the real filter. (`PROXY.md`)
+- **App control + uninstall-proofing:** **Headwind MDM** (self-hosted), stock agent as
+  Device Owner. (`SETUP-PHONES.md`, `FIRST-PHONE.md`)
+- **Control plane:** this **Cloudflare Worker + D1** — policy store, AI classifier
+  (Gemini), scheduler, `/admin` console. (`README.md`)
+
+## Where everything is
+
+| Thing | Location |
+|---|---|
+| This repo (phone tag) | `Daniel3752/Phonetagging`, branch `main` |
+| Computer-tag sibling (unrelated code, same family) | `Daniel3752/Shmiras` |
+| Blocklists (public) | `Daniel3752/shmiras-blocklists` — level1 = explicit (~36k), level2 = social |
+| Telnyx call-fork (unrelated, split out this session) | `Daniel3752/telnyx-callfork` |
+| Worker (LIVE, serves the phones) | `phone-url-filter` → https://phone-url-filter.daniel08-madar.workers.dev |
+| Stray worker (auto-built from old main; NOT the live one) | `phonetagging` — ignore/clean up |
+| D1 database | `phone-url-filter-db` · id `9e5b0576-7a7c-4af0-8d13-495fb9e30718` |
+| Headwind MDM panel | https://mdm.getshmira.com (Ubuntu 22.04, Hetzner) |
+| Squid proxy | same box, port **3128** |
+| Deploy: `cd` into a local clone → `npx wrangler deploy` | main does NOT auto-deploy phone-url-filter; deploy by hand |
+
+Secrets live as `wrangler secret` (OPERATOR_KEY, PROXY_KEY, GEMINI_API_KEY,
+CF_GATEWAY_API_TOKEN, HEADWIND_USER/PASSWORD) and in `/etc/squid/filter.env` on the
+server (SHMIRA_PROXY_KEY must match the Worker's PROXY_KEY). None are in the repo.
+
+Read, in order: `README.md`, `FIRST-PHONE.md` (the authoritative phone runbook),
+`PROXY.md`, `DEPLOYMENT.md` (identifiers + live state), `SETUP-PHONES.md` (older,
+DNS-era — superseded by FIRST-PHONE for setup).
+
+## State as of end of previous session
+
+**Working and proven on a real phone (Samsung S22 Ultra, "Isaac", Headwind id IES22,
+rung 4, proxy login `isaac-elbaz-samsung-phone-s22-ultra`):**
+- Proxy auth, TLS interception, per-URL + per-search AI filtering, block-page redirect.
+- Google account sign-in + Play Store (after exempting Google/Play/WhatsApp hosts from
+  auth AND interception — see `scripts/squid.conf` `google_system_hosts` + `splice.txt`).
+- Phone switched from Managed Launcher to **Background (Agent) Mode** (normal Samsung
+  launcher) because rung 4 is a blocklist model, not allowlist.
+- The Headwind MDM host itself is exempted from the proxy (`mdm_host` ACL) — without
+  this the agent can't sync and the device goes unmanageable once the proxy is on.
+
+**D1 facts:**
+- Migration ledger reconciled: 0001–0015 all recorded. `npm run db:migrate` is safe.
+- `devices` has `proxy_password` (generated per phone; `/admin` shows it + the htpasswd line).
+- `app_rules`: browser/VPN/Telegram blocklist was written into rungs 2–5 this session.
+
+## Unfinished / open items (verify each — do not assume)
+
+1. **Worker → Headwind is NOT wired.** Every `policies.headwind_configuration_id` is
+   NULL, so the scheduler cannot push app policies; app control is 100% manual in the
+   Headwind panel today. The DB app_rules are aspirational until this is built. This was
+   the big deferred task — see "The wiring" below.
+2. **Headwind's "Block" semantics are unconfirmed.** DB inspection showed `action=1`
+   (=install/allow) but a "Block" attempt did NOT produce a clean `action=2`; the UI hint
+   says Block "unlinks" the app. It is UNVERIFIED whether Headwind's Block actually
+   prevents a Play Store install or just stops managing the app. Confirm empirically on a
+   TEST phone (block an app, see if it's actually gone/uninstallable) before trusting it
+   or building sync code on it.
+3. **Samsung Internet (`com.sec.android.app.sbrowser`) block was not confirmed** taking
+   effect on Isaac's phone. It's a preinstalled working browser that bypasses the proxy —
+   the #1 live hole. Verify it's actually blocked on the device.
+4. **Restrictions** (`no_config_vpn,no_install_unknown_sources,no_safe_boot,
+   no_config_credentials`) — intended for the Background config's MDM Settings (uncheck
+   "Permissive mode" to enable the field). Confirm they're set. `no_config_vpn` is the
+   real VPN defense; `no_install_unknown_sources` stops sideload bypass.
+5. **Proxy password `bec-339-wwx` was typed in plaintext in chat** — rotate it
+   (`/admin` regenerate → new htpasswd line on server → re-enter on phone).
+6. **Chrome re-prompts for proxy creds after reboot/squid reload.** One re-entry is
+   normal; if it's every few minutes, investigate (credentialsttl is 24h in squid.conf).
+7. **Port 3128 should move to 443** before wide rollout (odd ports get blocked on some
+   wifi). 443 on that box currently serves the Headwind panel — needs a 2nd IP or split.
+8. **Play Store maturity-rating PIN** is the only real "block explicit apps by rating"
+   control and it's on-device, not MDM (Headwind can't filter Play by rating). Decide
+   whether to use it.
+
+## The wiring (the deferred big task) — approach carefully
+
+Goal: `/admin` sets a phone's rung; the scheduler pushes the matching Headwind
+configuration AND that config's app blocklist, so new phones auto-configure.
+
+- `src/scheduler.js` already assigns a config to a device via
+  `setDeviceConfiguration(headwind_device_id, headwind_configuration_id)` — but every
+  policy's config id is NULL, so it's inert.
+- `src/headwind.js` can list configs + set a device's config, but has **NO** function to
+  push app blocklists into a config. That must be written against the Headwind REST API
+  (`/rest/private/...`; spec at `GET https://mdm.getshmira.com/rest/swagger.json`, 121
+  endpoints). The app `action` enum is `[0,1,2]`; `1`=install/allow confirmed, block
+  value UNCONFIRMED (see open item #2).
+- **Danger:** the scheduler runs every 5 min. The moment you map a rung to a config id,
+  it will act on Isaac's live phone. To activate safely, first map his rung to the
+  config he is ALREADY on (a no-op re-apply), test on a THROWAWAY device/config, and only
+  then expand. Do NOT do live-fire config archaeology against the one working phone.
+- Recommendation from last session: build this as reviewed code with offline tests, on a
+  branch, deployed inert (no config mapping), and activate deliberately with a test
+  device — not against Isaac's phone.
+
+## Hard-won gotchas (do not rediscover these)
+
+- **Terminal paste corrupts bare `www.`/domain lines into markdown links** in this user's
+  setup. When editing server files with domains, use `base64 -d | python3 -` patches or
+  `nano`, never pasted heredocs of raw domains. Verify with `grep -c '\[' <file>` == 0.
+- **`sudo -u postgres psql` / server commands are LINUX** — they must run in the
+  `ssh root@mdm.getshmira.com` window, not the Windows `C:\` prompt. `adb` is the
+  opposite — Windows PC only, where the phone is plugged in.
+- Squid `access_log` is `none` by design (privacy). Turn on briefly to debug, off after.
+- A Headwind config change only reaches the phone after the agent syncs; a reboot forces
+  it. Launcher change (Managed→Background) also needs the phone's default Home app set to
+  One UI Home (Settings → Apps → Default apps → Home).
+
+## First actions for this session
+
+1. Read the docs listed above.
+2. Verify the live phone's actual state (open items 3, 4) rather than trusting notes.
+3. Ask the user what they want to tackle: finish/verify Isaac's phone lockdown, build the
+   worker→Headwind wiring properly (with a test device), or set up the next phone.
