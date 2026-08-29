@@ -260,8 +260,18 @@ def main():
         if len(fields) < 2:
             out = 'ERR message="malformed helper request"'
         else:
+            # squid.conf sends "%LOGIN %SRC %URI". A password-path phone has a login; a WireGuard
+            # phone has none ("-"), so its tunnel IP (%SRC) is its identity — the Worker looks both
+            # up in the same devices.proxy_user column. The 2-field form is accepted so an old
+            # squid.conf keeps working against a new helper during an upgrade.
             user = urllib.parse.unquote(fields[0])
-            url = urllib.parse.unquote(fields[1])
+            if len(fields) >= 3:
+                src = urllib.parse.unquote(fields[1])
+                url = urllib.parse.unquote(fields[2])
+                if user == '-' or not user:
+                    user = src
+            else:
+                url = urllib.parse.unquote(fields[1])
             # On an HTTPS CONNECT, Squid passes the target as "host:port" with no scheme — there is
             # no URL yet, the tunnel hasn't been opened. Treat it as a request to that host so the
             # site check can run at the CONNECT gate. After ssl-bump the decrypted GET arrives with
