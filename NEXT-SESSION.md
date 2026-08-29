@@ -96,10 +96,17 @@ below are committed but NOT deployed/applied** — see the runbook that follows.
   check with the operator before assuming done.
 - **CA expiry: Aug 23 2036** (`notAfter=Aug 23 08:10:30 2036 GMT`). Operator was told
   to set a calendar reminder for early 2036.
-- Still to do: sideload-refusal test on Isaac's phone; full restrictions string in
-  the config (add `no_debugging_features` ONLY after adb work is finished);
-  Vortex: no-reset `dpm set-device-owner` test and the WireGuard PoC (the next
-  build session); then the scheduler wiring, now unblocked.
+- **Isaac's phone verification COMPLETE (2026-08-29):** sideload install refused
+  (`no_install_unknown_sources` live), VPN add refused, Samsung Internet + Google app
+  disabled, captive-portal probe silenced (`captive_portal_mode 0` — the phone will
+  no longer auto-detect real captive portals; browser visit triggers them instead).
+  `no_config_mobile_networks` was DROPPED from the restrictions by decision: it
+  locked Samsung's SIM manager, and APN edits cannot bypass the global proxy anyway.
+  Standing restrictions: `no_config_vpn,no_install_unknown_sources,no_safe_boot,
+  no_config_credentials,no_config_private_dns,no_add_user` (+`no_debugging_features`
+  only after all adb work on a phone is finished).
+- Still to do: Vortex no-reset `dpm set-device-owner` test and the WireGuard PoC
+  (the next build session); then the scheduler wiring, now unblocked.
 
 **Runbook — manual steps, in order (status per the block above):**
 
