@@ -196,6 +196,13 @@ THUMB_SUPPRESS_SECS = 45.0
 _thumb_suppress: "dict[str, float]" = {}  # user -> expiry time
 
 
+def _sweep_thumb_suppress():
+    """Drop expired entries so the dict stays bounded by active users, not by every login ever seen."""
+    now = time.time()
+    for user in [u for u, exp in _thumb_suppress.items() if exp <= now]:
+        _thumb_suppress.pop(user, None)
+
+
 def _is_search_thumb_host(host):
     return (
         host.startswith('encrypted-tbn') or          # Google image/result thumbnails
@@ -224,6 +231,7 @@ def decide(user, url):
 
     # Arm thumbnail suppression for this user when a search was allowed text-only.
     if allow and images_off:
+        _sweep_thumb_suppress()
         _thumb_suppress[user] = time.time() + THUMB_SUPPRESS_SECS
 
     # Social is blocked on every rung except the most open (5).

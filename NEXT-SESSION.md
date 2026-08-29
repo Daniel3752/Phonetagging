@@ -1,9 +1,103 @@
 # Next session — start here
 
 You are picking up a phone content-filter project mid-deployment. The **first real
-phone was set up during the previous session** and is in a user's hands. Read this
-whole file before touching anything, then read the docs it points to. Do not change
-production or the live phone without understanding the current state.
+phone was set up two sessions ago** and is in a user's hands. Read this whole file
+before touching anything, then read the docs it points to. Do not change production
+or the live phone without understanding the current state.
+
+## Session 2026-08-29 — decisions made and what changed
+
+A review session: code audited, live state verified, strategy settled. **Repo changes
+below are committed but NOT deployed/applied** — see the runbook that follows.
+
+**Decisions (settled with the operator; do not re-litigate):**
+
+- **Stay on Headwind.** AMAPI direct is effectively closed to non-EMMs since Dec 2024
+  (default device quota 0, partner validation, 500-device cap; usage restricted to
+  commercial EMM providers). Google's new DPC allowlist (Dec 2025) blocks non-approved
+  agents at enrollment — the stock `com.hmdm.launcher` currently passes; niche agents
+  (Entgra, OpenMDM) are riskier, not safer. The ONE trigger to re-evaluate: if the
+  Headwind "Block" test (open item 2) fails, bolt a cheap AMAPI-based EMM (TinyMDM /
+  ManageEngine, ~$1.3–2/device/mo) onto the app layer only; the Squid/Worker stack
+  stays regardless.
+- **iOS later ≠ Entgra now.** Supervised iOS takes a global HTTP proxy **with
+  credentials embedded in the profile** plus a trusted CA — the existing architecture
+  ports cleanly. Start with Apple Configurator (no server) or NanoMDM beside Headwind.
+  Begin Apple Business Manager / D-U-N-S paperwork early; it is slow.
+- **Target architecture: per-device WireGuard, not proxy passwords.** WG server on the
+  MDM box at **udp/443 — no conflict with Tomcat's tcp/443, so no second IP is needed
+  and the port-3128 problem dissolves**. Device Owner sets always-on VPN + lockdown
+  (configure VPN first, THEN `no_config_vpn`). Squid moves to transparent intercept;
+  identity becomes the tunnel IP (`%SRC` instead of `%LOGIN`, ~dozens of lines across
+  squid.conf/helper/`resolveDevice`). This kills: Chrome's per-reboot credential
+  prompt (unfixable under Basic auth — Chrome never persists proxy creds), the
+  raw-socket app bypass (the #1 structural hole on rungs 4–5), cross-rung credential
+  sharing, and wifi port blocking. Costs: box is a full VPN concentrator (2 vCPU fine
+  to ~50 phones; 20TB egress ≈ 400+ phones), server-down = phones fully offline (health
+  check below becomes mandatory), WG is UDP-only (rare all-UDP-blocked networks fail
+  closed). **Prove on the Vortex before touching Isaac's phone.**
+- **Isaac's phone gets rebuilt ONCE, onto the final architecture** (owner has approved
+  a reset) — after the Vortex proves WG + lockdown + captive portal + Block semantics.
+- **No-factory-reset enrollment path to verify on the Vortex:** remove all accounts
+  (data stays) → `adb shell dpm set-device-owner com.hmdm.launcher/.AdminReceiver` →
+  re-add accounts. Works on most models; prove per model. Default flow for existing
+  phones if it holds.
+- **Spotify images are blockable at SNI** (distinct hostnames: `i.scdn.co`,
+  `mosaic.scdn.co`, `image-cdn-*.spotifycdn.com`, `canvaz.scdn.co` — deny those,
+  splice the audio/API hosts; verify the current list with the access log on for ten
+  minutes, then off). **WhatsApp Channels are NOT blockable at the network layer**
+  (client UI + channel media shares `mmg.whatsapp.net` etc. with ordinary chats,
+  cert-pinned). Only real path: an on-device Accessibility watchdog app — a future
+  build, high value in this market (same pattern covers Shorts/Reels).
+
+**Repo changes this session (deploy/apply per runbook):**
+
+1. `src/proxy-api.js` — `requireProxyKey` no longer falls back to `OPERATOR_KEY`.
+   Needs a Worker deploy; `PROXY_KEY` secret is set, live Worker verified answering 401.
+2. `scripts/squid.conf` — `.gstatic.com` wholesale exemption narrowed to the four
+   subdomains sign-in/Play/connectivity need. This puts `encrypted-tbn*.gstatic.com`
+   (Google result thumbnails) back behind auth + filter and revives the helper's
+   images-off thumbnail suppression, which the blanket exemption had made dead code.
+   Also: pre-auth exemptions (`google_system_hosts`, `mdm_host`) now constrained to
+   ports 80/443 — they had made the box an open relay to those hosts.
+3. `scripts/install-squid.sh` — splice.txt seed matches the narrowed gstatic list.
+   NOTE: the installer never overwrites an existing splice.txt; the live server's copy
+   must be edited by hand (runbook step 4).
+4. `scripts/squid-acl-helper.py` — expired thumbnail-suppression entries are swept.
+5. `scripts/health-check.sh` — NEW: cron probe proving squid + Worker + auth + helper
+   end to end, with optional ntfy.sh-style webhook alerting. Install per its header.
+6. `DEPLOYMENT.md` — server spec corrected (CX23, 4GB — not CPX12/2GB).
+
+**Runbook — manual steps, in order (none done yet):**
+
+1. Deploy the Worker: local clone → `npx wrangler deploy` (picks up change 1).
+2. D1 (was permission-blocked from the session): Isaac's phone has a DUPLICATE device
+   row. Delete it: `DELETE FROM devices WHERE id='dev_6f1731f5' AND proxy_user IS NULL;`
+   (that row: IES22 / apps_rung_4 / Asia/Jerusalem / no proxy_user / never seen — the
+   real row `dev_b73af724` stays). Must be gone before any scheduler wiring.
+3. Rotate the leaked proxy password `bec-339-wwx` (open item 5): `/admin` regenerate →
+   new htpasswd line on the server → re-enter on Isaac's phone.
+4. Server: `install -m 644 scripts/squid.conf /etc/squid/squid.conf`; hand-edit
+   `/etc/squid/splice.txt` replacing the `.gstatic.com` line with `ssl.gstatic.com`,
+   `www.gstatic.com`, `fonts.gstatic.com`, `connectivitycheck.gstatic.com` (use nano —
+   remember the paste-corruption gotcha); `squid -k parse`; reload. Then ON A PHONE
+   test: Google sign-in, Play Store, and that image-search thumbnails now get filtered.
+   A broken sign-in step = add the one subdomain cache.log names, never `.gstatic.com`.
+5. Install the health check (script header has the 3 steps: monitor login + env file +
+   cron). Under the future lockdown-VPN this stops being optional.
+6. Isaac's phone, over adb on the Windows PC (open items 3, 4): verify Samsung
+   Internet is actually blocked, and the restrictions are actually set (add
+   `no_debugging_features` and `no_config_mobile_networks` to the intended list —
+   Developer Options + a PC can undo the proxy; APN edits can too).
+7. Vortex test battery (gates everything): Headwind "Block" semantics (open item 2) →
+   `dpm set-device-owner` no-reset path → WireGuard + lockdown PoC (incl. captive
+   portal behaviour) → Spotify image-host block.
+8. Cloudflare dashboard: delete the stray `phonetagging` Worker (build artifact of old
+   main; `phone-url-filter` is the live one).
+9. Put the CA expiry date (~2036, check `openssl x509 -enddate -in
+   /etc/squid/ssl/filter-ca.crt`) in a calendar that outlives this repo.
+10. Backups on cron: `wrangler d1 export` of `phone-url-filter-db`, plus
+    `/etc/squid/passwd`. (The CA key stays deliberately un-backed-up.)
 
 ## What this project is
 

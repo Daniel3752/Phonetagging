@@ -99,7 +99,13 @@ dl.google.com
 .android.com
 play-lh.googleusercontent.com
 .googleapis.com
-.gstatic.com
+# gstatic by SUBDOMAIN, deliberately NOT .gstatic.com: encrypted-tbn*.gstatic.com carries Google's
+# search-result thumbnails and must stay bumped + filtered (Chrome trusts our CA, so bumping it is
+# safe). Keep this in step with the google_system_hosts ACL in squid.conf.
+ssl.gstatic.com
+www.gstatic.com
+fonts.gstatic.com
+connectivitycheck.gstatic.com
 accounts.google.com
 android.clients.google.com
 play.google.com
