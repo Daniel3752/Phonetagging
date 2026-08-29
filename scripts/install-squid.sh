@@ -93,12 +93,20 @@ if [[ ! -f /etc/squid/splice.txt ]]; then
 .whatsapp.net
 .whatsapp.com
 .gvt1.com
+.gvt2.com
+dl.google.com
+.ggpht.com
+.android.com
+play-lh.googleusercontent.com
 .googleapis.com
 .gstatic.com
 accounts.google.com
 android.clients.google.com
 play.google.com
 google-ohttp-relay-safebrowsing.fastly-edge.com
+# Your Headwind MDM host — its background agent cannot answer proxy auth, so it must pass
+# through untouched or the device goes unmanageable once the proxy is on. Change to your host.
+mdm.getshmira.com
 SPLICE
 fi
 
