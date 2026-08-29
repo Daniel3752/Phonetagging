@@ -68,7 +68,40 @@ below are committed but NOT deployed/applied** — see the runbook that follows.
    end to end, with optional ntfy.sh-style webhook alerting. Install per its header.
 6. `DEPLOYMENT.md` — server spec corrected (CX23, 4GB — not CPX12/2GB).
 
-**Runbook — manual steps, in order (none done yet):**
+**2026-08-29, later: runbook executed with the operator. VERIFIED FACTS — do not re-test:**
+
+- **Open item 2 ANSWERED. Headwind app removal works.** In a configuration's
+  Applications tab the action set is Allow / Block / **Delete**; Delete persists as
+  `action=2, remove=t` in `configurationapplications` and — proven on Isaac's live
+  phone — actually UNINSTALLS a user-installed app after a sync (flashlight test app
+  removed on reboot). This is the encoding the scheduler wiring must write.
+  Caveats: the dialog only persists after the CONFIG's own Save button; Delete does
+  NOT remove preinstalled SYSTEM apps (agent can't) — those are disabled at setup
+  time over adb: `adb shell pm disable-user --user 0 <pkg>`.
+- **Open item 3 ANSWERED, better than feared.** Samsung Internet does NOT bypass the
+  proxy — it honours it and prompts for proxy credentials (so even live it was
+  behind the filter). It is now DISABLED on Isaac's phone via `pm disable-user`
+  (Headwind Delete couldn't remove it — system app).
+- **Google app (`com.google.android.googlequicksearchbox`) disabled on Isaac's phone**
+  via `pm disable-user`: its Discover/Assistant/Lens surfaces ride the exempted
+  `.googleapis.com` hosts unfiltered, while its search function is redundant with
+  filtered Chrome. Blocking it is the standing policy for rungs 1–4.
+- **`no_config_vpn` verified live** on Isaac's phone (VPN add refused).
+- **Steps 1, 2, 4 of the runbook are DONE**: Worker deployed (PROXY_KEY-only,
+  answers 401 unauthenticated), duplicate device row deleted (2 rows remain:
+  dev_vortex, dev_b73af724), new squid.conf + narrowed splice.txt applied and
+  reloaded on the server. Step 3 (password rotation) deliberately SKIPPED by the
+  operator (accepted risk). Step 5 (health check): installed without alerting
+  (ntfy skipped). Stray `phonetagging` Worker deletion + D1/htpasswd backups:
+  check with the operator before assuming done.
+- **CA expiry: Aug 23 2036** (`notAfter=Aug 23 08:10:30 2036 GMT`). Operator was told
+  to set a calendar reminder for early 2036.
+- Still to do: sideload-refusal test on Isaac's phone; full restrictions string in
+  the config (add `no_debugging_features` ONLY after adb work is finished);
+  Vortex: no-reset `dpm set-device-owner` test and the WireGuard PoC (the next
+  build session); then the scheduler wiring, now unblocked.
+
+**Runbook — manual steps, in order (status per the block above):**
 
 1. Deploy the Worker: local clone → `npx wrangler deploy` (picks up change 1).
 2. D1 (was permission-blocked from the session): Isaac's phone has a DUPLICATE device
