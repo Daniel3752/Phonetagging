@@ -105,8 +105,57 @@ below are committed but NOT deployed/applied** — see the runbook that follows.
   Standing restrictions: `no_config_vpn,no_install_unknown_sources,no_safe_boot,
   no_config_credentials,no_config_private_dns,no_add_user` (+`no_debugging_features`
   only after all adb work on a phone is finished).
-- Still to do: Vortex no-reset `dpm set-device-owner` test and the WireGuard PoC
-  (the next build session); then the scheduler wiring, now unblocked.
+- Still to do: Vortex no-reset `dpm set-device-owner` test; then the scheduler wiring.
+
+## Session 2026-08-31 — WireGuard IS LIVE on Isaac's phone (unfinished; read before touching)
+
+The WG architecture was built AND deployed, debugged live on Isaac's S22 (owner approved).
+Current phone state at session end: tunnel ON (peer `isaac-s22` = 10.66.0.3, identity via
+`devices.proxy_user`), global proxy CLEARED, `no_config_vpn` REMOVED (it force-kills the tunnel
+on this phone — re-adding it while the proxy is cleared = UNFILTERED internet; the lockdown/
+always-on step was NOT yet done). Samsung Internet + Google app are disabled (from 08-29);
+Chrome is STILL ENABLED — the phone was not physically available at session end. The
+overnight hold is SERVER-SIDE: the operator was instructed to run the fail-open curl below
+and then either set Isaac's device to level=1 in D1 (filter healthy: denies all web,
+WhatsApp/calls unaffected) or stop squid (fail-open: kills all tunnel traffic). Check which
+was done — and RESTORE `level=4` on dev_b73af724 when resuming.
+
+**FIRST ACTION NEXT SESSION — verify the filter is not failing open** (operator reported
+"nothing being blocked" at session end, untriaged):
+`curl -sk -x http://<isaac-login>:<pw>@127.0.0.1:3128 -o /dev/null -w '%{http_code}\n' https://pornhub.com`
+→ 302 = fine; 200 = fail-open, drop everything and fix. Note that under splice-by-default an
+on-phone "blocked site" now looks like a browser connection error, NOT the block page — the
+operator's "nothing being blocked" report may have been exactly this misread, with allowed
+sites loading and blocked ones erroring. Judge by the curl and by whether a blocked site
+actually renders content, not by which error screen appears.
+
+What was built/fixed today (all on the branch, all applied live):
+- Shared DNS (dnsmasq on 127.0.0.1 + 10.66.0.1, phones use 10.66.0.1) — fixes intercept-mode
+  host-forgery 409s (Google/Play/Gemini "no connection").
+- `filter-rr=HTTPS` in dnsmasq — Chrome's ECH decoy SNI (cloudflare-ech.com) broke every
+  Cloudflare site; stripping DNS HTTPS records forces plain SNI. Load-bearing.
+- Splice-by-default for tunnel phones; only search engines (+ encrypted-tbn*) and
+  L1-blocklist hosts are bumped (L1 bumped solely to show the block page). Pinned apps
+  (Spotify etc.) now work with zero per-app splice maintenance. `.googleusercontent.com`
+  spliced (Google Photos). Blocked-but-unknown HTTPS sites now surface as a browser
+  connection error, not the block page — known tradeoff.
+- level1.domains flattener DEDUPES shadowed subdomains — squid FATALs on overlap (this
+  took squid down for ~2h tonight; symptom was "site can't be reached" everywhere).
+- Helper is now THREADED (squid channel protocol, out-of-order answers) and fast-denies
+  `/complete/ /gen_204 /client_204 /async/` locally — the single-threaded helper + a
+  Gemini-call-per-autocomplete-keystroke overflowed squid's lookup queue, which fails
+  CLOSED and presented as "all searches blocked" for two days.
+- GEMINI_API_KEY secret was DEAD (old key invalidated; new-format key worked from
+  operator's PC). Re-put via wrangler; verified classifying again. NOTE: the working key
+  was pasted in the session chat — rotate it once stable.
+
+Remaining to finish the migration: fail-open triage → on-phone test battery (sites,
+searches, blocked site, Spotify, Photos, Play) → lockdown (Always-on + Block connections
+without VPN) → decide `no_config_vpn` (verify whether it kills the tunnel even as
+always-on; if yes, leave off and rely on lockdown + hidden app) → re-enable/hide apps →
+health-check script should also probe the intercept path and dnsmasq (not yet done) →
+rotate Gemini key + proxy password → clean up: THREE repo clones on the server
+(/opt/Phonetagging is canonical; delete /opt/phonetagging and /root/Phonetagging).
 
 **Runbook — manual steps, in order (status per the block above):**
 
