@@ -43,6 +43,13 @@ no-resolv
 server=1.1.1.1
 server=1.0.0.1
 cache-size=10000
+# Strip DNS HTTPS records (type 65): they carry Encrypted Client Hello keys, and with ECH the
+# phone's TLS handshake hides the real hostname behind a decoy SNI (cloudflare-ech.com) — the
+# filter can neither read nor verify it, and every Cloudflare-fronted site dies with a 409.
+# Without HTTPS records browsers fall back to a plain-SNI handshake. Chrome only auto-upgrades
+# to DoH (which would smuggle the records back in) for resolvers it recognizes, which 10.66.0.1
+# is not.
+filter-rr=HTTPS
 DNSMASQ
 mkdir -p /etc/systemd/system/dnsmasq.service.d
 cat > /etc/systemd/system/dnsmasq.service.d/after-wg.conf <<'UNIT'
