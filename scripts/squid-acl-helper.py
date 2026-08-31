@@ -24,10 +24,12 @@ brain is unavailable is indistinguishable from no filter, and the failure mode o
 import json
 import os
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 
 WORKER_URL = os.environ.get('SHMIRA_WORKER_URL', 'https://phone-url-filter.daniel08-madar.workers.dev')
 PROXY_KEY = os.environ.get('SHMIRA_PROXY_KEY', '')
@@ -211,13 +213,35 @@ def _is_search_thumb_host(host):
     )
 
 
+# Request paths answered locally, instantly, without the Worker. Search AUTOCOMPLETE fires one
+# request per keystroke, each a unique URL — rating those would cost a model call per letter typed
+# and stall the helper behind a wall of lookups (the /search request then overflows squid's queue
+# and gets denied out of hand, which looked exactly like "all searches blocked"). Denying them is
+# invisible: Chrome just shows no suggestions while typing. gen_204/client_204 are telemetry pings.
+_FAST_DENY_PREFIXES = ('/complete/', '/gen_204', '/client_204', '/async/')
+
+
+def _fast_local_path(url):
+    try:
+        path = urllib.parse.urlsplit(url).path or '/'
+    except ValueError:
+        return None
+    if any(path.startswith(p) for p in _FAST_DENY_PREFIXES):
+        return False, 'suggestions/telemetry disabled'
+    return None
+
+
 def decide(user, url):
-    """The full local decision: search-thumbnail suppression → L1 blocklist (all rungs) → Worker →
-    L2 blocklist (rungs 1-4).
+    """The full local decision: fast local paths → search-thumbnail suppression → L1 blocklist (all
+    rungs) → Worker → L2 blocklist (rungs 1-4).
 
     L1 is checked locally and first so an explicit host is denied without a Worker round trip and can
     never slip through the Worker's default-allow on a permissive rung. L2 is rung-dependent, so it is
     applied after the Worker answers with device_level."""
+    fast = _fast_local_path(url)
+    if fast is not None:
+        return fast
+
     host = _host_of(url)
 
     # A result thumbnail while this user's last search asked for images-off.
@@ -257,46 +281,69 @@ def main():
         else:
             channel, fields = None, parts
 
-        if len(fields) < 2:
-            out = 'ERR message="malformed helper request"'
+        if channel is not None:
+            # Concurrent mode: one blocking Worker round-trip must never stall the line. A page
+            # load — a Google results page especially — bursts dozens of lookups at once, and a
+            # helper that answers them one at a time overflows squid's lookup queue, which squid
+            # fails CLOSED (instant deny). Channels exist precisely so answers can return out of
+            # order; use them.
+            _pool.submit(_answer, channel, fields)
         else:
-            # squid.conf sends "%LOGIN %SRC %URI". A password-path phone has a login; a WireGuard
-            # phone has none ("-"), so its tunnel IP (%SRC) is its identity — the Worker looks both
-            # up in the same devices.proxy_user column. The 2-field form is accepted so an old
-            # squid.conf keeps working against a new helper during an upgrade.
-            user = urllib.parse.unquote(fields[0])
-            if len(fields) >= 3:
-                src = urllib.parse.unquote(fields[1])
-                url = urllib.parse.unquote(fields[2])
-                if user == '-' or not user:
-                    user = src
-            else:
-                url = urllib.parse.unquote(fields[1])
-            # On an HTTPS CONNECT, Squid passes the target as "host:port" with no scheme — there is
-            # no URL yet, the tunnel hasn't been opened. Treat it as a request to that host so the
-            # site check can run at the CONNECT gate. After ssl-bump the decrypted GET arrives with
-            # the full "https://host/path?query", which is re-checked here — that is where a search
-            # query actually gets judged, so nothing is lost by coarse-checking the CONNECT.
-            if '://' not in url:
-                host = url.rsplit(':', 1)[0] if ':' in url else url
-                url = 'https://' + host + '/'
-            # Squid sends "-" for an unauthenticated login; the Worker treats an unknown user as the
-            # strictest rung rather than denying outright, so pass it through as-is.
-            if user == '-':
-                user = ''
+            _answer(channel, fields)
 
-            key = (user, url)
-            cached = _cache_get(key)
-            if cached is None:
+
+def _answer(channel, fields):
+    if len(fields) < 2:
+        out = 'ERR message="malformed helper request"'
+    else:
+        # squid.conf sends "%LOGIN %SRC %URI". A password-path phone has a login; a WireGuard
+        # phone has none ("-"), so its tunnel IP (%SRC) is its identity — the Worker looks both
+        # up in the same devices.proxy_user column. The 2-field form is accepted so an old
+        # squid.conf keeps working against a new helper during an upgrade.
+        user = urllib.parse.unquote(fields[0])
+        if len(fields) >= 3:
+            src = urllib.parse.unquote(fields[1])
+            url = urllib.parse.unquote(fields[2])
+            if user == '-' or not user:
+                user = src
+        else:
+            url = urllib.parse.unquote(fields[1])
+        # On an HTTPS CONNECT, Squid passes the target as "host:port" with no scheme — there is
+        # no URL yet, the tunnel hasn't been opened. Treat it as a request to that host so the
+        # site check can run at the CONNECT gate. After ssl-bump the decrypted GET arrives with
+        # the full "https://host/path?query", which is re-checked here — that is where a search
+        # query actually gets judged, so nothing is lost by coarse-checking the CONNECT.
+        if '://' not in url:
+            host = url.rsplit(':', 1)[0] if ':' in url else url
+            url = 'https://' + host + '/'
+        # Squid sends "-" for an unauthenticated login; the Worker treats an unknown user as the
+        # strictest rung rather than denying outright, so pass it through as-is.
+        if user == '-':
+            user = ''
+
+        key = (user, url)
+        cached = _cache_get(key)
+        if cached is None:
+            try:
                 allow, reason = decide(user, url)
-                _cache_put(key, allow)
-            else:
-                allow, reason = cached, 'cached'
+            except Exception as exc:  # a crashed lookup must still answer, and must fail closed
+                allow, reason = False, f'helper exception {type(exc).__name__}'
+            _cache_put(key, allow)
+        else:
+            allow, reason = cached, 'cached'
 
-            out = 'OK' if allow else f'ERR message={json.dumps(reason)}'
+        out = 'OK' if allow else f'ERR message={json.dumps(reason)}'
 
+    # One writer at a time: an interleaved line desynchronizes every channel after it.
+    with _stdout_lock:
         sys.stdout.write(f'{channel} {out}\n' if channel else f'{out}\n')
         sys.stdout.flush()
+
+
+_stdout_lock = threading.Lock()
+# Sized comfortably above squid's per-helper concurrency=32 burst; threads spend their time
+# blocked on the Worker call, so they are cheap.
+_pool = ThreadPoolExecutor(max_workers=32)
 
 
 if __name__ == '__main__':
