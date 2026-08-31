@@ -97,7 +97,9 @@ if [[ ! -f /etc/squid/splice.txt ]]; then
 dl.google.com
 .ggpht.com
 .android.com
-play-lh.googleusercontent.com
+# All of googleusercontent, not just play-lh: Google Photos/account media (lh3.* etc.) is served
+# from here and the Photos app rejects our CA, so bumping it just breaks photo loading.
+.googleusercontent.com
 .googleapis.com
 # gstatic by SUBDOMAIN, deliberately NOT .gstatic.com: encrypted-tbn*.gstatic.com carries Google's
 # search-result thumbnails and must stay bumped + filtered (Chrome trusts our CA, so bumping it is

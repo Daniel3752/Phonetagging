@@ -25,9 +25,33 @@ TLS_REDIR_PORT=3130             # squid.conf https_port ... intercept ssl-bump
 
 if [[ $EUID -ne 0 ]]; then echo "Run with sudo." >&2; exit 1; fi
 
-echo "==> Installing wireguard + qrencode"
+echo "==> Installing wireguard + qrencode + dnsmasq"
 apt-get update -qq
-apt-get install -y wireguard qrencode
+apt-get install -y wireguard qrencode dnsmasq
+
+# Shared DNS: phones and Squid must resolve hostnames IDENTICALLY, or Squid's host-forgery
+# check in intercept mode kills connections whenever a CDN rotates IPs (Google/Fastly do this
+# constantly -> NONE_NONE/409 in the log, "no connection" in Google apps). One dnsmasq, bound to
+# loopback and the tunnel only (never the public interface -- no open resolver), serves both:
+# phones get 10.66.0.1 as their tunnel DNS, squid.conf points at 127.0.0.1. Same cache, same
+# answers, no mismatch.
+echo "==> dnsmasq (shared resolver for phones + squid)"
+cat > /etc/dnsmasq.d/shmira.conf <<'DNSMASQ'
+listen-address=127.0.0.1,10.66.0.1
+bind-interfaces
+no-resolv
+server=1.1.1.1
+server=1.0.0.1
+cache-size=10000
+DNSMASQ
+mkdir -p /etc/systemd/system/dnsmasq.service.d
+cat > /etc/systemd/system/dnsmasq.service.d/after-wg.conf <<'UNIT'
+[Unit]
+# 10.66.0.1 only exists once wg0 is up; without this ordering dnsmasq loses the bind at boot.
+After=wg-quick@wg0.service
+Wants=wg-quick@wg0.service
+UNIT
+systemctl daemon-reload
 
 echo "==> IP forwarding"
 cat > /etc/sysctl.d/99-shmira-wireguard.conf <<'SYSCTL'
@@ -112,7 +136,11 @@ fi
 
 echo "==> Starting"
 systemctl enable --now wg-quick@$WG_IF
+systemctl enable dnsmasq
+systemctl restart dnsmasq
 wg show $WG_IF
+echo "==> dnsmasq answers:"
+dig @127.0.0.1 +short google.com | head -2 || echo "    !! dnsmasq not answering — check systemctl status dnsmasq"
 
 echo
 echo "Done. Next:"

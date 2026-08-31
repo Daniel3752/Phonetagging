@@ -58,7 +58,7 @@ wg syncconf "$WG_IF" <(wg-quick strip "$WG_IF")
 CLIENT_CONF="[Interface]
 PrivateKey = $PRIV
 Address = $PHONE_IP/32
-DNS = 1.1.1.1
+DNS = 10.66.0.1
 
 [Peer]
 PublicKey = $SERVER_PUB
