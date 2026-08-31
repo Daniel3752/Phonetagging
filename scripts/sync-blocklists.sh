@@ -84,7 +84,13 @@ def walk(o):
         for v in o: yield from walk(v)
     elif isinstance(o, str) and o.strip():
         yield o.strip().lower().rstrip('.')
-for d in sorted(set(walk(json.load(open(sys.argv[1]))))):
+doms = set(walk(json.load(open(sys.argv[1]))))
+# squid FATALs on an ACL where one entry is a subdomain of another ("You need to remove ...").
+# A leading-dot entry already covers every subdomain, so drop any domain with an ancestor present.
+def shadowed(d):
+    parts = d.split('.')
+    return any('.'.join(parts[i:]) in doms for i in range(1, len(parts) - 1))
+for d in sorted(d for d in doms if not shadowed(d)):
     print('.' + d)
 PY
   if [[ -s "$tmp" ]] && ! cmp -s "$tmp" "$DOMAINS" 2>/dev/null; then
