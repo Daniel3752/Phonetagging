@@ -89,7 +89,7 @@ export function renderAdminPage() {
         <div id="deviceTable"></div>
       </div>
       <div class="card">
-        <h2>Add or update a phone</h2>
+        <h2 id="deviceFormTitle">Add a phone</h2>
         <div class="row">
           <div><label for="dLabel">Label</label><input id="dLabel" placeholder="Cohen family — Dovid"></div>
           <div><label for="dHw">Headwind device id</label><input id="dHw" placeholder="42"></div>
@@ -107,6 +107,7 @@ export function renderAdminPage() {
           <code>htpasswd</code> line shown below on the proxy — the phone has no web until that
           account exists, and a phone with no login falls back to the strictest rung.</p>
         <button id="saveDevice" type="button">Save phone</button>
+        <button id="cancelEdit" type="button" class="ghost" style="display:none">Cancel</button>
         <div class="msg" id="deviceMsg"></div>
         <div id="deviceCreds"></div>
       </div>
@@ -284,7 +285,7 @@ export function renderAdminPage() {
   }
 
   function render() {
-    id('deviceTable').innerHTML = table(['Phone', 'Web level', 'Proxy login', 'Password', 'Baseline', 'Now running', 'Zone'], state.devices, function (d) {
+    id('deviceTable').innerHTML = table(['Phone', 'Web level', 'Proxy login', 'Password', 'Baseline', 'Now running', 'Zone', ''], state.devices, function (d) {
       return '<tr><td>' + esc(d.label) + '</td><td>' + esc(levelName(d.level)) + '</td><td>' +
         (d.proxy_user ? esc(d.proxy_user) : '<span class="empty">none — strictest</span>') +
         '</td><td>' +
@@ -293,7 +294,10 @@ export function renderAdminPage() {
         (d.proxy_password ? '<code>' + esc(d.proxy_password) + '</code>' : '<span class="empty">—</span>') +
         '</td><td>' + esc(policyName(d.policy_id)) + '</td><td>' +
         (d.last_applied_policy_id ? esc(policyName(d.last_applied_policy_id)) : '<span class="empty">not applied</span>') +
-        '</td><td>' + esc(d.timezone) + '</td></tr>';
+        '</td><td>' + esc(d.timezone) + '</td><td style="white-space:nowrap">' +
+        '<button class="ghost" style="margin:0 6px 0 0;padding:4px 10px" data-dev-edit="' + esc(d.id) + '">Edit</button>' +
+        '<button class="ghost" style="margin:0;padding:4px 10px" data-dev-del="' + esc(d.id) + '">Delete</button>' +
+        '</td></tr>';
     });
 
     // The ladder comes from the server (levels.js) rather than being written out here, so the console
@@ -426,9 +430,70 @@ export function renderAdminPage() {
     }).catch(function () {});
   }
 
+  // Which phone the form is editing. Null means "save" creates a new phone; otherwise the save
+  // carries the id and the server updates that row in place (keeping its password), instead of
+  // minting a second phone with the same label — which is what happened before there was any way
+  // to edit at all.
+  var editingId = null;
+
+  function editDevice(d) {
+    editingId = d.id;
+    id('dLabel').value = d.label || '';
+    id('dHw').value = d.headwind_device_id || '';
+    id('dPolicy').value = d.policy_id || '';
+    id('dTz').value = d.timezone || 'UTC';
+    id('dLevel').value = String(d.level);
+    id('dProxy').value = d.proxy_user || '';
+    id('deviceFormTitle').textContent = 'Editing: ' + (d.label || d.id);
+    id('saveDevice').textContent = 'Update phone';
+    id('cancelEdit').style.display = '';
+    id('deviceCreds').innerHTML = '';
+    say(id('deviceMsg'), '', true);
+    id('deviceFormTitle').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  function clearDeviceForm() {
+    editingId = null;
+    id('dLabel').value = '';
+    id('dHw').value = '';
+    id('dTz').value = 'UTC';
+    id('dLevel').value = '2';
+    id('dProxy').value = '';
+    id('deviceFormTitle').textContent = 'Add a phone';
+    id('saveDevice').textContent = 'Save phone';
+    id('cancelEdit').style.display = 'none';
+  }
+
+  id('cancelEdit').addEventListener('click', function () {
+    clearDeviceForm();
+    say(id('deviceMsg'), '', true);
+  });
+
+  document.addEventListener('click', function (e) {
+    var ds = e.target && e.target.dataset;
+    if (!ds) return;
+    if (ds.devEdit) {
+      var d = state.devices.find(function (x) { return x.id === ds.devEdit; });
+      if (d) editDevice(d);
+      return;
+    }
+    if (ds.devDel) {
+      var victim = state.devices.find(function (x) { return x.id === ds.devDel; });
+      var name = victim ? victim.label : ds.devDel;
+      // A phone's row is its identity to the filter: with the row gone it falls to the strictest
+      // rung on the next request, and its time windows are removed with it. Ask.
+      if (!confirm('Delete "' + name + '"?\\n\\nThe phone will fall back to the strictest rung (no web) until it is added again, and its schedules are removed.')) return;
+      submit('saveDevice', 'deviceMsg', function () {
+        if (editingId === ds.devDel) clearDeviceForm();
+        return api('/api/admin/devices/delete', { id: ds.devDel });
+      }, 'Phone deleted.');
+    }
+  });
+
   id('saveDevice').addEventListener('click', function () {
     submit('saveDevice', 'deviceMsg', function () {
       return api('/api/admin/devices', {
+        id: editingId || undefined,
         label: id('dLabel').value.trim(),
         headwind_device_id: id('dHw').value.trim() || null,
         policy_id: id('dPolicy').value,
@@ -448,6 +513,7 @@ export function renderAdminPage() {
             esc(location.hostname === 'localhost' ? 'mdm.getshmira.com:3128' : 'mdm.getshmira.com:3128') +
             '</code></pre>';
         }
+        clearDeviceForm();
         return r;
       });
     }, 'Phone saved.');
