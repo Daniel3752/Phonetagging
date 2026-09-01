@@ -117,8 +117,10 @@ always-on step was NOT yet done). Samsung Internet + Google app are disabled (fr
 Chrome is STILL ENABLED — the phone was not physically available at session end. The
 overnight hold is SERVER-SIDE: the operator was instructed to run the fail-open curl below
 and then either set Isaac's device to level=1 in D1 (filter healthy: denies all web,
-WhatsApp/calls unaffected) or stop squid (fail-open: kills all tunnel traffic). Check which
-was done — and RESTORE `level=4` on dev_b73af724 when resuming.
+WhatsApp/calls unaffected) or stop squid (fail-open: kills all tunnel traffic). The operator
+chose the level=1 route (`UPDATE devices SET level=1 WHERE id='dev_b73af724';` via wrangler
+from the PC). Verify it took (`SELECT id, level FROM devices;`) and RESTORE `level=4` on
+dev_b73af724 when resuming.
 
 **FIRST ACTION NEXT SESSION — verify the filter is not failing open** (operator reported
 "nothing being blocked" at session end, untriaged):
