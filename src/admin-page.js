@@ -298,8 +298,8 @@ export function renderAdminPage() {
 
     // The ladder comes from the server (levels.js) rather than being written out here, so the console
     // can never show rung names that differ from what is actually enforced.
-    fillLevels('dLevel');
-    fillLevels('qLevel');
+    fillLevels('dLevel', false);   // a phone's rung: 1-5 only
+    fillLevels('qLevel', true);    // a site/search rating: 2-6, Never included
 
     id('policyTable').innerHTML = table(['Policy', 'Headwind config', 'Apps'], state.policies, function (p) {
       var n = state.appRules.filter(function (r) { return r.policy_id === p.id; }).length;
@@ -401,12 +401,17 @@ export function renderAdminPage() {
     return l ? n + ' \u00b7 ' + l.name : String(n == null ? '?' : n);
   }
 
-  function fillLevels(elId) {
+  // withNever distinguishes the two kinds of select that share this ladder. A SITE or SEARCH rating
+  // may be Never (6) — blocked at every rung. A PHONE's rung may not: 6 is not a rung, and the
+  // clamp on the way in turns it into rung 1, which is 'no web at all'. Offering it on the device
+  // form is how a phone ends up unable to load anything while the console reads as though the
+  // operator chose the strictest filtering — which is exactly what happened to a live phone.
+  function fillLevels(elId, withNever) {
     var el = id(elId);
     if (!el || el.dataset.filled) return;
     el.innerHTML = (state.levels || []).map(function (l) {
       return '<option value="' + l.level + '">' + esc(l.level + ' \u00b7 ' + l.name) + '</option>';
-    }).join('') + '<option value="6">Never (blocked everywhere)</option>';
+    }).join('') + (withNever ? '<option value="6">Never (blocked everywhere)</option>' : '');
     el.value = '2';
     el.dataset.filled = '1';
   }
