@@ -98,20 +98,25 @@ async function rateSearch(env, search) {
   return { level: normalizeSiteLevel(rated.level), imagesOk: rated.imagesOk !== false, reason: rated.reason };
 }
 
-// Looks up a site verdict: an exact-host row (seed / operator override) first, then a whole-domain
+// Looks up a site verdict: an exact-host row (seed / operator override) wins over a whole-domain
 // row (AI classifications and the domains that share it). Returns the row or null.
+//
+// One query for both candidates, not two in sequence. D1's primary is an ocean away from where
+// this Worker runs for the phones, so every round trip is ~100ms and a person is waiting on each.
 async function lookupVerdict(env, hostname) {
-  const exact = await env.DB.prepare(
-    `SELECT level, is_doorway, reason, site_mode FROM url_verdicts WHERE url_hash = ? AND scope = 'host'`
-  ).bind(await sha256Hex(hostname)).first().catch(() => null);
-  if (exact) return exact;
-
   const domain = registrableDomain(hostname);
-  if (domain && domain !== hostname) {
-    const byDomain = await env.DB.prepare(
-      `SELECT level, is_doorway, reason, site_mode FROM url_verdicts WHERE url_hash = ? AND scope = 'host'`
-    ).bind(await sha256Hex(domain)).first().catch(() => null);
-    if (byDomain) return byDomain;
+  const hashes = [await sha256Hex(hostname)];
+  if (domain && domain !== hostname) hashes.push(await sha256Hex(domain));
+
+  const rows = await env.DB.prepare(
+    `SELECT url_hash, level, is_doorway, reason, site_mode FROM url_verdicts
+     WHERE scope = 'host' AND url_hash IN (${hashes.map(() => '?').join(', ')})`
+  ).bind(...hashes).all().then((r) => r.results || []).catch(() => []);
+
+  // Exact host first, then the domain — the order of `hashes`.
+  for (const h of hashes) {
+    const row = rows.find((r) => r.url_hash === h);
+    if (row) return row;
   }
   return null;
 }
@@ -128,8 +133,18 @@ export async function handleProxyCheck(request, env) {
   try { u = new URL(body.url); } catch { return json({ error: 'invalid url' }, 400); }
   const hostname = normalizeHost(u.hostname);
 
+  // The device row and the site verdict do not depend on each other, so they are fetched at the
+  // same time. The verdict is only needed on the site path (step 5), but starting it here costs
+  // nothing on the other paths and saves a full round trip on the common one.
+  const search = parseSearchUrl(body.url);
+  const verdictPromise = search ? null : lookupVerdict(env, hostname);
   const { level, def, deviceId, known } = await resolveDevice(env, body.user);
-  const base = { device_level: level, device: deviceId, known_device: known };
+
+  // cache_scope tells the helper how widely it may reuse this answer: 'host' when the decision
+  // depended on the hostname alone (an ordinary site — one answer covers every URL on it, so a page
+  // load is one round trip rather than dozens), 'url' when the words or the path mattered.
+  // A rung with images off decides per URL (step 3), so its answers must never be reused per host.
+  const base = { device_level: level, device: deviceId, known_device: known, cache_scope: def && def.images ? 'host' : 'url' };
 
   // 1. Rung 1: no web at all.
   if (!def || def.webMode === 'none') {
@@ -137,17 +152,16 @@ export async function handleProxyCheck(request, env) {
   }
 
   // 2. Search: judge the words. (Ahead of everything else so a search is always query-filtered.)
-  const search = parseSearchUrl(body.url);
   if (search) {
     if (search.isImageSearch && !def.imageSearch) {
-      return json({ ...base, allow: false, action: 'image_search', engine: search.engine, image_search: true,
+      return json({ ...base, cache_scope: 'url', allow: false, action: 'image_search', engine: search.engine, image_search: true,
         reason: 'Image search is turned off at this level.' });
     }
     const rated = await rateSearch(env, search);
     const allow = rated.level <= level;
     const imagesOff = allow && rated.imagesOk === false; // text answer permitted, result images stripped
     return json({
-      ...base, allow,
+      ...base, cache_scope: 'url', allow,
       action: allow ? (imagesOff ? 'allow_text_only' : 'allow') : 'search',
       images_off: imagesOff, level: rated.level, engine: search.engine,
       image_search: search.isImageSearch, reason: rated.reason,
@@ -156,7 +170,7 @@ export async function handleProxyCheck(request, env) {
 
   // 3. Image strip on a rung with images off (rung 2).
   if (!def.images && isImageRequest(u)) {
-    return json({ ...base, allow: false, action: 'image_blocked', hostname, reason: 'Images are turned off at this level.' });
+    return json({ ...base, cache_scope: 'url', allow: false, action: 'image_blocked', hostname, reason: 'Images are turned off at this level.' });
   }
 
   // 4. A search engine's bare homepage (no query) — let the box load wherever search is enabled.
@@ -165,7 +179,7 @@ export async function handleProxyCheck(request, env) {
   }
 
   // 5. Ordinary site: known verdict, else classify the whole domain inline.
-  let verdict = await lookupVerdict(env, hostname);
+  let verdict = await verdictPromise;
   let action;
   if (verdict) {
     if (verdict.site_mode === 'blocked') {

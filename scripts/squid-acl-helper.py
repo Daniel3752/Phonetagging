@@ -168,9 +168,9 @@ def ask_worker(user, url):
             detail = exc.read().decode()[:120]
         except Exception:
             pass
-        return False, f'filter error HTTP {exc.code} {detail}'.strip(), None, False
+        return False, f'filter error HTTP {exc.code} {detail}'.strip(), None, False, False
     except (urllib.error.URLError, OSError, ValueError, json.JSONDecodeError) as exc:
-        return False, f'filter unreachable ({type(exc).__name__})', None, False
+        return False, f'filter unreachable ({type(exc).__name__})', None, False, False
 
     level = body.get('device_level')
     level = level if isinstance(level, int) else None
@@ -179,6 +179,7 @@ def ask_worker(user, url):
         body.get('reason') or body.get('action') or 'blocked',
         level,
         body.get('images_off') is True,
+        body.get('cache_scope') == 'host',
     )
 
 
@@ -206,21 +207,24 @@ def _is_search_thumb_host(host):
 
 def decide(user, url):
     """The full local decision: search-thumbnail suppression → L1 blocklist (all rungs) → Worker →
-    L2 blocklist (rungs 1-4).
+    L2 blocklist (rungs 1-4). Returns (allow, reason, host_scoped).
 
     L1 is checked locally and first so an explicit host is denied without a Worker round trip and can
     never slip through the Worker's default-allow on a permissive rung. L2 is rung-dependent, so it is
-    applied after the Worker answers with device_level."""
+    applied after the Worker answers with device_level.
+
+    host_scoped is True when the answer depended on the hostname alone (the Worker says so, and the
+    local lists are hostname-based anyway), so the caller may reuse it for every URL on that host."""
     host = _host_of(url)
 
-    # A result thumbnail while this user's last search asked for images-off.
+    # A result thumbnail while this user's last search asked for images-off. Per URL, per moment.
     if host and _is_search_thumb_host(host) and _thumb_suppress.get(user, 0) > time.time():
-        return False, 'search images stripped'
+        return False, 'search images stripped', False
 
     if host and _domain_blocked(host, _blocklists['level1']):
-        return False, 'blocklist: explicit'
+        return False, 'blocklist: explicit', True
 
-    allow, reason, level, images_off = ask_worker(user, url)
+    allow, reason, level, images_off, host_scoped = ask_worker(user, url)
 
     # Arm thumbnail suppression for this user when a search was allowed text-only.
     if allow and images_off:
@@ -228,9 +232,9 @@ def decide(user, url):
 
     # Social is blocked on every rung except the most open (5).
     if allow and host and level is not None and level <= 4 and _domain_blocked(host, _blocklists['level2']):
-        return False, 'blocklist: social'
+        return False, 'blocklist: social', True
 
-    return allow, reason
+    return allow, reason, host_scoped
 
 
 def main():
@@ -267,11 +271,17 @@ def main():
             if user == '-':
                 user = ''
 
-            key = (user, url)
-            cached = _cache_get(key)
+            # Two cache keys. A page load fans out into dozens of URLs on one host, and for an
+            # ordinary site the answer is the same for all of them — so when the Worker says its
+            # decision was per-host, it is cached under the host and every other URL on that host
+            # is answered locally. Searches and per-URL image decisions stay keyed by full URL.
+            host_key = (user, 'host:' + _host_of(url))
+            cached = _cache_get(host_key)
             if cached is None:
-                allow, reason = decide(user, url)
-                _cache_put(key, allow)
+                cached = _cache_get((user, url))
+            if cached is None:
+                allow, reason, host_scoped = decide(user, url)
+                _cache_put(host_key if host_scoped else (user, url), allow)
             else:
                 allow, reason = cached, 'cached'
 
