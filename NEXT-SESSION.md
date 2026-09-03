@@ -1,5 +1,14 @@
 # Next session — start here
 
+> **Update 2026-09-03.** The live proxy is NOT the password model this file describes. Phones come
+> in over **WireGuard** (`wg0`, 10.66.0.0/24, UDP 443) with iptables redirecting 80/443 into Squid's
+> intercept ports; identity is the tunnel address, stored in `devices.proxy_user` (Isaac =
+> `10.66.0.3`). Squid now splices approved hostnames and decrypts only denied ones — see
+> `PROXY.md` "Decrypt or pass through". `scripts/squid.conf` is current again; the helper on the
+> server (`%LOGIN %SRC %URI`, threaded) is newer than `scripts/squid-acl-helper.py` and still needs
+> to be committed. Also fixed: Isaac's rung was 1 (no web) — the console offered "Never" as a
+> device rung and it clamped to 1; that option is gone and the API refuses it.
+
 You are picking up a phone content-filter project mid-deployment. The **first real
 phone was set up during the previous session** and is in a user's hands. Read this
 whole file before touching anything, then read the docs it points to. Do not change

@@ -70,6 +70,41 @@ app level instead. This list is the ongoing maintenance cost of the architecture
 by how many apps you permit — on a locked-down phone that is a handful, not the endless treadmill a
 consumer product would face.
 
+## Decrypt or pass through — decided per hostname (2026-09-03)
+
+The fact that shapes this: **on Android 7 and later, apps do not trust a user-installed
+certificate.** Only browsers do. So decrypting a connection only ever helps when a browser made it,
+and breaks any app that made it — and Squid cannot see which app opened a connection, only the
+hostname it asked for.
+
+The first live phone showed both failure modes in one afternoon. With `ssl_bump splice wg_phones`
+in place, every app worked and nothing was filtered: Instagram and TikTok loaded through blind
+tunnels the filter never saw. With that line removed, Instagram was blocked and Moovit broke, and
+every further app would have needed a line in `splice.txt` forever.
+
+So the decision is made per hostname, at the TLS handshake, by asking the filter:
+
+| Hostname is… | Squid does | Why |
+|---|---|---|
+| approved for this phone's rung | **splice** — tunnel untouched | apps work, nothing needs a certificate |
+| denied | **bump** — decrypt | Chrome gets the block page instead of a dead connection; an app just fails, which is a block either way |
+| a search engine (`bump_hosts`) | always bump | the typed query is in the URL; judging it is the point |
+| on the explicit blocklist | always bump | so the block page can explain itself |
+| in `splice.txt` | splice, never judged | Google account/Play infrastructure, WhatsApp, the MDM host |
+
+In `squid.conf` this is one rule, `ssl_bump splice filter_allows`, placed before `ssl_bump bump all`.
+The helper already turns the handshake's `host:443` into `https://host/` and runs the site check
+with the phone's rung, so no helper or Worker change is needed.
+
+What it gives up: on an approved site Chrome is filtered by **hostname**, not full path, and the
+rung-2 image stripping cannot see inside a spliced tunnel. That is the granularity the DNS design
+had, and path filtering is already deferred in the README. What it removes: the per-app splice
+treadmill. `splice.txt` is now only for hosts that must never be judged at all.
+
+Identity for WireGuard phones is the tunnel address (`10.66.0.x`), stored in `devices.proxy_user`.
+The helper is fed `%LOGIN %SRC %URI` and uses `%SRC` when there is no login. The Worker never
+knows the difference.
+
 ## Deploying
 
 ```
