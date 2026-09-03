@@ -1,0 +1,49 @@
+# /etc/wireguard/wg0.conf on the filter server — the LIVE design, keys removed.
+#
+# Phones connect over WireGuard; the tunnel address (10.66.0.x) is the phone's identity and must
+# equal devices.proxy_user in D1. Peers are appended by new-wg-phone.sh, one block per phone.
+# The phone-side config sets AllowedIPs = 0.0.0.0/0 so everything transits this box.
+
+[Interface]
+Address = 10.66.0.1/24
+ListenPort = 443
+PrivateKey = <server private key — /etc/wireguard/server.key>
+
+# All rules are scoped to the tunnel interface so the rest of the box (panel, 3128 path) is
+# untouched. PostUp/PostDown keep them exactly as alive as the tunnel itself.
+#
+#  * tcp 80/443 from phones -> squid intercept ports = the filter.
+#  * udp 443 rejected = no QUIC, browsers fall back to filtered TCP. REJECT, not DROP, so the
+#    fallback is instant instead of waiting on a timeout.
+#  * everything else NATs out, so DNS, push notifications and pinned apps just work (their TLS
+#    still transits squid via the redirect and is spliced or bumped per squid.conf).
+# The panel's own public redirect (tcp/443 -> Tomcat 8443, scoped to the external interface so it
+# can never swallow tunnel traffic). It lives here because nothing else on this box persists
+# iptables rules across reboots — wg0 comes up at boot and recreates the whole set.
+PostUp = iptables -t nat -A PREROUTING -i eth0 -p tcp --dport 443 -j REDIRECT --to-ports 8443
+PostDown = iptables -t nat -D PREROUTING -i eth0 -p tcp --dport 443 -j REDIRECT --to-ports 8443
+# Panel traffic first: requests from the tunnel to this box's own tcp/443 go straight to Tomcat
+# (the Headwind agent syncing), everything else into the filter. Order matters — the specific
+# rule must be appended before the generic one. The OUTPUT rule covers Squid's own locally
+# generated connections to the panel, which PREROUTING never sees.
+PostUp = iptables -t nat -A PREROUTING -i wg0 -p tcp -d 2.28.63.95 --dport 443 -j REDIRECT --to-ports 8443
+PostUp = iptables -t nat -A OUTPUT -p tcp -d 2.28.63.95 --dport 443 -j REDIRECT --to-ports 8443
+PostUp = iptables -t nat -A PREROUTING -i wg0 -p tcp --dport 80 -j REDIRECT --to-port 3129
+PostUp = iptables -t nat -A PREROUTING -i wg0 -p tcp --dport 443 -j REDIRECT --to-port 3130
+PostUp = iptables -A FORWARD -i wg0 -p udp --dport 443 -j REJECT
+PostUp = iptables -A FORWARD -i wg0 -j ACCEPT
+PostUp = iptables -A FORWARD -o wg0 -m state --state ESTABLISHED,RELATED -j ACCEPT
+PostUp = iptables -t nat -A POSTROUTING -s 10.66.0.0/24 -o eth0 -j MASQUERADE
+PostDown = iptables -t nat -D PREROUTING -i wg0 -p tcp -d 2.28.63.95 --dport 443 -j REDIRECT --to-ports 8443
+PostDown = iptables -t nat -D OUTPUT -p tcp -d 2.28.63.95 --dport 443 -j REDIRECT --to-ports 8443
+PostDown = iptables -t nat -D PREROUTING -i wg0 -p tcp --dport 80 -j REDIRECT --to-port 3129
+PostDown = iptables -t nat -D PREROUTING -i wg0 -p tcp --dport 443 -j REDIRECT --to-port 3130
+PostDown = iptables -D FORWARD -i wg0 -p udp --dport 443 -j REJECT
+PostDown = iptables -D FORWARD -i wg0 -j ACCEPT
+PostDown = iptables -D FORWARD -o wg0 -m state --state ESTABLISHED,RELATED -j ACCEPT
+PostDown = iptables -t nat -D POSTROUTING -s 10.66.0.0/24 -o eth0 -j MASQUERADE
+
+# phone: <label>
+[Peer]
+PublicKey = <phone public key>
+AllowedIPs = 10.66.0.3/32
