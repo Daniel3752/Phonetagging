@@ -9,6 +9,8 @@
 > concurrently and judges an unreachable homepage by name. The console can edit/delete phones and
 > no longer offers "Never" as a phone rung. Two clones exist on the server (`/root/Phonetagging`,
 > `/opt/Phonetagging`) — keep them on one branch, and never run `install-squid.sh` from a stale one.
+> `scripts/check-drift.sh` compares the installed files against the clone; run it before
+> touching the server and after, and commit whatever it flags.
 
 You are picking up a phone content-filter project mid-deployment. The **first real
 phone was set up two sessions ago** and is in a user's hands. Read this whole file
