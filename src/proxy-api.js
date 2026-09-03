@@ -31,7 +31,10 @@ function json(data, status = 200) {
 }
 
 function requireProxyKey(request, env) {
-  const expected = String(env.PROXY_KEY || env.OPERATOR_KEY || '').trim();
+  // PROXY_KEY only — no OPERATOR_KEY fallback. The operator key unlocks /admin and must not double
+  // as the proxy credential: the two have different holders (a human vs a server config file) and
+  // different blast radii when leaked.
+  const expected = String(env.PROXY_KEY || '').trim();
   if (!expected) return json({ error: 'proxy_not_configured' }, 503);
   const m = /^Bearer\s+(.+)$/i.exec((request.headers.get('Authorization') || '').trim());
   const provided = m ? m[1] : '';
