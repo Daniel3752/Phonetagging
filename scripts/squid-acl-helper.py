@@ -376,9 +376,10 @@ def _answer(channel, fields):
 _stdout_lock = threading.Lock()
 _inflight_lock = threading.Lock()
 _inflight: "dict[tuple[str, str], threading.Event]" = {}
-# Sized comfortably above squid's per-helper concurrency=32 burst; threads spend their time
-# blocked on the Worker call, so they are cheap.
-_pool = ThreadPoolExecutor(max_workers=32)
+# Sized well above squid's per-helper concurrency (64 in squid.conf). Threads spend their time
+# blocked on the Worker call or waiting for a leader's answer, so they are cheap — and running out
+# of them is not: squid's lookup queue then overflows and squid FAILS CLOSED, denying everything.
+_pool = ThreadPoolExecutor(max_workers=128)
 
 
 if __name__ == '__main__':

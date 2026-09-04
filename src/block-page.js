@@ -18,7 +18,7 @@
 function whyLine(rating) {
   if (!rating) return '';
   const { level, reason } = rating;
-  const note = reason ? ` — ${reason}` : '';
+  const note = reason ? ` — ${String(reason).replace(/[.\s]+$/, '')}` : '';
   if (level >= 6) return `Not allowed on any phone${note}`;
   return `Rated ${level} of 5${note}. This phone is set lower.`;
 }
