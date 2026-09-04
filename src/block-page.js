@@ -11,7 +11,19 @@
 //
 // Self-contained HTML (no external assets, no script) so it works even though every other host is
 // blocked, and renders instantly.
-export function renderBlockPage({ blockedUrl = '', kind = 'site', reason = '' } = {}) {
+// rating: { level, reason } for the site, when known. The reason on file describes the SITE, not
+// the denial — a rung-2 phone can be refused a site whose note reads "ordinary sports news". So
+// the page says what the site is rated and lets that explain the block, rather than presenting
+// the description as if it were an accusation.
+function whyLine(rating) {
+  if (!rating) return '';
+  const { level, reason } = rating;
+  const note = reason ? ` — ${reason}` : '';
+  if (level >= 6) return `Not allowed on any phone${note}`;
+  return `Rated ${level} of 5${note}. This phone is set lower.`;
+}
+
+export function renderBlockPage({ blockedUrl = '', kind = 'site', rating = null } = {}) {
   const esc = (s) => String(s).slice(0, 300)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
@@ -57,7 +69,7 @@ export function renderBlockPage({ blockedUrl = '', kind = 'site', reason = '' } 
     ${host && !isSearch ? `<p class="site">${esc(host)}</p>` : ''}
     <div class="card">
       <p>${body}</p>
-      ${reason ? `<p class="why">Why: ${esc(reason)}</p>` : ''}
+      ${whyLine(rating) ? `<p class="why">${esc(whyLine(rating))}</p>` : ''}
       <p class="why">If you need this for a legitimate reason, ask the person who set up this phone.</p>
     </div>
   </div>

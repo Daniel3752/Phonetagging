@@ -11,6 +11,16 @@
 > `/opt/Phonetagging`) — keep them on one branch, and never run `install-squid.sh` from a stale one.
 > `scripts/check-drift.sh` compares the installed files against the clone; run it before
 > touching the server and after, and commit whatever it flags.
+>
+> **State as of 2026-09-04:** the splice-if-approved rule blocked EVERYTHING on Isaac's phone
+> in live use even though the helper answered OK by hand (cause not yet found — suspected: the
+> handshake lookups overflowing squid's helper queue, which fails closed). So, on the server:
+> Isaac's phone (`10.66.0.3`) BYPASSES squid entirely via
+> `iptables -t nat -I PREROUTING -i wg0 -s 10.66.0.3 -j RETURN` (unfiltered; the rule does not
+> survive a reboot — remove with `-D` to re-enable filtering), and `squid.conf` is back on
+> `ssl_bump splice wg_phones` (Tuesday's working state). The rule in this repo's `squid.conf`
+> is to be proven on the **Vortex** first (`NEW-PHONE.md`, peer `vortex-b`), with the access log
+> on and `grep -iE "queue|too many" cache.log`. Do not re-enable it for Isaac until then.
 
 You are picking up a phone content-filter project mid-deployment. The **first real
 phone was set up two sessions ago** and is in a user's hands. Read this whole file

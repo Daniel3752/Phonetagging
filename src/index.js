@@ -103,8 +103,8 @@ export default {
       const kind = blockedUrl && parseSearchUrl(blockedUrl) ? 'search' : 'site';
       // The site's recorded reason, so the page can say why rather than just that. One lookup;
       // nothing about the phone is revealed, only what the classifier said about the site.
-      const reason = kind === 'site' ? await blockReason(env, blockedUrl) : '';
-      return new Response(renderBlockPage({ blockedUrl, kind, reason }), {
+      const rating = kind === 'site' ? await blockReason(env, blockedUrl) : null;
+      return new Response(renderBlockPage({ blockedUrl, kind, rating }), {
         headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' },
       });
     }
@@ -183,13 +183,13 @@ async function blockReason(env, blockedUrl) {
   const hashes = [await sha256Hex(hostname)];
   if (domain && domain !== hostname) hashes.push(await sha256Hex(domain));
   const rows = await env.DB.prepare(
-    `SELECT url_hash, reason FROM url_verdicts WHERE scope = 'host' AND url_hash IN (${hashes.map(() => '?').join(', ')})`
+    `SELECT url_hash, level, reason FROM url_verdicts WHERE scope = 'host' AND url_hash IN (${hashes.map(() => '?').join(', ')})`
   ).bind(...hashes).all().then((r) => r.results || []).catch(() => []);
   for (const h of hashes) {
     const row = rows.find((r) => r.url_hash === h);
-    if (row?.reason) return String(row.reason);
+    if (row) return { level: normalizeSiteLevel(row.level), reason: String(row.reason || '') };
   }
-  return '';
+  return null;
 }
 
 async function handleVerdict(request, env) {
