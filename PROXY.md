@@ -113,6 +113,23 @@ tcp/80 and tcp/443 into Squid's intercept ports, rejects udp/443 so QUIC cannot 
 path, and NATs the rest. The tunnel address is the phone's identity. Peers are added by
 `scripts/new-wg-phone.sh`; the per-phone checklist is `NEW-PHONE.md`.
 
+## The bug that blocked every search (found 2026-09-04)
+
+`external_acl_type` used `%LOGIN`. That token means *the authenticated login* and makes Squid
+require proxy authentication before it consults the helper. Intercepted tunnel requests cannot
+authenticate, so Squid denied every tunnel lookup itself, in 0 ms, without running the helper:
+
+```
+aclMatchExternal: shmira_filter check user authenticated.
+NOTICE: Authentication not applicable on intercepted requests.
+aclMatchExternal: shmira_filter user not authenticated (DENIED)
+```
+
+Symptoms: decrypted requests (searches) always hit the block page; spliced sites loaded
+unfiltered; the helper answered OK whenever run by hand; no helper decision was ever logged. The
+fix is `%un`, which forces nothing and is `-` for a tunnel phone. To see this class of problem in
+future: `debug_options ALL,1 82,4` for one page load, then `tail cache.log`, then remove it.
+
 ## Deploying
 
 ```

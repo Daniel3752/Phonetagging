@@ -300,7 +300,7 @@ def _answer(channel, fields):
     if len(fields) < 2:
         out = 'ERR message="malformed helper request"'
     else:
-        # squid.conf sends "%LOGIN %SRC %URI". A password-path phone has a login; a WireGuard
+        # squid.conf sends "%un %SRC %URI" (%un, not %LOGIN — see squid.conf). A password-path phone has a login; a WireGuard
         # phone has none ("-"), so its tunnel IP (%SRC) is its identity — the Worker looks both
         # up in the same devices.proxy_user column. The 2-field form is accepted so an old
         # squid.conf keeps working against a new helper during an upgrade.
