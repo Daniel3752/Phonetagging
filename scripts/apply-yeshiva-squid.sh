@@ -56,11 +56,13 @@ if ! grep -q '^acl browser_port myportname browser' "$work"; then
     note "4a. added acl browser_port"
   else echo "!! 4a. no 'acl step1 at_step SslBump1' line to anchor on. Not touching it." >&2; fi
 else note "4a. acl browser_port already present"; fi
+#    Anchor: the FIRST splice of filter_allows, whatever ACLs precede it (a live file may carry a
+#    scoped `ssl_bump splice test_phones filter_allows`). The rule goes immediately before it.
 if ! grep -q '^ssl_bump bump browser_port' "$work"; then
-  if grep -q '^ssl_bump splice worker_sni' "$work"; then
-    sed -i '/^ssl_bump splice worker_sni/a ssl_bump bump browser_port' "$work"; changed=1
-    note "4b. added ssl_bump bump browser_port after the worker_sni splice"
-  else echo "!! 4b. no 'ssl_bump splice worker_sni' line to anchor on. Not touching it." >&2; fi
+  if grep -qE '^ssl_bump splice .*filter_allows' "$work"; then
+    sed -i -E '0,/^ssl_bump splice .*filter_allows/s//ssl_bump bump browser_port\n&/' "$work"; changed=1
+    note "4b. added ssl_bump bump browser_port before the first filter_allows splice"
+  else echo "!! 4b. no 'ssl_bump splice ... filter_allows' line to anchor on. Not touching it." >&2; fi
 else note "4b. ssl_bump bump browser_port already present"; fi
 
 echo
