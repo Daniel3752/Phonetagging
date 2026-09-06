@@ -112,10 +112,12 @@ export function windowContains(schedule, day, minute) {
 //
 // With no matching window, the device's baseline policy stands.
 //
-// options.shiurMode is the operator's toggle (see SHIUR_MODES): 'on' forces the shiur policy on
-// every yeshiva-tag phone, 'off' drops the shiur windows before resolving.
+// options.shiurMode is the operator's fleet toggle (see SHIUR_MODES): 'on' forces the shiur policy
+// on every yeshiva-tag phone, 'off' drops the shiur windows before resolving. A phone whose own
+// shiur_lock is 0 is exempt from both: for it the mode is always 'off'.
 export function resolveEffectivePolicy(device, schedules, instant, options = {}) {
-  const shiurMode = normalizeShiurMode(options.shiurMode);
+  const exempt = device.shiur_lock === 0 || device.shiur_lock === false || device.shiur_lock === '0';
+  const shiurMode = exempt ? 'off' : normalizeShiurMode(options.shiurMode);
   if (shiurMode === 'on' && normalizeTag(device.tag) === 'yeshiva') {
     return { policyId: SHIUR_POLICY_ID, scheduleId: null, forced: true };
   }

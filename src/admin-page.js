@@ -210,6 +210,9 @@ export function renderAdminPage() {
       </div>
       <div class="card">
         <h2>Phones on the tag</h2>
+        <p class="sub" style="margin:0 0 10px">Shiur lock <strong>off</strong> exempts that phone from the
+          timetable and from "Locked now"; it stays on its rung. The fleet switch below still governs
+          every phone that is on.</p>
         <div id="yeshivaDevices"></div>
       </div>
       <div class="card">
@@ -533,12 +536,16 @@ export function renderAdminPage() {
     });
 
     var phones = state.devices.filter(function (d) { return d.tag === 'yeshiva'; });
-    id('yeshivaDevices').innerHTML = table(['Phone', 'Rung', 'Now running', 'Zone', 'Move to'], phones, function (d) {
+    id('yeshivaDevices').innerHTML = table(['Phone', 'Rung', 'Shiur lock', 'Now running', 'Zone', 'Move to'], phones, function (d) {
       var moves = y.levels.map(function (l) {
         return l.level === d.level ? '' :
           '<button class="ghost" style="margin:0 6px 0 0;padding:4px 10px" data-y-move="' + esc(d.id) + '" data-y-level="' + l.level + '">' + l.level + '</button>';
       }).join('');
+      var lockOn = Number(d.shiur_lock) !== 0;
       return '<tr><td>' + esc(d.label) + '</td><td>' + esc(levelName(d.level, 'yeshiva')) + '</td><td>' +
+        '<span class="pill ' + (lockOn ? 'allowed' : 'blocked') + '">' + (lockOn ? 'on' : 'off') + '</span> ' +
+        '<button class="ghost" style="margin:0 0 0 6px;padding:4px 10px" data-y-lock="' + esc(d.id) + '" data-y-on="' + (lockOn ? '0' : '1') + '">' +
+        (lockOn ? 'turn off' : 'turn on') + '</button></td><td>' +
         (d.last_applied_policy_id ? esc(policyName(d.last_applied_policy_id)) : '<span class="empty">not applied</span>') +
         '</td><td>' + esc(d.timezone) + (d.timezone !== 'Asia/Jerusalem' ? ' <span class="empty">(shiur times are local — is this right?)</span>' : '') +
         '</td><td style="white-space:nowrap">' + moves +
@@ -701,6 +708,14 @@ export function renderAdminPage() {
             (r.errors && r.errors.length ? ': ' + r.errors.join('; ') : '.'), r.failed === 0);
         });
       }).catch(function (err) { say(msg, err.message, false); btn.disabled = false; });
+      return;
+    }
+    if (ds.yLock) {
+      submit('saveShiur', 'yeshivaMsg', function () {
+        return api('/api/admin/devices/shiur', { id: ds.yLock, on: ds.yOn === '1' }).then(function () {
+          return api('/api/admin/apply', {});
+        });
+      }, 'Shiur lock ' + (ds.yOn === '1' ? 'on' : 'off') + ' for that phone. Web follows within a minute; apps were re-applied.');
       return;
     }
     if (ds.ySave) {

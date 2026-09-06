@@ -28,8 +28,9 @@ bumped, while every app stays on the intercept path and is spliced as before. No
 needed. The helper still knows how to force a bump per phone (`decrypt`) as a fallback; it is off
 on every ladder. Unproven on a phone: that Chrome takes the pushed setting (check chrome://policy).
 
-The shiur lock has a **toggle** (Yeshiva tab): Timetable / Off / Locked now — a `settings` row
-(`shiur_lock_mode`, migration 0017) read by the scheduler and the proxy alike.
+The shiur lock has a fleet **toggle** (Yeshiva tab): Timetable / Off / Locked now — a `settings`
+row (`shiur_lock_mode`, migration 0017) read by the scheduler and the proxy alike — and a
+**per-phone on/off** (`devices.shiur_lock`, migration 0018); per-phone off beats everything.
 
 Tests: `npm test` (adds `test/yeshiva.test.mjs`) and `npm run test:helper` (Python, drives the
 helper's line protocol offline). Both green.

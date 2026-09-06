@@ -64,9 +64,14 @@ rung 4 in `YESHIVA_LEVELS` (`src/levels.js`) — one word.
   in force. The block page says "The phone is locked right now — it's shiur time". This half needs
   no Headwind and applies within a minute of the window starting (the helper's cache TTL).
 
-**The toggle** (Yeshiva tab → Shiur lock): **Timetable** (default), **Off** (bein hazmanim, a
-trip — the windows are ignored), **Locked now** (every yeshiva phone locked immediately until you
-switch back). It is one setting read by both halves; changing it runs the scheduler.
+**The fleet toggle** (Yeshiva tab → Shiur lock): **Timetable** (default), **Off** (bein
+hazmanim, a trip — the windows are ignored), **Locked now** (every yeshiva phone locked
+immediately until you switch back). It is one setting read by both halves; changing it runs the
+scheduler.
+
+**Per phone** (Yeshiva tab → Phones on the tag → Shiur lock on/off): off exempts that one phone
+from the timetable and from "Locked now" — it stays on its rung's policy. Per-phone off beats
+the fleet toggle. Migration 0018 adds the column (`devices.shiur_lock`, default on).
 
 The windows, Sunday–Thursday, in the phone's local time (set every yeshiva phone's zone to
 `Asia/Jerusalem` — the form does this when you pick the tag):

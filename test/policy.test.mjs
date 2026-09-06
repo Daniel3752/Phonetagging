@@ -120,6 +120,15 @@ check('a row with no tag is the standard ladder', r.policyId === 'yeshiva_rung_3
 const exemption = sched({ id: 'ex', device_id: 'd2', base_policy_id: tagBaseId('yeshiva'), active_policy_id: 'yeshiva_rung_3', start_min: 0, end_min: 1439, priority: 5 });
 r = resolveEffectivePolicy(yDevice, [tagWide, exemption], new Date('2026-08-24T10:00:00Z'));
 check('a per-phone window at higher priority overrides the tag-wide one', r.policyId === 'yeshiva_rung_3', JSON.stringify(r));
+const shiur = sched({ id: 'sh', base_policy_id: tagBaseId('yeshiva'), active_policy_id: 'yeshiva_shiur', start_min: 0, end_min: 1439 });
+r = resolveEffectivePolicy(yDevice, [shiur], new Date('2026-08-24T10:00:00Z'), { shiurMode: 'schedule' });
+check('the shiur window locks a phone with the lock on', r.policyId === 'yeshiva_shiur', JSON.stringify(r));
+r = resolveEffectivePolicy({ ...yDevice, shiur_lock: 0 }, [shiur], new Date('2026-08-24T10:00:00Z'), { shiurMode: 'schedule' });
+check('a phone with its lock off ignores the window', r.policyId === 'yeshiva_rung_3', JSON.stringify(r));
+r = resolveEffectivePolicy({ ...yDevice, shiur_lock: 0 }, [shiur], new Date('2026-08-24T10:00:00Z'), { shiurMode: 'on' });
+check('and ignores "Locked now"', r.policyId === 'yeshiva_rung_3', JSON.stringify(r));
+r = resolveEffectivePolicy(yDevice, [], new Date('2026-08-24T10:00:00Z'), { shiurMode: 'on' });
+check('"Locked now" forces a phone with the lock on', r.policyId === 'yeshiva_shiur' && r.forced === true, JSON.stringify(r));
 
 console.log(failures ? `\n${failures} FAILURE(S)` : '\nAll checks passed.');
 process.exit(failures ? 1 : 0);

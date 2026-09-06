@@ -91,6 +91,10 @@ CREATE TABLE IF NOT EXISTS devices (
   -- Which ladder the rung is read on: 'standard' (the five rungs above) or 'yeshiva' (the
   -- temporary four-rung tag, see levels.js YESHIVA_LEVELS and YESHIVA.md).
   tag TEXT NOT NULL DEFAULT 'standard',
+  -- Does the shiur lock apply to this phone? 1 (default) = the timetable and the fleet toggle
+  -- govern it; 0 = exempt — it stays on its rung's policy through every window and through
+  -- "Locked now". Per-phone off beats everything (policy.js resolveEffectivePolicy).
+  shiur_lock INTEGER NOT NULL DEFAULT 1,
   -- The phone's own Cloudflare Gateway DNS location and the DoT hostname it was issued. DNS-over-
   -- TLS carries no identity, so a fleet sharing one resolver hostname can only share one policy;
   -- a location per phone makes the hostname itself the identity, and a level change becomes an API

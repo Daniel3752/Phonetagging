@@ -69,7 +69,7 @@ async function resolveDevice(env, proxyUser, now) {
   if (!proxyUser) return fallback;
 
   const rows = await env.DB.prepare(`
-    SELECT d.id, d.level, d.tag, d.timezone, d.policy_id, bp.web_mode AS base_web_mode,
+    SELECT d.id, d.level, d.tag, d.timezone, d.policy_id, d.shiur_lock, bp.web_mode AS base_web_mode,
            (SELECT value FROM settings WHERE key = 'shiur_lock_mode') AS shiur_mode,
            s.id AS s_id, s.device_id AS s_device_id, s.base_policy_id AS s_base_policy_id,
            s.active_policy_id AS s_active_policy_id, s.day_mask AS s_day_mask, s.start_min AS s_start_min,
@@ -87,7 +87,7 @@ async function resolveDevice(env, proxyUser, now) {
   const row = rows[0];
   const tag = normalizeTag(row.tag);
   const level = normalizeDeviceLevel(row.level, tag);
-  const device = { id: row.id, policy_id: row.policy_id, timezone: row.timezone, tag };
+  const device = { id: row.id, policy_id: row.policy_id, timezone: row.timezone, tag, shiur_lock: row.shiur_lock };
   const webModeByPolicy = new Map([[row.policy_id, row.base_web_mode]]);
   const schedules = [];
   for (const r of rows) {

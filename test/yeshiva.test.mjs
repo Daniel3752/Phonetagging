@@ -167,6 +167,25 @@ await admin('/api/admin/settings', { key: 'shiur_lock_mode', value: 'schedule' }
 out = await (await proxyCheck('10.66.0.4', 'https://brand-new-site.example/', {}, SEDER)).json();
 check('back on the timetable, seder locks again', out.action === 'locked');
 
+console.log('\n5c. the per-phone switch');
+check('a phone starts with the lock on', Number((await DB.prepare('SELECT shiur_lock FROM devices WHERE id = ?').bind('vortex').first()).shiur_lock) === 1);
+res = await admin('/api/admin/devices/shiur', { id: 'vortex', on: false });
+check('switched off for one phone', res.status === 200);
+out = await (await proxyCheck('10.66.0.4', 'https://brand-new-site.example/', {}, SEDER)).json();
+check('exempt: open during seder', out.allow === true, JSON.stringify(out));
+await admin('/api/admin/settings', { key: 'shiur_lock_mode', value: 'on' });
+out = await (await proxyCheck('10.66.0.4', 'https://brand-new-site.example/', {}, LUNCH)).json();
+check('exempt: "Locked now" skips it too', out.allow === true, JSON.stringify(out));
+await admin('/api/admin/settings', { key: 'shiur_lock_mode', value: 'schedule' });
+// Re-saving the phone from the form without the field keeps the switch as it was.
+await admin('/api/admin/devices', { id: 'vortex', label: 'Vortex', policy_id: 'yeshiva_rung_2', timezone: 'Asia/Jerusalem', tag: 'yeshiva', level: 2, proxy_user: '10.66.0.4' });
+check('a re-save without the field keeps it off', Number((await DB.prepare('SELECT shiur_lock FROM devices WHERE id = ?').bind('vortex').first()).shiur_lock) === 0);
+res = await admin('/api/admin/devices/shiur', { id: 'nope', on: true });
+check('an unknown phone is a 404', res.status === 404);
+await admin('/api/admin/devices/shiur', { id: 'vortex', on: true });
+out = await (await proxyCheck('10.66.0.4', 'https://brand-new-site.example/', {}, SEDER)).json();
+check('switched back on, seder locks', out.action === 'locked');
+
 console.log('\n6. rung 1 has no browser; the block page knows a locked phone and a stripped image');
 await admin('/api/admin/devices/level', { id: 'vortex', level: 1 });
 out = await (await proxyCheck('10.66.0.4', 'https://brand-new-site.example/', {}, LUNCH)).json();

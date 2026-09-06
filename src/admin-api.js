@@ -167,6 +167,11 @@ export async function handleAdmin(request, env, path) {
       }
 
       const id = body.id || newId('dev');
+      // Per-phone shiur lock. Omitted = keep what the row has (or on, for a new phone).
+      const existingLock = await env.DB.prepare('SELECT shiur_lock FROM devices WHERE id = ?').bind(id).first();
+      const shiurLock = body.shiur_lock === undefined || body.shiur_lock === null
+        ? (existingLock ? Number(existingLock.shiur_lock) : 1)
+        : (body.shiur_lock === true || body.shiur_lock === 1 || body.shiur_lock === '1' || body.shiur_lock === 'on' ? 1 : 0);
 
       // Generate a password per phone rather than letting the operator pick one — a chosen password
       // gets reused across phones, and reuse is the only way one leaked login becomes a fleet-wide
@@ -179,15 +184,15 @@ export async function handleAdmin(request, env, path) {
         || generateProxyPassword();
       try {
         await env.DB.prepare(`
-          INSERT INTO devices (id, headwind_device_id, label, policy_id, timezone, enrolled_at, level, tag, proxy_user, proxy_password)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          INSERT INTO devices (id, headwind_device_id, label, policy_id, timezone, enrolled_at, level, tag, shiur_lock, proxy_user, proxy_password)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(id) DO UPDATE SET
             headwind_device_id = excluded.headwind_device_id, label = excluded.label,
             policy_id = excluded.policy_id, timezone = excluded.timezone,
-            level = excluded.level, tag = excluded.tag, proxy_user = excluded.proxy_user,
-            proxy_password = excluded.proxy_password
+            level = excluded.level, tag = excluded.tag, shiur_lock = excluded.shiur_lock,
+            proxy_user = excluded.proxy_user, proxy_password = excluded.proxy_password
         `).bind(id, body.headwind_device_id || null, label, body.policy_id,
-                body.timezone || 'UTC', Date.now(), level, tag, proxyUser, proxyPassword).run();
+                body.timezone || 'UTC', Date.now(), level, tag, shiurLock, proxyUser, proxyPassword).run();
       } catch (err) {
         // proxy_user is uniquely indexed: two phones sharing a login would silently share a rung,
         // and whichever was loosest would win for both.
@@ -282,6 +287,19 @@ export async function handleAdmin(request, env, path) {
       if (!res.meta?.changes) return json({ error: 'no such device' }, 404);
       await audit(env, 'operator', 'device_level_set', body.id, `${tag} level ${level}`);
       return json({ ok: true, level, tag });
+    }
+
+    // Switch the shiur lock on or off for one phone. Off = exempt from the windows and from the
+    // fleet "Locked now"; on = governed by them. Its own route so the Yeshiva tab can flip it
+    // without re-sending the whole device.
+    case 'POST /api/admin/devices/shiur': {
+      if (!body.id) return json({ error: 'id is required' }, 400);
+      const on = body.on === true || body.on === 1 || body.on === '1' || body.on === 'on';
+      const res = await env.DB.prepare('UPDATE devices SET shiur_lock = ? WHERE id = ?')
+        .bind(on ? 1 : 0, body.id).run();
+      if (!res.meta?.changes) return json({ error: 'no such device' }, 404);
+      await audit(env, 'operator', 'device_shiur_lock_set', body.id, on ? 'on' : 'off');
+      return json({ ok: true, shiur_lock: on ? 1 : 0 });
     }
 
     // --- overriding the classifier ----------------------------------------------------------------
