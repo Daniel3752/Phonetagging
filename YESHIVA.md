@@ -96,22 +96,16 @@ server files should go together.
 1. **D1:** `npm run db:migrate` (applies `0016_yeshiva_tag.sql`: three new columns, the policies,
    175 app rules, four windows). Through the ledger, never `d1 execute --file`.
 2. **Worker:** `npx wrangler deploy` from a clone of this branch.
-3. **Server** (`ssh root@mdm.getshmira.com`), from `/opt/Phonetagging` on this branch:
+3. **Server** (`ssh root@mdm.getshmira.com`), from `/opt/Phonetagging`:
    ```
-   git pull
-   install -m 755 scripts/squid-acl-helper.py /usr/local/bin/squid-acl-helper.py
-   install -m 644 scripts/squid.conf /etc/squid/squid.conf     # see the warning below
-   squid -k parse && squid -k reconfigure
-   scripts/check-drift.sh
+   git fetch origin && git checkout claude/yeshiva-temp-tag-shiur-0kgp2f && git pull
+   sudo scripts/apply-yeshiva-squid.sh
    ```
-   **Warning:** the live `squid.conf` carries the scoped test rule (`acl test_phones src 10.66.0.4`,
-   see NEXT-SESSION.md) and the access log is on. Reinstalling the repo copy removes both. If the
-   Vortex test still needs the scoped rule, apply only the two changed lines by hand instead:
-   the `external_acl_type` format (`%un %SRC %URI %>ha{Sec-Fetch-Dest}`), the `deny_info` URL
-   (`...blocked?url=%s&why=%o`), `name=browser` on the `http_port 3128` line, and the two lines
-   `acl browser_port myportname browser` + `ssl_bump bump browser_port` (placed just before
-   `ssl_bump splice filter_allows`). The helper is safe to install either way (it accepts the old
-   3-field line). Reconfigure restarts the helpers.
+   That script patches the LIVE `/etc/squid/squid.conf` in place (the four changed lines: helper
+   format, deny_info, `name=browser`, the browser_port acl + bump rule), keeps everything else —
+   the scoped `test_phones` rule and the access log included — backs the file up beside itself,
+   installs the helper, parses and reconfigures. Idempotent; `--dry-run` shows the diff first.
+   Do NOT run `install-squid.sh` — it would overwrite the hand edits.
 4. **The phone's row** (Devices tab, Edit): Tag = Yeshiva, Rung = 2, Baseline policy follows
    (`Yeshiva — Rung 2`), Time zone `Asia/Jerusalem`, proxy login = its tunnel IP. Save.
 5. **Chrome's proxy setting**, in Headwind: the phone's configuration → Applications → Chrome →
