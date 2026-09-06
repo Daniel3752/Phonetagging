@@ -133,6 +133,15 @@ CREATE TABLE IF NOT EXISTS schedules (
 
 CREATE INDEX IF NOT EXISTS idx_schedules_lookup ON schedules (base_policy_id, device_id);
 
+-- Operator-wide switches. Today: shiur_lock_mode ('schedule' | 'off' | 'on', see policy.js
+-- SHIUR_MODES) — the toggle on /admin → Yeshiva. Read by the scheduler and, in the same query as
+-- the device row, by the proxy.
+CREATE TABLE IF NOT EXISTS settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
 -- Every operator action and every automated policy flip. Non-negotiable for a system that reaches
 -- into other families' phones: if a phone's apps changed, this says what changed it and when.
 CREATE TABLE IF NOT EXISTS audit_log (

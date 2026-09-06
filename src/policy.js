@@ -38,6 +38,19 @@ export function scheduleCoversDevice(schedule, device) {
   return false;
 }
 
+// The shiur lock toggle (/admin → Yeshiva). Stored in the settings table as shiur_lock_mode:
+//   'schedule' — the timetable decides (default)
+//   'off'      — the shiur windows are ignored; phones stay on their rung's policy
+//   'on'       — every yeshiva phone is locked now, whatever the clock says
+// Applied identically by the scheduler (apps) and the proxy (web), via resolveEffectivePolicy.
+export const SHIUR_POLICY_ID = 'yeshiva_shiur';
+export const SHIUR_MODES = ['schedule', 'off', 'on'];
+
+export function normalizeShiurMode(value) {
+  const v = String(value || '').trim().toLowerCase();
+  return SHIUR_MODES.includes(v) ? v : 'schedule';
+}
+
 // A schedule's day_mask is a 7-bit field, bit 0 = Sunday. Matched against the day the window
 // STARTS, which is what makes a wrapped window like Fri 22:00–06:00 land on Friday night rather
 // than Saturday morning.
@@ -98,7 +111,18 @@ export function windowContains(schedule, day, minute) {
 // operator gave is the one that takes effect.
 //
 // With no matching window, the device's baseline policy stands.
-export function resolveEffectivePolicy(device, schedules, instant) {
+//
+// options.shiurMode is the operator's toggle (see SHIUR_MODES): 'on' forces the shiur policy on
+// every yeshiva-tag phone, 'off' drops the shiur windows before resolving.
+export function resolveEffectivePolicy(device, schedules, instant, options = {}) {
+  const shiurMode = normalizeShiurMode(options.shiurMode);
+  if (shiurMode === 'on' && normalizeTag(device.tag) === 'yeshiva') {
+    return { policyId: SHIUR_POLICY_ID, scheduleId: null, forced: true };
+  }
+  if (shiurMode === 'off') {
+    schedules = schedules.filter((s) => s.active_policy_id !== SHIUR_POLICY_ID);
+  }
+
   const { day, minute } = localTime(instant, device.timezone || 'UTC');
 
   const matches = schedules.filter((s) =>

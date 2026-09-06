@@ -123,8 +123,10 @@ check('rung 1 has no browser; the rest share one blocklist browser with images o
     assert.equal(d.images, false);
     assert.equal(d.imageSearch, false);
     assert.equal(d.blockSocial, true);
-    assert.equal(d.decrypt, true);
   }
+});
+check('no ladder forces a bump — the browser has its own port', () => {
+  assert.ok([...LEVELS, ...YESHIVA_LEVELS].every((l) => !l.decrypt));
 });
 check('rungs 1-2 are app allowlists, 3-4 blocklists', () => {
   assert.deepEqual(YESHIVA_LEVELS.map((l) => l.appModel), ['allowlist', 'allowlist', 'blocklist', 'blocklist']);
@@ -135,8 +137,7 @@ check('on a blocklist rung only NEVER is invisible', () => {
   assert.equal(isVisibleAtLevel(site(NEVER_LEVEL), 2, d), false);
   assert.equal(isVisibleAtLevel(undefined, 2, d), false);
 });
-check('the standard ladder does not decrypt approved hosts', () => {
-  assert.ok(LEVELS.every((l) => !l.decrypt));
+check('each tag has its policy id prefix', () => {
   assert.equal(TAGS.standard.policyPrefix, 'apps_rung');
   assert.equal(TAGS.yeshiva.policyPrefix, 'yeshiva_rung');
 });

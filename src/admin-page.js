@@ -213,6 +213,17 @@ export function renderAdminPage() {
         <div id="yeshivaDevices"></div>
       </div>
       <div class="card">
+        <h2>Shiur lock</h2>
+        <p class="sub" style="margin:0 0 10px">
+          <strong>Timetable</strong> locks every yeshiva phone inside the windows below.
+          <strong>Off</strong> ignores the windows (bein hazmanim, a trip). <strong>Locked now</strong>
+          locks every yeshiva phone immediately, whatever the clock says, until you switch back. The
+          web side follows within a minute; the apps on the next scheduler run (this runs it).
+        </p>
+        <div id="shiurToggle"></div>
+        <div class="msg" id="shiurToggleMsg"></div>
+      </div>
+      <div class="card">
         <h2>Shiur timetable</h2>
         <p class="sub" style="margin:0 0 10px">
           Inside these windows every yeshiva phone switches to the shiur policy: only the essentials
@@ -534,6 +545,12 @@ export function renderAdminPage() {
         '<button class="ghost" style="margin:0;padding:4px 10px" data-y-move="' + esc(d.id) + '" data-y-tag="standard" data-y-level="4">standard 4</button></td></tr>';
     });
 
+    var mode = (state.settings && state.settings.shiur_lock_mode) || 'schedule';
+    id('shiurToggle').innerHTML = [['schedule', 'Timetable'], ['off', 'Off'], ['on', 'Locked now']].map(function (m) {
+      return '<button type="button" class="' + (m[0] === mode ? '' : 'ghost') + '" style="margin:0 8px 0 0" data-shiur-mode="' + m[0] + '"' +
+        (m[0] === mode ? ' disabled' : '') + '>' + m[1] + '</button>';
+    }).join('') + '<span class="empty" style="margin-left:8px">now: ' + esc(mode === 'on' ? 'locked' : mode === 'off' ? 'off' : 'following the timetable') + '</span>';
+
     var windows = state.schedules.filter(function (s) { return s.base_policy_id === 'tag:yeshiva'; });
     id('shiurTable').innerHTML = table(['When', 'Days', 'Switch to', 'Pri', ''], windows, function (s) {
       return '<tr><td>' + minutesToText(s.start_min) + '&ndash;' + minutesToText(s.end_min) +
@@ -672,6 +689,19 @@ export function renderAdminPage() {
           });
         });
       }, 'Phone moved.');
+    }
+    if (ds.shiurMode) {
+      var btn = e.target, msg = id('shiurToggleMsg');
+      btn.disabled = true;
+      api('/api/admin/settings', { key: 'shiur_lock_mode', value: ds.shiurMode }).then(function () {
+        return api('/api/admin/apply', {});
+      }).then(function (r) {
+        return refresh().then(function () {
+          say(msg, 'Saved. Apps: ' + r.changed + ' changed, ' + r.unchanged + ' already correct, ' + r.failed + ' failed' +
+            (r.errors && r.errors.length ? ': ' + r.errors.join('; ') : '.'), r.failed === 0);
+        });
+      }).catch(function (err) { say(msg, err.message, false); btn.disabled = false; });
+      return;
     }
     if (ds.ySave) {
       var input = document.querySelector('[data-y-cfg="' + ds.ySave + '"]');

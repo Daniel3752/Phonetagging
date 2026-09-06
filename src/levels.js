@@ -68,15 +68,18 @@ export const LEVELS = [
 //   4  Blocklist            — the same blocklist minus the social apps.
 //
 // appModel is what policies.app_default mirrors for the policy that pairs with the rung.
-// decrypt: true means the proxy BUMPS every approved host for these phones rather than splicing
-// it (see PROXY.md "Decrypt or pass through"): an image can only be blanked on a connection the
-// proxy can see inside. The cost is that an app which does not trust the filter's certificate
-// breaks unless its hosts are in splice.txt — bounded on rungs 1-2 by the short app allowlist.
+//
+// Images are blanked in the BROWSER only. Chrome is pointed at the proxy's browser port (3128,
+// pushed by Headwind as a Chrome managed setting), where everything is decrypted; app traffic
+// takes the intercept path and is spliced as on the standard ladder, so no app breaks and nothing
+// needs a splice entry. decrypt: true would instead make the helper force a bump of every
+// approved host for these phones at the TLS handshake — the fallback if the Chrome setting cannot
+// be pushed, at the cost of breaking apps that reject the filter's certificate. Off.
 export const YESHIVA_LEVELS = [
-  { level: 1, name: 'Apps only',            webMode: 'none',      images: false, textSearch: false, imageSearch: false, blockSocial: true, appModel: 'allowlist', decrypt: true },
-  { level: 2, name: 'Apps + browser',       webMode: 'blocklist', images: false, textSearch: true,  imageSearch: false, blockSocial: true, appModel: 'allowlist', decrypt: true },
-  { level: 3, name: 'Blocklist, no social', webMode: 'blocklist', images: false, textSearch: true,  imageSearch: false, blockSocial: true, appModel: 'blocklist', decrypt: true },
-  { level: 4, name: 'Blocklist',            webMode: 'blocklist', images: false, textSearch: true,  imageSearch: false, blockSocial: true, appModel: 'blocklist', decrypt: true },
+  { level: 1, name: 'Apps only',            webMode: 'none',      images: false, textSearch: false, imageSearch: false, blockSocial: true, appModel: 'allowlist', decrypt: false },
+  { level: 2, name: 'Apps + browser',       webMode: 'blocklist', images: false, textSearch: true,  imageSearch: false, blockSocial: true, appModel: 'allowlist', decrypt: false },
+  { level: 3, name: 'Blocklist, no social', webMode: 'blocklist', images: false, textSearch: true,  imageSearch: false, blockSocial: true, appModel: 'blocklist', decrypt: false },
+  { level: 4, name: 'Blocklist',            webMode: 'blocklist', images: false, textSearch: true,  imageSearch: false, blockSocial: true, appModel: 'blocklist', decrypt: false },
 ];
 
 // The tags a device can carry, with the ladder each one uses and the app-policy id convention

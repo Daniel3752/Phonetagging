@@ -41,14 +41,15 @@ rung 4 in `YESHIVA_LEVELS` (`src/levels.js`) — one word.
   then on the explicit list). If that matters before migration, the one-line fix is to pass
   `noModel: false` for blocklist rungs in `proxy-api.js` `rateSearch` — the model then rates every
   search and NEVER refuses it, at a model call per new query.
-- **Decrypt, not splice.** To blank an image the proxy has to see inside the connection, so on a
-  yeshiva phone the helper refuses the splice at the TLS handshake for every approved host and
-  Squid bumps it (`decrypt: true` on the ladder). Chrome trusts the filter CA, so Chrome is fine.
-  **An app that does not trust our certificate breaks on a yeshiva phone unless its hosts are in
-  `/etc/squid/splice.txt`** — WhatsApp, Google/Play and the MDM host already are. On rungs 1–2
-  the allowlist is short, so the list of apps that can need a splice entry is short; on rungs 3–4
-  expect to add entries (banking apps first). The standard ladder is untouched: it still splices
-  approved hosts.
+- **Only the browser is decrypted; no app is touched.** To blank an image the proxy has to see
+  inside the connection, and Squid cannot tell an app's connection from Chrome's by hostname. So
+  Chrome gets its own door: Headwind pushes Chrome a managed proxy setting pointing at Squid's
+  explicit port through the tunnel (`10.66.0.1:3128`, named `browser` in squid.conf), and
+  everything on that port is bumped. Apps never use it — their traffic takes the intercept path,
+  where approved hosts are spliced exactly as on the standard ladder. **Nothing needs a splice
+  entry.** Setup is one Chrome managed configuration in Headwind (below). If the setting is not
+  applied, Chrome falls back to the intercept path: still filtered by hostname (both lists, the
+  shiur lock), but images load — so verify it on the phone (chrome://policy shows the values).
 
 ## The shiur lock
 
@@ -62,6 +63,10 @@ rung 4 in `YESHIVA_LEVELS` (`src/levels.js`) — one word.
   every request, the same way the scheduler does, and refuses everything while the shiur policy is
   in force. The block page says "The phone is locked right now — it's shiur time". This half needs
   no Headwind and applies within a minute of the window starting (the helper's cache TTL).
+
+**The toggle** (Yeshiva tab → Shiur lock): **Timetable** (default), **Off** (bein hazmanim, a
+trip — the windows are ignored), **Locked now** (every yeshiva phone locked immediately until you
+switch back). It is one setting read by both halves; changing it runs the scheduler.
 
 The windows, Sunday–Thursday, in the phone's local time (set every yeshiva phone's zone to
 `Asia/Jerusalem` — the form does this when you pick the tag):
@@ -102,15 +107,27 @@ server files should go together.
    **Warning:** the live `squid.conf` carries the scoped test rule (`acl test_phones src 10.66.0.4`,
    see NEXT-SESSION.md) and the access log is on. Reinstalling the repo copy removes both. If the
    Vortex test still needs the scoped rule, apply only the two changed lines by hand instead:
-   the `external_acl_type` format (`%un %SRC %URI %>ha{Sec-Fetch-Dest}`) and the `deny_info` URL
-   (`...blocked?url=%s&why=%o`). The helper is safe to install either way (it accepts the old
+   the `external_acl_type` format (`%un %SRC %URI %>ha{Sec-Fetch-Dest}`), the `deny_info` URL
+   (`...blocked?url=%s&why=%o`), `name=browser` on the `http_port 3128` line, and the two lines
+   `acl browser_port myportname browser` + `ssl_bump bump browser_port` (placed just before
+   `ssl_bump splice filter_allows`). The helper is safe to install either way (it accepts the old
    3-field line). Reconfigure restarts the helpers.
 4. **The phone's row** (Devices tab, Edit): Tag = Yeshiva, Rung = 2, Baseline policy follows
    (`Yeshiva — Rung 2`), Time zone `Asia/Jerusalem`, proxy login = its tunnel IP. Save.
+5. **Chrome's proxy setting**, in Headwind: the phone's configuration → Applications → Chrome →
+   application settings (managed configuration), add:
+   ```
+   ProxyMode     string   fixed_servers
+   ProxyServer   string   10.66.0.1:3128
+   ```
+   (`10.66.0.1` is the server's address inside the tunnel, reachable only through it.) Sync the
+   phone; `chrome://policy` on the phone lists both values when it took. This is per
+   configuration, so put it on every configuration a yeshiva phone can be switched to (rungs and
+   Shiur alike). Without it Chrome is still filtered, but images show.
 
 From here the WEB side of the tag and the shiur lock are live for that phone. The APP side needs:
 
-5. **Headwind configurations**, in the panel, one per yeshiva policy:
+6. **Headwind configurations**, in the panel, one per yeshiva policy:
    - `Yeshiva — Rung 1..4`: copy of **Background (Agent) Mode** with the restrictions from
      NEW-PHONE.md §E; app list per the policy (Install the allowed ones; for the allowlist rungs
      Delete/hide Chrome on rung 1 and the rest of what the phone ships with that is not listed —
@@ -121,7 +138,7 @@ From here the WEB side of the tag and the shiur lock are live for that phone. Th
    Paste each configuration's id on the Yeshiva tab (Headwind configurations card). Until then the
    scheduler reports "no Headwind configuration mapped" for yeshiva phones every five minutes —
    noisy in the audit log, harmless.
-6. **Apply now** and watch the phone: inside a window the agent should sync into kiosk with the
+7. **Apply now** and watch the phone: inside a window the agent should sync into kiosk with the
    essentials; outside it, back to the rung's configuration. The agent polls; a reboot forces it.
 
 ## Testing on the Vortex
@@ -131,15 +148,16 @@ key). Then, with the Vortex on rung 2 of the tag, on the hotspot, in Chrome:
 
 1. `https://en.wikipedia.org` — loads, **every picture a grey box of the right shape**, layout intact.
    If pictures are missing entirely (collapsed) rather than grey: the redirect to `/blocked` is
-   not reaching the Worker (check `deny_info` line). If pictures LOAD: the host was spliced —
-   `grep shmira-decision /var/log/squid/cache.log` should show the handshake denied with
-   `decrypt:` on this phone; if it was allowed, the live helper is the old one.
+   not reaching the Worker (check the `deny_info` line). If pictures LOAD: Chrome is not on the
+   browser port — `chrome://policy` on the phone should show ProxyMode/ProxyServer; on the server
+   `ss -tn | grep :3128` should show the phone's tunnel IP connected.
+1b. Open WhatsApp, Waze, a bank app — all work, untouched (they are on the intercept path).
 2. Search "volcano" — text results, thumbnails grey. Search "porn" — the refused-search page.
 3. `https://www.instagram.com` — block page (social list). `https://pornhub.com` — block page.
 4. `https://www.ynet.co.il` or any never-seen site — loads (no rating, no model call; the Worker's
    logs show no classification).
-5. During a shiur window (or add a 5-minute window on the Yeshiva tab, priority 200, to test
-   now): any site → "The phone is locked right now". WhatsApp still works (spliced, never judged).
+5. Yeshiva tab → Shiur lock → **Locked now**: any site → "The phone is locked right now"; WhatsApp
+   still works. Back to **Timetable**.
 6. Move the phone to rung 1 (Yeshiva tab, "1" button): Chrome shows the block page for everything;
    move it back.
 7. `scripts/check-drift.sh` clean, then the app side per step 5 above.
@@ -157,8 +175,10 @@ Built and tested offline: the tag, the ladder, the blocklist browser, image blan
 lock on the web side, the tag-wide windows with per-phone exemptions, the console tab, the helper
 and squid.conf changes, the migration.
 
-Depends on the phone: image blanking under bump on Android Chrome (the mechanism is deny_info →
-`/blocked` → SVG; unproven on a device), kiosk-mode switching by the scheduler (the scheduler's
+Depends on the phone: Chrome honouring the pushed ProxyMode/ProxyServer (a documented Chrome
+managed policy on Android, pushed through Headwind's per-app settings — unproven here), image
+blanking on Android Chrome (deny_info → `/blocked` → SVG; unproven on a device), kiosk-mode
+switching by the scheduler (the scheduler's
 configuration swap is tested against a fake Headwind; kiosk entry/exit on the agent is not),
 which stock package names the Vortex actually has, and which apps on rungs 3–4 need splice
 entries.

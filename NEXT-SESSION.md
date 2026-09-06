@@ -15,17 +15,21 @@ allowlist, `web_mode 'none'`) is swapped in by four tag-wide schedules Sun–Thu
 everything while it is in force. The console has a **Yeshiva** tab.
 
 Deploy order and the exact commands are in `YESHIVA.md` "Deploying it". Two things to know before
-touching the server: (1) `squid.conf` changed on two lines — the helper format gains
-`%>ha{Sec-Fetch-Dest}` and `deny_info` gains `&why=%o` — and the live file still has the scoped
-`test_phones` rule + access log, so apply those two lines by hand rather than reinstalling; (2) the
-helper is backward compatible with the old 3-field line, the Worker with the old helper.
+touching the server: (1) `squid.conf` changed in four places — the helper format gains
+`%>ha{Sec-Fetch-Dest}`, `deny_info` gains `&why=%o`, `http_port 3128` gains `name=browser`, and
+`acl browser_port` + `ssl_bump bump browser_port` are new — and the live file still has the scoped
+`test_phones` rule + access log, so apply those by hand rather than reinstalling; (2) the helper is
+backward compatible with the old 3-field line, the Worker with the old helper.
 
-The trade-off decided this session: yeshiva phones are **bumped, not spliced**, on approved hosts
-(the helper refuses the splice at the handshake when the Worker says `decrypt: true`), because an
-image can only be blanked on a connection the proxy sees inside. Apps that reject the CA break on
-those phones unless in `splice.txt`. The standard ladder is unchanged (still splices). An idea not
-built: push Chrome-only proxy settings (`ProxyMode`/`ProxyServer` → 3128 over the tunnel) through
-Headwind's per-app managed settings so only Chrome is bumped and apps keep the splice path.
+How images get blanked without breaking apps: **only the browser is decrypted**. Port 3128 is now
+the browser's port (`name=browser`, `ssl_bump bump browser_port`); Headwind pushes Chrome a managed
+`ProxyMode=fixed_servers` / `ProxyServer=10.66.0.1:3128`, so Chrome's traffic arrives there and is
+bumped, while every app stays on the intercept path and is spliced as before. No splice entries
+needed. The helper still knows how to force a bump per phone (`decrypt`) as a fallback; it is off
+on every ladder. Unproven on a phone: that Chrome takes the pushed setting (check chrome://policy).
+
+The shiur lock has a **toggle** (Yeshiva tab): Timetable / Off / Locked now — a `settings` row
+(`shiur_lock_mode`, migration 0017) read by the scheduler and the proxy alike.
 
 Tests: `npm test` (adds `test/yeshiva.test.mjs`) and `npm run test:helper` (Python, drives the
 helper's line protocol offline). Both green.

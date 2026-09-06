@@ -83,7 +83,7 @@ console.log('\n3. the yeshiva browser: blocklists only, no model, images blanked
 modelCalls = 0;
 let out = await (await proxyCheck('10.66.0.4', 'https://brand-new-site.example/page', {}, LUNCH)).json();
 check('an unknown site is allowed without asking the model', out.allow === true && modelCalls === 0, JSON.stringify(out));
-check('the answer tells the helper to decrypt and block social', out.decrypt === true && out.block_social === true && out.tag === 'yeshiva', JSON.stringify(out));
+check('the answer tells the helper to block social and not to force a bump (the browser port does that)', out.decrypt === false && out.block_social === true && out.tag === 'yeshiva', JSON.stringify(out));
 check('without the helper feature the answer is per URL', out.cache_scope === 'url');
 out = await (await proxyCheck('10.66.0.4', 'https://brand-new-site.example/page', { features: ['strip_images'] }, LUNCH)).json();
 check('with the helper feature it is per host and flags strip_images', out.cache_scope === 'host' && out.strip_images === true, JSON.stringify(out));
@@ -147,6 +147,25 @@ await admin('/api/admin/schedules/delete', { id: 'amud_vortex' });
 
 res = await admin('/api/admin/schedules', { base_policy_id: 'tag:kollel', active_policy_id: 'yeshiva_shiur', day_mask: 31, start: '10:00', end: '11:00' });
 check('a window on an unknown tag is refused', res.status === 400);
+
+console.log('\n5b. the shiur toggle');
+check('the toggle is served with the state, defaulting to the timetable', (await (await admin('/api/admin/state', null, 'GET')).json()).settings?.shiur_lock_mode === 'schedule');
+res = await admin('/api/admin/settings', { key: 'shiur_lock_mode', value: 'on' });
+check('switched on', res.status === 200);
+out = await (await proxyCheck('10.66.0.4', 'https://brand-new-site.example/', {}, LUNCH)).json();
+check('"locked now" locks a yeshiva phone in the lunch break', out.action === 'locked', JSON.stringify(out));
+out = await (await proxyCheck('10.66.0.3', 'https://en.wikipedia.org/', {}, LUNCH)).json();
+check('but not a standard-ladder phone', out.action !== 'locked', JSON.stringify(out));
+await admin('/api/admin/settings', { key: 'shiur_lock_mode', value: 'off' });
+out = await (await proxyCheck('10.66.0.4', 'https://brand-new-site.example/', {}, SEDER)).json();
+check('"off" opens a yeshiva phone during seder', out.allow === true, JSON.stringify(out));
+res = await admin('/api/admin/settings', { key: 'shiur_lock_mode', value: 'maybe' });
+check('a nonsense value is refused', res.status === 400);
+res = await admin('/api/admin/settings', { key: 'anything_else', value: 'on' });
+check('an unknown setting is refused', res.status === 400);
+await admin('/api/admin/settings', { key: 'shiur_lock_mode', value: 'schedule' });
+out = await (await proxyCheck('10.66.0.4', 'https://brand-new-site.example/', {}, SEDER)).json();
+check('back on the timetable, seder locks again', out.action === 'locked');
 
 console.log('\n6. rung 1 has no browser; the block page knows a locked phone and a stripped image');
 await admin('/api/admin/devices/level', { id: 'vortex', level: 1 });

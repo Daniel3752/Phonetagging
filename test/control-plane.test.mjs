@@ -141,6 +141,27 @@ s = await runScheduler(env, new Date('2026-08-26T23:00:00Z'));
 check('reported as failed, not thrown', s.failed === 1, JSON.stringify(s));
 check('other devices unaffected', s.errors.length === 1 && /not linked/.test(s.errors[0]), JSON.stringify(s.errors));
 
+console.log('\n7b. the shiur toggle drives the scheduler too');
+hwDevices.push({ id: 9, number: 'yeshiva-a', configurationId: '30', groups: [], mdmMode: true, serial: 'CCC333' });
+await adminJson('/api/admin/policies', { id: 'yeshiva_rung_2', name: 'Yeshiva — Rung 2 (Apps + browser)', headwind_configuration_id: '30', app_default: 'blocked' });
+await adminJson('/api/admin/policies', { id: 'yeshiva_shiur', name: 'Yeshiva — Shiur (locked to essentials)', headwind_configuration_id: '40', app_default: 'blocked', web_mode: 'none' });
+const bochur = await adminJson('/api/admin/devices', { label: 'Bochur', headwind_device_id: '9', policy_id: 'yeshiva_rung_2', timezone: 'Asia/Jerusalem', tag: 'yeshiva', level: 2 });
+check('a yeshiva phone was created', !!bochur.id && bochur.tag === 'yeshiva', JSON.stringify(bochur));
+// Sunday 2026-09-06 15:00 Israel (12:00Z): lunch, so the timetable would leave him on his rung.
+s = await runScheduler(env, new Date('2026-09-06T12:00:00Z'));
+check('on the timetable, lunch means his rung config', Number(hwDevices.find((d) => d.id === 9).configurationId) === 30, JSON.stringify(s));
+await adminJson('/api/admin/settings', { key: 'shiur_lock_mode', value: 'on' });
+s = await runScheduler(env, new Date('2026-09-06T12:05:00Z'));
+check('"locked now" moves him to the shiur config at lunch', Number(hwDevices.find((d) => d.id === 9).configurationId) === 40, JSON.stringify(s));
+await adminJson('/api/admin/settings', { key: 'shiur_lock_mode', value: 'off' });
+// 16:00 Israel (13:00Z): second seder, but the toggle is off.
+s = await runScheduler(env, new Date('2026-09-06T13:00:00Z'));
+check('"off" keeps him on his rung config during seder', Number(hwDevices.find((d) => d.id === 9).configurationId) === 30, JSON.stringify(s));
+await adminJson('/api/admin/settings', { key: 'shiur_lock_mode', value: 'schedule' });
+s = await runScheduler(env, new Date('2026-09-06T13:05:00Z'));
+check('back on the timetable, seder locks him', Number(hwDevices.find((d) => d.id === 9).configurationId) === 40, JSON.stringify(s));
+hwDevices = hwDevices.filter((d) => d.id !== 9);  // the Headwind-shape checks below count two devices
+
 console.log('\n8. audit log records both operator and scheduler actions');
 const audit = await adminJson('/api/admin/audit');
 check('operator actions logged', audit.entries.some((e) => e.actor === 'operator' && e.action === 'policy_saved'));

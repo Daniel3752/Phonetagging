@@ -101,13 +101,18 @@ rung-2 image stripping cannot see inside a spliced tunnel. That is the granulari
 had, and path filtering is already deferred in the README. What it removes: the per-app splice
 treadmill. `splice.txt` is now only for hosts that must never be judged at all.
 
-**Except on the yeshiva tag** (`YESHIVA.md`): those phones strip every image, which is only
-possible on a connection the proxy sees inside, so the helper refuses the splice at the handshake
-whenever the Worker answers `decrypt: true` and Squid falls through to `bump all`. The decrypted
-requests are then answered from the same cached host decision, image fetches excepted. The Worker
-tells the helper what the browser was fetching (`%>ha{Sec-Fetch-Dest}` in the helper format) so an
-image with no file extension is still caught; the block page answers an image fetch with a blank
-placeholder so the layout keeps its shape.
+**The browser's own door (2026-09-06).** Image stripping needs a decrypted connection, and Squid
+cannot tell an app's connection from Chrome's by hostname — but it can tell them apart by PORT.
+Port 3128 is now the browser port (`http_port 3128 name=browser`, `ssl_bump bump browser_port`):
+Chrome is given it as an explicit proxy through the tunnel (Headwind pushes the Chrome managed
+policy `ProxyMode=fixed_servers`, `ProxyServer=10.66.0.1:3128`), and everything arriving there is
+bumped. App traffic never comes that way; it takes the intercept ports and the per-hostname
+splice decision above, so no app ever needs a splice entry for the browser's sake. The helper
+forwards what the browser said it was fetching (`%>ha{Sec-Fetch-Dest}`) so an image with no file
+extension is still caught, and the block page answers an image fetch with a blank placeholder so
+the layout keeps its shape. (`YESHIVA.md` is the first user; it applies to any images-off rung.)
+The helper can still force a bump of every approved host for one phone — `decrypt: true` from the
+Worker makes it answer ERR at the handshake — kept as a fallback, off on every ladder.
 
 Identity for WireGuard phones is the tunnel address (`10.66.0.x`), stored in `devices.proxy_user`.
 The helper is fed `%LOGIN %SRC %URI` and uses `%SRC` when there is no login. The Worker never

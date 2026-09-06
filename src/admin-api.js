@@ -8,7 +8,7 @@
 
 import { audit } from './scheduler.js';
 import { runScheduler } from './scheduler.js';
-import { parseTimeOfDay, TAG_BASE_PREFIX, tagBaseId } from './policy.js';
+import { parseTimeOfDay, TAG_BASE_PREFIX, tagBaseId, SHIUR_MODES, normalizeShiurMode } from './policy.js';
 import { normalizeDeviceLevel, normalizeSiteLevel, normalizeTag, maxLevelFor, LEVELS, TAGS, NEVER_LEVEL, MIN_LEVEL } from './levels.js';
 import { searchCacheKey } from './search.js';
 import { sha256Hex , generateProxyPassword, proxyUserFromLabel } from './crypto.js';
@@ -25,6 +25,9 @@ function newId(prefix) {
 }
 
 const APP_STATES = new Set(['allowed', 'blocked', 'hidden']);
+// Operator-wide switches and what each accepts. Anything else is refused: a setting nobody reads
+// is a typo, and a value nobody understands would silently mean "default".
+const SETTINGS = { shiur_lock_mode: new Set(SHIUR_MODES) };
 // What a policy says about an app it has no rule for: 'blocked' = allowlist, 'allowed' = blocklist.
 const APP_DEFAULTS = new Set(['allowed', 'blocked']);
 // A policy's own say over the browser: NULL/'' = the rung decides, 'none' = no web while in force.
@@ -52,18 +55,21 @@ export async function handleAdmin(request, env, path) {
   switch (`${request.method} ${path}`) {
     // --- read-only views the admin page renders ------------------------------------------------
     case 'GET /api/admin/state': {
-      const [devices, policies, appRules, schedules] = await Promise.all([
+      const [devices, policies, appRules, schedules, settingRows] = await Promise.all([
         all(env, 'SELECT * FROM devices ORDER BY label'),
         all(env, 'SELECT * FROM policies ORDER BY name'),
         all(env, 'SELECT * FROM app_rules ORDER BY policy_id, package_name'),
         all(env, 'SELECT * FROM schedules ORDER BY priority DESC, created_at DESC'),
+        all(env, 'SELECT key, value FROM settings').catch(() => []),
       ]);
+      const settings = Object.fromEntries(settingRows.map((r) => [r.key, r.value]));
+      settings.shiur_lock_mode = normalizeShiurMode(settings.shiur_lock_mode);
       // The ladders ship with the state so the page never hard-codes rung names — they live in
       // levels.js, and a page that duplicated them would drift from what is actually enforced.
       // `levels` is the standard ladder (kept for anything that reads it); `tags` carries every
       // ladder with its name, keyed by the tag a device stores.
       const tags = Object.values(TAGS).map((t) => ({ id: t.id, name: t.name, levels: t.levels, policyPrefix: t.policyPrefix }));
-      return json({ devices, policies, appRules, schedules, levels: LEVELS, tags });
+      return json({ devices, policies, appRules, schedules, settings, levels: LEVELS, tags });
     }
 
     case 'GET /api/admin/verdicts':
@@ -332,6 +338,20 @@ export async function handleAdmin(request, env, path) {
 
       await audit(env, 'operator', 'search_level_set', query.slice(0, 60), `level ${level}`);
       return json({ ok: true, level });
+    }
+
+    // --- operator-wide switches (the shiur lock toggle) ----------------------------------------
+    case 'POST /api/admin/settings': {
+      const key = String(body.key || '');
+      if (!SETTINGS[key]) return json({ error: `unknown setting; one of ${Object.keys(SETTINGS).join(', ')}` }, 400);
+      const value = String(body.value ?? '').trim().toLowerCase();
+      if (!SETTINGS[key].has(value)) return json({ error: `${key} must be one of ${[...SETTINGS[key]].join(', ')}` }, 400);
+      await env.DB.prepare(`
+        INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+      `).bind(key, value, Date.now()).run();
+      await audit(env, 'operator', 'setting_changed', key, value);
+      return json({ ok: true, key, value });
     }
 
     // --- manual scheduler run, so the operator doesn't wait for the next cron tick ---------------

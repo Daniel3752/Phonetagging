@@ -9,8 +9,8 @@
 // as NEVER refuse a site — and every image is blanked.
 //
 // Decision order (first match wins):
-//   0. The phone's EFFECTIVE policy right now (its schedules, resolved the same way the scheduler
-//      does) has web_mode 'none' → deny everything: the phone is locked (the shiur lock).
+//   0. The phone's EFFECTIVE policy right now (its schedules and the shiur toggle, resolved the
+//      same way the scheduler does) has web_mode 'none' → deny everything: the phone is locked.
 //   1. Rung with no web (rung 1 on either ladder) → deny everything.
 //   2. Search URL → judge the QUERY (keyword pre-filter, then model on the standard ladder; keyword
 //      pre-filter and anything on file, NO model, on a blocklist rung). Image search is off on
@@ -70,6 +70,7 @@ async function resolveDevice(env, proxyUser, now) {
 
   const rows = await env.DB.prepare(`
     SELECT d.id, d.level, d.tag, d.timezone, d.policy_id, bp.web_mode AS base_web_mode,
+           (SELECT value FROM settings WHERE key = 'shiur_lock_mode') AS shiur_mode,
            s.id AS s_id, s.device_id AS s_device_id, s.base_policy_id AS s_base_policy_id,
            s.active_policy_id AS s_active_policy_id, s.day_mask AS s_day_mask, s.start_min AS s_start_min,
            s.end_min AS s_end_min, s.priority AS s_priority, s.created_at AS s_created_at,
@@ -99,7 +100,7 @@ async function resolveDevice(env, proxyUser, now) {
     webModeByPolicy.set(r.s_active_policy_id, r.s_web_mode);
   }
 
-  const { policyId } = resolveEffectivePolicy(device, schedules, now);
+  const { policyId } = resolveEffectivePolicy(device, schedules, now, { shiurMode: row.shiur_mode });
   return {
     level, tag, def: levelDefinition(level, tag), deviceId: row.id, known: true,
     policyId, locked: webModeByPolicy.get(policyId) === 'none',
