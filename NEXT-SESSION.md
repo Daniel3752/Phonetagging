@@ -1,9 +1,111 @@
 # Next session — start here
 
-You are picking up a phone content-filter project mid-deployment. The **first real
-phone was set up during the previous session** and is in a user's hands. Read this
-whole file before touching anything, then read the docs it points to. Do not change
-production or the live phone without understanding the current state.
+## START HERE — handoff from the 2026-09-01 → 09-06 session (branch `claude/gifted-ramanujan-nld0wy`)
+
+Read this block before anything else. The rest of this file (from "What this project is" on)
+is older layers of history; where they disagree with this block, this block wins.
+
+### The one bug that explains almost everything
+
+`external_acl_type shmira_filter` used `%LOGIN`. In Squid that token means *the authenticated
+login* and makes Squid **require proxy authentication before it will call the helper**.
+Intercepted (WireGuard) requests can never authenticate, so Squid denied every tunnel lookup
+itself, in 0 ms, without running the helper. cache.log, with `debug_options ALL,1 82,4`:
+
+```
+aclMatchExternal: shmira_filter check user authenticated.
+NOTICE: Authentication not applicable on intercepted requests.
+aclMatchExternal: shmira_filter user not authenticated (DENIED)
+```
+
+Consequences, all observed: every decrypted request (searches) hit the block page; every
+spliced site loaded unfiltered (Instagram, TikTok); the helper answered OK whenever run by hand;
+no helper decision was ever logged. This was the Tuesday complaint ("searches blocked, sites
+load"), and it is why `ssl_bump splice filter_allows` looked like it "blocked everything".
+
+**Fix: `%un %SRC %URI`** (`%un` = a user name from any source, forces nothing, is `-` for a
+tunnel phone; the helper already falls back to `%SRC`). Committed in `scripts/squid.conf` and
+applied on the live server by sed (09-04 ~09:45 UTC). **NOT YET TESTED on a phone** — the Vortex
+test stalled on the tunnel (below). See PROXY.md "The bug that blocked every search".
+
+### Live server state RIGHT NOW (mdm.getshmira.com) — verify, don't assume
+
+- **Isaac's phone (10.66.0.3) BYPASSES squid entirely**: `iptables -t nat -I PREROUTING -i wg0
+  -s 10.66.0.3 -j RETURN`. Unfiltered. Remove with the same command and `-D` when the Vortex
+  passes. The rule does not survive a reboot.
+- `/etc/squid/squid.conf` differs from the repo in one intended way: the ssl_bump block is
+  SCOPED — `acl test_phones src 10.66.0.4` (the Vortex); `splice test_phones filter_allows` /
+  `bump test_phones` for it; `splice wg_phones` (old splice-by-default) for everyone else. When
+  the Vortex passes, replace with the repo's unscoped block (`splice filter_allows` for all).
+  Also has `%un %SRC %URI`, `concurrency=64 … queue-size=1024`, `acl worker_sni` + splice.
+- **`access_log` is ON** (`/var/log/squid/access.log`) for debugging. Turn it OFF when done:
+  `sed -i 's|^access_log /var/log/squid/access.log|access_log none|' /etc/squid/squid.conf && squid -k reconfigure`
+- `debug_options` line was added and removed again (verify: `grep debug_options /etc/squid/squid.conf` → nothing).
+- The live helper is the repo helper PLUS a one-line debug patch that writes
+  `shmira-decision user=… url=… -> OK/ERR` to cache.log on every decision. Useful; remove by
+  reinstalling from the repo when done. `scripts/check-drift.sh` will flag it.
+- Two clones: `/opt/Phonetagging` (used by the previous session; `new-wg-phone.sh` lives there)
+  and `/root/Phonetagging`. Both were pointed at this branch on 09-03. `git pull` before use.
+  NEVER run `install-squid.sh` from a stale clone — it overwrites the live config.
+
+### The Vortex test phone (Vortex V23, Android 12 Go, Headwind number 4908545443)
+
+Done: factory reset; Device Owner set by adb (`dpm set-device-owner`) after installing
+`/var/cache/tomcat9/files/hmdm-6.38-os.apk`; enrolled in the panel (device id typed into the
+agent), configuration Background (Agent) Mode; CA cert installed (needed
+`no_config_credentials` temporarily REMOVED from the config's restrictions — put it back, and see
+"Enrolling config" below); WireGuard peer `vortex-b` = **10.66.0.4** (QR was scanned into the
+app); D1 row `dev_3458aa4e` Vortex, rung 4, proxy_user `10.66.0.4`.
+
+**Where it stalled:** the tunnel handshaked ONCE (09-04 09:39:14 UTC) and never again. The app
+shows the tunnel on; `wg show wg0 latest-handshakes` shows the vortex-b key stuck at that time;
+`tcpdump -ni eth0 udp port 443` (excluding Isaac's IP) saw NOTHING arriving. The phone was on a
+hotspot the whole time (the building wifi's DNS is broken for this phone — old known issue). The
+operator had edited the tunnel's Endpoint in the app to `2.28.63.95:443` around then.
+Unresolved hypotheses, in order: (1) the hotspot is Isaac's phone, so the Vortex's packets travel
+inside Isaac's tunnel and arrive from 10.66.0.3 — the tcpdump filter hid that; run
+`timeout 30 tcpdump -ni any udp port 443 | head` while toggling; (2) the Endpoint edit was
+mistyped / not saved; (3) phone-side key no longer matches the peer (QR from an earlier run) —
+tcpdump would show packets arriving but no handshake; fix = delete tunnel in app, rescan.
+First thing: ask which phone is the hotspot; get a screenshot of the tunnel screen.
+
+**Then the actual test** (never yet run with `%un` in place): Chrome → `https://en.wikipedia.org`
+(loads), search "volcano" (results), `https://www.instagram.com` (block page with a
+"Rated … / Not allowed on any phone" line), Play Store / a pinned app works with no splice entry.
+Then `grep shmira-decision /var/log/squid/cache.log | tail -30` shows the real decisions.
+Then the full battery in `NEW-PHONE.md` §F, the Headwind lockdown (§E — this phone is where to
+test `no_config_vpn`), and only then un-bypass Isaac and unscope the rule.
+
+### Other things learned / decided this session
+
+- Isaac's rung 1 (09-01) was the deliberate overnight hold (below), never restored. Restored to 4.
+- The console (`/admin`) now edits/deletes phones and no longer offers "Never" as a phone rung;
+  the API refuses an invalid device level instead of clamping to 1.
+- Block page is static: "This site is blocked", host, "Rated N of 5 — note" / "Not allowed on any
+  phone — note". No request button (sites are judged automatically on first visit).
+- Worker: device + verdict lookups concurrent, one query for both hashes, `cache_scope` hint;
+  helper caches per host + dedups a page-load burst (pool 128). Inline classification: 3 s
+  fetch, 64 KB, judges by domain name if the homepage won't load. Deployed.
+- Android apps do not trust a user CA → "bump all + splice exceptions" breaks every app forever.
+  The intended model is `ssl_bump splice filter_allows` (ask the filter per hostname at the
+  handshake: approved → splice, denied → bump so Chrome gets the block page; search engines
+  and the explicit list always bumped). PROXY.md "Decrypt or pass through". UNPROVEN on a phone.
+- The "Host header forgery" alerts are noise (phone DNS = 10.66.0.1 = the server's resolver).
+- The "Location can be accessed" notice on managed phones = Headwind agent's location permission.
+  Decide once in the configuration's location setting.
+- A second Claude session was working on branch `claude/phone-filter-deployment-review-b9witi`
+  (WireGuard work, NEW-PHONE.md). MERGED into this branch on 09-03. After PR #2 merges, that
+  session must pull `main`; any further commits on its branch need merging by hand.
+- **PR #2** (this branch → main) is open: https://github.com/Daniel3752/Phonetagging/pull/2.
+  Merge when the Vortex passes. Then `cd /opt/Phonetagging && git checkout main && git pull`.
+- Ideas not yet done: an "Enrolling" Headwind configuration without restrictions for phones
+  mid-setup (the cert can't be installed under `no_config_credentials`); `new-wg-phone.sh`
+  emitting the server IP as Endpoint (a phone whose wifi DNS is broken can't resolve the name
+  before the tunnel exists); `scripts/check-drift.sh` installed via cron (not yet installed).
+- Rules to stop drift: `main` is the truth; one session drives the server at a time; run
+  `check-drift.sh` before and after touching the server and commit what it flags.
+
+---
 
 ## What this project is
 

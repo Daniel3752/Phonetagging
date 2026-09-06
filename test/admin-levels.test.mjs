@@ -52,10 +52,25 @@ check('a login cannot be shared by two phones', res.status === 409,
 res = await admin('/api/admin/devices', { id: 'dev3', label: 'Bad', policy_id: 'pol1', proxy_user: 'has spaces!' });
 check('a malformed login is refused', res.status === 400);
 
+// A rung the operator did not ask for is refused, not clamped. The clamp direction is still strict
+// (see below, and normalizeDeviceLevel) — but silently landing a phone on rung 1 while the form says
+// something else is how a live phone ended up unable to load a single page.
 res = await admin('/api/admin/devices', { id: 'dev4', label: 'Typo', policy_id: 'pol1', level: 99 });
+check('a nonsensical rung is refused, not silently applied', res.status === 400);
+let missing = await DB.prepare('SELECT id FROM devices WHERE id = ?').bind('dev4').first();
+check('and no phone is created from it', !missing);
+
+// 6 is the specific trap: it is a valid SITE rating ("blocked everywhere") and not a rung at all.
+// Clamped onto a phone it becomes rung 1 — no web — which reads in the console as the strictest
+// filtering rather than as a broken phone.
+res = await admin('/api/admin/devices', { id: 'dev5', label: 'Never', policy_id: 'pol1', level: 6 });
+check('a site rating of 6 is refused as a phone rung', res.status === 400);
+
+// A level left out entirely is a different case: nothing was asserted, so the strict default stands.
+res = await admin('/api/admin/devices', { id: 'dev6', label: 'Unset', policy_id: 'pol1', proxy_user: 'unset-phone' });
 body = await res.json();
-check('a nonsensical rung clamps to the strictest, not the loosest', body.level === 1,
-  'a typo in a form must never open a phone up');
+check('an omitted rung still defaults strict, not open', body.ok === true && body.level === 2,
+  JSON.stringify(body));
 
 console.log('\n2. moving a phone between rungs');
 res = await admin('/api/admin/devices/level', { id: 'dev1', level: 1 });

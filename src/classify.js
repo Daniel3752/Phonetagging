@@ -11,9 +11,36 @@ import { registrableDomain } from './domains.js';
 import { normalizeSiteLevel, NEVER_LEVEL } from './levels.js';
 
 // Kept tight because this runs INLINE on a request the user is waiting on (first hit of a new
-// domain). A slow origin should not hold the page for long — fail closed and let the retry re-judge.
-const FETCH_TIMEOUT_MS = 6000;
+// domain). A slow origin must not hold the page: after this long the site is judged from its name
+// alone rather than left unjudged.
+const FETCH_TIMEOUT_MS = 3000;
+// Only the head of the page is read. The title and the first few thousand characters of text are
+// all the model is shown, and a multi-megabyte homepage would otherwise be downloaded in full.
+const PAGE_BYTES_LIMIT = 64 * 1024;
 const PAGE_TEXT_LIMIT = 4000;
+
+// Reads at most PAGE_BYTES_LIMIT of a response body, then cancels the rest.
+async function readHead(res) {
+  const reader = res.body?.getReader();
+  if (!reader) return await res.text();
+  const chunks = [];
+  let size = 0;
+  while (size < PAGE_BYTES_LIMIT) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    size += value.byteLength;
+  }
+  reader.cancel().catch(() => {});
+  return new TextDecoder('utf-8', { fatal: false }).decode(concat(chunks, size));
+}
+
+function concat(chunks, size) {
+  const out = new Uint8Array(size);
+  let at = 0;
+  for (const c of chunks) { out.set(c, at); at += c.byteLength; }
+  return out;
+}
 
 export function extractPageInfo(html) {
   const title = (/<title[^>]*>([^<]*)<\/title>/i.exec(html) || [])[1]?.trim() || '';
@@ -40,12 +67,21 @@ export async function classifyDomain(env, hostOrDomain, { source = 'gemini' } = 
   }
 
   try {
-    const pageRes = await fetch(`https://${domain}/`, {
-      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-      headers: { 'User-Agent': 'shmira-filter-classifier/1.0' },
-    });
-    const html = await pageRes.text();
-    const { title, text } = extractPageInfo(html);
+    // The homepage is evidence, not a prerequisite. Many sites refuse a non-browser fetch or are
+    // slow; before, that turned into "could not check this site" — a block page for a site nobody
+    // had judged, paid again on every visit. Now a failed fetch means the model judges from the
+    // domain name alone. The prompt already rates anything it cannot place as NEVER, so an obscure
+    // unreachable site still fails closed, and a well-known one gets its obvious rating.
+    let title = '', text = '';
+    try {
+      const pageRes = await fetch(`https://${domain}/`, {
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+        headers: { 'User-Agent': 'shmira-filter-classifier/1.0' },
+      });
+      ({ title, text } = extractPageInfo(await readHead(pageRes)));
+    } catch {
+      // judged by name below
+    }
     const result = await classifySite(env, { hostname: domain, title, text });
     const level = normalizeSiteLevel(result.level);
 

@@ -35,9 +35,15 @@ const DB = {
       if (/FROM url_verdicts/.test(sql)) return siteVerdicts.get(q.args[0]) || null;
       return null;
     };
-    // keyword_rules is the only .all() query on this path; empty means every query falls through to
-    // the cache and the model, exactly as before the pre-filter existed.
-    q.all = async () => ({ results: /FROM keyword_rules/.test(sql) ? [] : [] });
+    q.all = async () => {
+      // The site lookup asks for every candidate hash (exact host, registrable domain) in one query
+      // and picks in order itself; the fake returns whichever of them it holds.
+      if (/FROM url_verdicts/.test(sql)) {
+        return { results: q.args.filter((h) => siteVerdicts.has(h)).map((h) => ({ url_hash: h, ...siteVerdicts.get(h) })) };
+      }
+      // keyword_rules: empty means every query falls through to the cache and the model.
+      return { results: [] };
+    };
     q.run = async () => {
       if (/INSERT INTO search_verdicts/.test(sql)) {
         // columns: query_hash, query_sample, level, images_ok, reason, ...
@@ -218,6 +224,42 @@ await check('a missing url is a 400', async () => {
 });
 await check('a non-url is a 400', async () => {
   assert.equal((await ask({ user: 'phone-a', url: 'not a url' })).status, 400);
+});
+
+console.log('\n6. speed: how widely the helper may reuse an answer, and judging by name');
+reset();
+await check('an ordinary site answer is reusable for every URL on that host', async () => {
+  siteVerdicts.set(await sha('news.example.com'), { level: 2, is_doorway: 0, reason: 'News.', site_mode: 'filtered' });
+  const r = await (await ask({ user: 'phone-open', url: 'https://news.example.com/a/b?c=d' })).json();
+  assert.equal(r.allow, true);
+  assert.equal(r.cache_scope, 'host');
+});
+await check('a search answer is per URL — the words matter', async () => {
+  const r = await (await ask({ user: 'phone-open', url: 'https://www.google.com/search?q=cats' })).json();
+  assert.equal(r.cache_scope, 'url');
+});
+await check('a rung with images off decides per URL, so nothing is host-scoped there', async () => {
+  siteVerdicts.set(await sha('news.example.com'), { level: 2, is_doorway: 0, reason: 'News.', site_mode: 'filtered' });
+  const r = await (await ask({ user: 'phone-a', url: 'https://news.example.com/' })).json();
+  assert.equal(r.allow, true);
+  assert.equal(r.cache_scope, 'url');
+});
+await check('an unreachable homepage is judged from the domain name, not left unjudged', async () => {
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, opts) => {
+    if (String(url).startsWith('https://unreachable.example/')) throw new Error('ECONNREFUSED');
+    return realFetch(url, opts);
+  };
+  try {
+    geminiLevel = 3;
+    const before = geminiCalls;
+    const r = await (await ask({ user: 'phone-open', url: 'https://unreachable.example/page' })).json();
+    assert.equal(geminiCalls, before + 1, 'the model is still asked');
+    assert.equal(r.allow, true, 'rated 3, visible at rung 5');
+    assert.equal(r.transient, undefined);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
 });
 
 console.log(`\nAll ${passed} proxy-check tests passed.\n`);

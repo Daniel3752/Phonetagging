@@ -9,7 +9,7 @@
 import { audit } from './scheduler.js';
 import { runScheduler } from './scheduler.js';
 import { parseTimeOfDay } from './policy.js';
-import { normalizeDeviceLevel, normalizeSiteLevel, LEVELS, NEVER_LEVEL } from './levels.js';
+import { normalizeDeviceLevel, normalizeSiteLevel, LEVELS, NEVER_LEVEL, MIN_LEVEL, MAX_DEVICE_LEVEL } from './levels.js';
 import { searchCacheKey } from './search.js';
 import { sha256Hex , generateProxyPassword, proxyUserFromLabel } from './crypto.js';
 
@@ -105,8 +105,21 @@ export async function handleAdmin(request, env, path) {
       if (!label) return json({ error: 'label is required' }, 400);
       if (!body.policy_id) return json({ error: 'policy_id is required' }, 400);
 
-      // A missing or nonsensical level clamps to the strictest rung, never the loosest. Getting
-      // this backwards would mean a typo in a form silently opening a phone up.
+      // A MISSING level clamps to the strictest rung, never the loosest: getting that backwards
+      // would mean a typo in a form silently opening a phone up.
+      //
+      // A level that was SUPPLIED but is not a rung is refused instead of clamped. Clamping is the
+      // right answer for a corrupt row the scheduler stumbles over at 3am; it is the wrong answer
+      // for an operator standing at the form, because the clamp lands on rung 1 — no web at all —
+      // and the console then reads as though they had chosen the strictest filtering. A live phone
+      // spent days unable to load anything or run a single search that way. Say no instead.
+      if (body.level !== undefined && body.level !== null && body.level !== ''
+          && normalizeDeviceLevel(body.level) !== Number(body.level)) {
+        return json({
+          error: `level must be a rung between ${MIN_LEVEL} and ${MAX_DEVICE_LEVEL}; ` +
+            `${JSON.stringify(body.level)} is not one (6/"Never" is a site rating, not a phone rung)`,
+        }, 400);
+      }
       const level = normalizeDeviceLevel(body.level ?? 2);
 
       // The proxy login is how the filter tells one phone from another. It must match an account in
@@ -210,6 +223,15 @@ export async function handleAdmin(request, env, path) {
     // this stricter, now" — is one call that cannot accidentally blank another field.
     case 'POST /api/admin/devices/level': {
       if (!body.id) return json({ error: 'id is required' }, 400);
+      // Same as the save route: a rung the operator did not ask for is worse than an error. 6 is
+      // the one people reach for by mistake — it is a site rating meaning "blocked everywhere", and
+      // clamped onto a phone it becomes rung 1, no web.
+      if (normalizeDeviceLevel(body.level) !== Number(body.level)) {
+        return json({
+          error: `level must be a rung between ${MIN_LEVEL} and ${MAX_DEVICE_LEVEL}; ` +
+            `${JSON.stringify(body.level)} is not one`,
+        }, 400);
+      }
       const level = normalizeDeviceLevel(body.level);
       const res = await env.DB.prepare('UPDATE devices SET level = ? WHERE id = ?')
         .bind(level, body.id).run();
