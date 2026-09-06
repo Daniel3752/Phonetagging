@@ -49,6 +49,14 @@ CREATE TABLE IF NOT EXISTS policies (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL UNIQUE,
   headwind_configuration_id TEXT,
+  -- What the policy says about an app it has NO rule for. 'blocked' makes the policy an ALLOWLIST
+  -- (only listed 'allowed' apps exist), 'allowed' makes it a BLOCKLIST (everything but the listed
+  -- 'blocked' apps). Enforced by Headwind, recorded here so the intent is in the data.
+  app_default TEXT NOT NULL DEFAULT 'allowed',
+  -- NULL: the phone's rung decides the browser. 'none': no web at all while this policy is the one
+  -- in force — a lockdown policy a schedule swaps in (the yeshiva shiur lock). The proxy resolves
+  -- the phone's effective policy on every request and honours this.
+  web_mode TEXT,
   created_at INTEGER NOT NULL
 );
 
@@ -80,6 +88,9 @@ CREATE TABLE IF NOT EXISTS devices (
   -- Website strictness rung, 1..5 (see levels.js). Defaults to 2 so a new phone starts usefully
   -- strict and is loosened deliberately rather than tightened after the fact.
   level INTEGER NOT NULL DEFAULT 2,
+  -- Which ladder the rung is read on: 'standard' (the five rungs above) or 'yeshiva' (the
+  -- temporary four-rung tag, see levels.js YESHIVA_LEVELS and YESHIVA.md).
+  tag TEXT NOT NULL DEFAULT 'standard',
   -- The phone's own Cloudflare Gateway DNS location and the DoT hostname it was issued. DNS-over-
   -- TLS carries no identity, so a fleet sharing one resolver hostname can only share one policy;
   -- a location per phone makes the hostname itself the identity, and a level change becomes an API
@@ -101,7 +112,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_devices_proxy_user ON devices (proxy_user)
 
 -- A recurring time window that swaps in a different policy. device_id NULL means the schedule
 -- applies to every device whose baseline policy is base_policy_id, so a rule can be written once
--- for the whole fleet and overridden per device.
+-- for the whole fleet and overridden per device. base_policy_id may instead be `tag:<tag>`
+-- (e.g. 'tag:yeshiva'): the window then applies to every device on that ladder whatever its rung
+-- — how one set of shiur windows covers all four yeshiva rungs.
 --
 -- day_mask is a 7-bit field, bit 0 = Sunday through bit 6 = Saturday, matched against the day the
 -- window STARTS. start_min/end_min are minutes from local midnight; end <= start means the window
@@ -160,12 +173,31 @@ INSERT OR IGNORE INTO level_definitions
   (5, 'Open',       'Everything except explicit; shtus and social permitted.',         'web',  1, 1, 1, 0, 'apps_rung_5');
 
 -- Five app policies, one per rung (empty until the app-control discussion — see BUILD-PLAN.md §7).
-INSERT OR IGNORE INTO policies (id, name, headwind_configuration_id, created_at) VALUES
-  ('apps_rung_1', 'Apps — Rung 1 (No browser)', NULL, 0),
-  ('apps_rung_2', 'Apps — Rung 2 (Text-only)',  NULL, 0),
-  ('apps_rung_3', 'Apps — Rung 3 (Essential)',  NULL, 0),
-  ('apps_rung_4', 'Apps — Rung 4 (General)',    NULL, 0),
-  ('apps_rung_5', 'Apps — Rung 5 (Open)',       NULL, 0);
+-- Rungs 1-3 are allowlists (app_default 'blocked'), 4-5 blocklists.
+INSERT OR IGNORE INTO policies (id, name, headwind_configuration_id, app_default, created_at) VALUES
+  ('apps_rung_1', 'Apps — Rung 1 (No browser)', NULL, 'blocked', 0),
+  ('apps_rung_2', 'Apps — Rung 2 (Text-only)',  NULL, 'blocked', 0),
+  ('apps_rung_3', 'Apps — Rung 3 (Essential)',  NULL, 'blocked', 0),
+  ('apps_rung_4', 'Apps — Rung 4 (General)',    NULL, 'allowed', 0),
+  ('apps_rung_5', 'Apps — Rung 5 (Open)',       NULL, 'allowed', 0);
+
+-- The yeshiva temp tag's policies and its shiur windows (the app rules for them live only in
+-- migrations/0016_yeshiva_tag.sql, like every other app seed). Kept here so a fresh database —
+-- and the offline tests — carry the shiur lock. See YESHIVA.md.
+INSERT OR IGNORE INTO policies (id, name, headwind_configuration_id, app_default, web_mode, created_at) VALUES
+  ('yeshiva_rung_1', 'Yeshiva — Rung 1 (Apps only)',            NULL, 'blocked', NULL,   0),
+  ('yeshiva_rung_2', 'Yeshiva — Rung 2 (Apps + browser)',       NULL, 'blocked', NULL,   0),
+  ('yeshiva_rung_3', 'Yeshiva — Rung 3 (Blocklist, no social)', NULL, 'allowed', NULL,   0),
+  ('yeshiva_rung_4', 'Yeshiva — Rung 4 (Blocklist)',            NULL, 'allowed', NULL,   0),
+  ('yeshiva_shiur',  'Yeshiva — Shiur (locked to essentials)',  NULL, 'blocked', 'none', 0);
+
+-- Sunday–Thursday (day_mask 31), phone-local time. See scripts/build-yeshiva-seed.mjs for how the
+-- timetable became these four windows.
+INSERT OR IGNORE INTO schedules (id, device_id, base_policy_id, active_policy_id, day_mask, start_min, end_min, priority, created_at) VALUES
+  ('shiur_shachris',  NULL, 'tag:yeshiva', 'yeshiva_shiur', 31,  450,  515, 100, 0),
+  ('shiur_morning',   NULL, 'tag:yeshiva', 'yeshiva_shiur', 31,  555,  825, 100, 0),
+  ('shiur_afternoon', NULL, 'tag:yeshiva', 'yeshiva_shiur', 31,  935, 1155, 100, 0),
+  ('shiur_night',     NULL, 'tag:yeshiva', 'yeshiva_shiur', 31, 1215, 1320, 100, 0);
 
 -- Keyword pre-filter rules for search queries. RATING is on the same 1..6 ladder (6 = NEVER). The
 -- proxy consults this before the model; a match short-circuits with no model call. Intentionally

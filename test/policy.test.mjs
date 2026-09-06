@@ -1,7 +1,7 @@
 // Boundary tests for the policy resolver. No network, no D1 — resolveEffectivePolicy is pure, and
 // the awkward cases (midnight-crossing windows, per-device time zones, overlapping schedules,
 // DST transitions) are exactly the ones worth pinning down before any of this reaches a phone.
-import { resolveEffectivePolicy, windowContains, localTime, parseTimeOfDay, formatTimeOfDay, appPolicyIdForLevel, DAY_BITS } from '../src/policy.js';
+import { resolveEffectivePolicy, windowContains, localTime, parseTimeOfDay, formatTimeOfDay, appPolicyIdForLevel, tagBaseId, DAY_BITS } from '../src/policy.js';
 
 let failures = 0;
 function check(name, cond, extra = '') {
@@ -104,6 +104,22 @@ check('each rung maps to its app policy', appPolicyIdForLevel(3) === 'apps_rung_
 check('rung 1 and 5 map too', appPolicyIdForLevel(1) === 'apps_rung_1' && appPolicyIdForLevel(5) === 'apps_rung_5');
 check('a corrupt level clamps to the strictest rung, never a missing policy',
   appPolicyIdForLevel(99) === 'apps_rung_1' && appPolicyIdForLevel('x') === 'apps_rung_1');
+
+check('the yeshiva tag has its own policy ids', appPolicyIdForLevel(2, 'yeshiva') === 'yeshiva_rung_2' && appPolicyIdForLevel(9, 'yeshiva') === 'yeshiva_rung_1');
+
+console.log('\nA window whose base is a whole tag');
+const yDevice = { id: 'd2', policy_id: 'yeshiva_rung_3', timezone: 'UTC', tag: 'yeshiva' };
+const sDevice = { id: 'd3', policy_id: 'apps_rung_4', timezone: 'UTC', tag: 'standard' };
+const tagWide = sched({ id: 'tw', base_policy_id: tagBaseId('yeshiva'), active_policy_id: 'shiur', start_min: 0, end_min: 1439 });
+r = resolveEffectivePolicy(yDevice, [tagWide], new Date('2026-08-24T10:00:00Z'));
+check('covers a phone on that tag whatever its rung policy', r.policyId === 'shiur', JSON.stringify(r));
+r = resolveEffectivePolicy(sDevice, [tagWide], new Date('2026-08-24T10:00:00Z'));
+check('does not cover a phone on another tag', r.policyId === 'apps_rung_4', JSON.stringify(r));
+r = resolveEffectivePolicy({ ...yDevice, tag: undefined }, [tagWide], new Date('2026-08-24T10:00:00Z'));
+check('a row with no tag is the standard ladder', r.policyId === 'yeshiva_rung_3', JSON.stringify(r));
+const exemption = sched({ id: 'ex', device_id: 'd2', base_policy_id: tagBaseId('yeshiva'), active_policy_id: 'yeshiva_rung_3', start_min: 0, end_min: 1439, priority: 5 });
+r = resolveEffectivePolicy(yDevice, [tagWide, exemption], new Date('2026-08-24T10:00:00Z'));
+check('a per-phone window at higher priority overrides the tag-wide one', r.policyId === 'yeshiva_rung_3', JSON.stringify(r));
 
 console.log(failures ? `\n${failures} FAILURE(S)` : '\nAll checks passed.');
 process.exit(failures ? 1 : 0);

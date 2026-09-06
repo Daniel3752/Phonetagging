@@ -8,8 +8,8 @@
 
 import assert from 'node:assert';
 import {
-  LEVELS, MIN_LEVEL, MAX_DEVICE_LEVEL, NEVER_LEVEL,
-  levelDefinition, normalizeDeviceLevel, normalizeSiteLevel,
+  LEVELS, YESHIVA_LEVELS, TAGS, MIN_LEVEL, MAX_DEVICE_LEVEL, NEVER_LEVEL,
+  levelDefinition, normalizeDeviceLevel, normalizeSiteLevel, normalizeTag, maxLevelFor,
   isVisibleAtLevel, levelsThatAllow,
 } from '../src/levels.js';
 
@@ -97,6 +97,48 @@ check('social is blocked everywhere except the most open rung', () => {
 });
 check('an unknown rung has no definition', () => {
   assert.equal(levelDefinition(9), null);
+});
+
+console.log('\n7. the yeshiva tag is a second ladder, read through the tag');
+check('an unknown tag is the standard ladder', () => {
+  assert.equal(normalizeTag('kollel'), 'standard');
+  assert.equal(normalizeTag(undefined), 'standard');
+  assert.equal(normalizeTag('YESHIVA'), 'yeshiva');
+});
+check('the yeshiva ladder has four rungs and its own top', () => {
+  assert.deepEqual(YESHIVA_LEVELS.map((l) => l.level), [1, 2, 3, 4]);
+  assert.equal(maxLevelFor('yeshiva'), 4);
+  assert.equal(maxLevelFor('standard'), MAX_DEVICE_LEVEL);
+});
+check('a rung is clamped against ITS ladder', () => {
+  assert.equal(normalizeDeviceLevel(5, 'yeshiva'), MIN_LEVEL);
+  assert.equal(normalizeDeviceLevel(4, 'yeshiva'), 4);
+  assert.equal(normalizeDeviceLevel(5, 'standard'), 5);
+});
+check('rung 1 has no browser; the rest share one blocklist browser with images off', () => {
+  assert.equal(levelDefinition(1, 'yeshiva').webMode, 'none');
+  for (const l of [2, 3, 4]) {
+    const d = levelDefinition(l, 'yeshiva');
+    assert.equal(d.webMode, 'blocklist');
+    assert.equal(d.images, false);
+    assert.equal(d.imageSearch, false);
+    assert.equal(d.blockSocial, true);
+    assert.equal(d.decrypt, true);
+  }
+});
+check('rungs 1-2 are app allowlists, 3-4 blocklists', () => {
+  assert.deepEqual(YESHIVA_LEVELS.map((l) => l.appModel), ['allowlist', 'allowlist', 'blocklist', 'blocklist']);
+});
+check('on a blocklist rung only NEVER is invisible', () => {
+  const d = levelDefinition(2, 'yeshiva');
+  assert.equal(isVisibleAtLevel(site(5), 2, d), true);
+  assert.equal(isVisibleAtLevel(site(NEVER_LEVEL), 2, d), false);
+  assert.equal(isVisibleAtLevel(undefined, 2, d), false);
+});
+check('the standard ladder does not decrypt approved hosts', () => {
+  assert.ok(LEVELS.every((l) => !l.decrypt));
+  assert.equal(TAGS.standard.policyPrefix, 'apps_rung');
+  assert.equal(TAGS.yeshiva.policyPrefix, 'yeshiva_rung');
 });
 
 console.log(`\nAll ${passed} level checks passed.\n`);

@@ -30,12 +30,17 @@ const DB = {
     const q = { sql, args: [] };
     q.bind = (...a) => { q.args = a; return q; };
     q.first = async () => {
-      if (/FROM devices/.test(sql)) return devices.get(q.args[0]) || null;
       if (/FROM search_verdicts/.test(sql)) return searchVerdicts.get(q.args[0]) || null;
       if (/FROM url_verdicts/.test(sql)) return siteVerdicts.get(q.args[0]) || null;
       return null;
     };
     q.all = async () => {
+      // The device lookup is one joined query: the device row plus every schedule that could cover
+      // it. This fake has no schedules, so one row with the schedule columns null.
+      if (/FROM devices d/.test(sql)) {
+        const d = devices.get(q.args[0]);
+        return { results: d ? [{ ...d, tag: d.tag || 'standard', timezone: 'UTC', policy_id: 'p', base_web_mode: null, s_id: null }] : [] };
+      }
       // The site lookup asks for every candidate hash (exact host, registrable domain) in one query
       // and picks in order itself; the fake returns whichever of them it holds.
       if (/FROM url_verdicts/.test(sql)) {

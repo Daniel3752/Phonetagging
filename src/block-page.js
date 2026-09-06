@@ -5,9 +5,14 @@
 // already exists — there is nothing to "request" and no button to press. The page says what was
 // blocked and why, and stops. A parent who disagrees with a rating changes it in /admin.
 //
-// Two kinds of denial:
+// Three kinds of denial:
 //   * a refused SEARCH — the words typed were rated above this phone's rung
 //   * a blocked SITE  — the site's rating is above this phone's rung, or it is never allowed
+//   * a LOCKED phone  — a schedule (the yeshiva shiur windows) has the web switched off right now
+//
+// A fourth thing lands here that is not a page at all: an IMAGE the phone's rung strips. Squid
+// redirects every denial to this URL, an <img> included, and for those the Worker answers with
+// renderBlankImage() — a flat placeholder that keeps the page's layout where the picture was.
 //
 // Self-contained HTML (no external assets, no script) so it works even though every other host is
 // blocked, and renders instantly.
@@ -23,6 +28,15 @@ function whyLine(rating) {
   return `Rated ${level} of 5${note}. This phone is set lower.`;
 }
 
+// A flat, light-grey rectangle that stretches to whatever box the page gave the image, so a
+// stripped picture leaves its shape behind rather than collapsing the layout around it. SVG rather
+// than a bitmap: it scales to any size, weighs a few hundred bytes, and needs no binary in the
+// source. preserveAspectRatio="none" is what makes it fill a box of any proportions.
+export function renderBlankImage() {
+  return '<svg xmlns="http://www.w3.org/2000/svg" width="160" height="120" viewBox="0 0 160 120" ' +
+    'preserveAspectRatio="none"><rect width="160" height="120" fill="#dfe3e8"/></svg>';
+}
+
 export function renderBlockPage({ blockedUrl = '', kind = 'site', rating = null } = {}) {
   const esc = (s) => String(s).slice(0, 300)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -32,17 +46,22 @@ export function renderBlockPage({ blockedUrl = '', kind = 'site', rating = null 
   try { host = blockedUrl ? new URL(blockedUrl).hostname : ''; } catch { host = ''; }
 
   const isSearch = kind === 'search';
-  const title = isSearch ? 'That search isn’t allowed' : 'This site is blocked';
-  const body = isSearch
-    ? 'The words in that search aren’t permitted on this phone. Try searching for something else.'
-    : 'This site isn’t available on this phone.';
+  const isLocked = kind === 'locked';
+  const title = isLocked ? 'The phone is locked right now'
+    : isSearch ? 'That search isn’t allowed' : 'This site is blocked';
+  const body = isLocked
+    ? 'It’s shiur time. The web comes back when seder ends; calls and WhatsApp still work.'
+    : isSearch
+      ? 'The words in that search aren’t permitted on this phone. Try searching for something else.'
+      : 'This site isn’t available on this phone.';
+  const eyebrow = isLocked ? 'Shiur time' : isSearch ? 'Search not allowed' : 'Blocked';
 
   return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${isSearch ? 'Search not allowed' : 'Site blocked'}</title>
+<title>${isLocked ? 'Phone locked' : isSearch ? 'Search not allowed' : 'Site blocked'}</title>
 <style>
   :root { color-scheme: light dark; }
   * { box-sizing: border-box; }
@@ -64,13 +83,13 @@ export function renderBlockPage({ blockedUrl = '', kind = 'site', rating = null 
 </head>
 <body>
   <div class="wrap">
-    <p class="eyebrow">${isSearch ? 'Search not allowed' : 'Blocked'}</p>
+    <p class="eyebrow">${eyebrow}</p>
     <h1>${title}</h1>
-    ${host && !isSearch ? `<p class="site">${esc(host)}</p>` : ''}
+    ${host && !isSearch && !isLocked ? `<p class="site">${esc(host)}</p>` : ''}
     <div class="card">
       <p>${body}</p>
-      ${whyLine(rating) ? `<p class="why">${esc(whyLine(rating))}</p>` : ''}
-      <p class="why">If you need this for a legitimate reason, ask the person who set up this phone.</p>
+      ${!isLocked && whyLine(rating) ? `<p class="why">${esc(whyLine(rating))}</p>` : ''}
+      ${isLocked ? '' : '<p class="why">If you need this for a legitimate reason, ask the person who set up this phone.</p>'}
     </div>
   </div>
 </body>

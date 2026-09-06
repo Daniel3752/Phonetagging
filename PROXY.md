@@ -101,6 +101,14 @@ rung-2 image stripping cannot see inside a spliced tunnel. That is the granulari
 had, and path filtering is already deferred in the README. What it removes: the per-app splice
 treadmill. `splice.txt` is now only for hosts that must never be judged at all.
 
+**Except on the yeshiva tag** (`YESHIVA.md`): those phones strip every image, which is only
+possible on a connection the proxy sees inside, so the helper refuses the splice at the handshake
+whenever the Worker answers `decrypt: true` and Squid falls through to `bump all`. The decrypted
+requests are then answered from the same cached host decision, image fetches excepted. The Worker
+tells the helper what the browser was fetching (`%>ha{Sec-Fetch-Dest}` in the helper format) so an
+image with no file extension is still caught; the block page answers an image fetch with a blank
+placeholder so the layout keeps its shape.
+
 Identity for WireGuard phones is the tunnel address (`10.66.0.x`), stored in `devices.proxy_user`.
 The helper is fed `%LOGIN %SRC %URI` and uses `%SRC` when there is no login. The Worker never
 knows the difference.

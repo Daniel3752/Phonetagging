@@ -8,8 +8,8 @@
 
 import { audit } from './scheduler.js';
 import { runScheduler } from './scheduler.js';
-import { parseTimeOfDay } from './policy.js';
-import { normalizeDeviceLevel, normalizeSiteLevel, LEVELS, NEVER_LEVEL, MIN_LEVEL, MAX_DEVICE_LEVEL } from './levels.js';
+import { parseTimeOfDay, TAG_BASE_PREFIX, tagBaseId } from './policy.js';
+import { normalizeDeviceLevel, normalizeSiteLevel, normalizeTag, maxLevelFor, LEVELS, TAGS, NEVER_LEVEL, MIN_LEVEL } from './levels.js';
 import { searchCacheKey } from './search.js';
 import { sha256Hex , generateProxyPassword, proxyUserFromLabel } from './crypto.js';
 
@@ -25,6 +25,22 @@ function newId(prefix) {
 }
 
 const APP_STATES = new Set(['allowed', 'blocked', 'hidden']);
+// What a policy says about an app it has no rule for: 'blocked' = allowlist, 'allowed' = blocklist.
+const APP_DEFAULTS = new Set(['allowed', 'blocked']);
+// A policy's own say over the browser: NULL/'' = the rung decides, 'none' = no web while in force.
+const POLICY_WEB_MODES = new Set(['none']);
+
+// Is this a rung on this tag's ladder? A rung the operator did not ask for is refused, not clamped
+// (see the device routes for why): the clamp lands on rung 1 — no web at all — and the console then
+// reads as though they had chosen the strictest filtering.
+function isRung(level, tag) {
+  return level !== undefined && level !== null && level !== ''
+    && normalizeDeviceLevel(level, tag) === Number(level);
+}
+function rungError(level, tag) {
+  return `level must be a rung between ${MIN_LEVEL} and ${maxLevelFor(tag)} on the ${normalizeTag(tag)} ladder; ` +
+    `${JSON.stringify(level)} is not one (6/"Never" is a site rating, not a phone rung)`;
+}
 
 // Android package names: dot-separated segments, each starting with a letter. Validated because
 // these strings are pushed to phones — a typo silently fails to block the app the operator meant.
@@ -42,9 +58,12 @@ export async function handleAdmin(request, env, path) {
         all(env, 'SELECT * FROM app_rules ORDER BY policy_id, package_name'),
         all(env, 'SELECT * FROM schedules ORDER BY priority DESC, created_at DESC'),
       ]);
-      // The ladder ships with the state so the page never hard-codes rung names — they live in
+      // The ladders ship with the state so the page never hard-codes rung names — they live in
       // levels.js, and a page that duplicated them would drift from what is actually enforced.
-      return json({ devices, policies, appRules, schedules, levels: LEVELS });
+      // `levels` is the standard ladder (kept for anything that reads it); `tags` carries every
+      // ladder with its name, keyed by the tag a device stores.
+      const tags = Object.values(TAGS).map((t) => ({ id: t.id, name: t.name, levels: t.levels, policyPrefix: t.policyPrefix }));
+      return json({ devices, policies, appRules, schedules, levels: LEVELS, tags });
     }
 
     case 'GET /api/admin/verdicts':
@@ -62,14 +81,21 @@ export async function handleAdmin(request, env, path) {
       const name = String(body.name || '').trim();
       if (!name) return json({ error: 'name is required' }, 400);
 
+      const appDefault = body.app_default === undefined || body.app_default === null || body.app_default === ''
+        ? 'allowed' : String(body.app_default);
+      if (!APP_DEFAULTS.has(appDefault)) return json({ error: 'app_default must be allowed (blocklist) or blocked (allowlist)' }, 400);
+      const webMode = body.web_mode ? String(body.web_mode) : null;
+      if (webMode && !POLICY_WEB_MODES.has(webMode)) return json({ error: 'web_mode must be empty (the rung decides) or none' }, 400);
+
       const id = body.id || newId('pol');
       await env.DB.prepare(`
-        INSERT INTO policies (id, name, headwind_configuration_id, created_at) VALUES (?, ?, ?, ?)
+        INSERT INTO policies (id, name, headwind_configuration_id, app_default, web_mode, created_at) VALUES (?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET name = excluded.name,
-          headwind_configuration_id = excluded.headwind_configuration_id
-      `).bind(id, name, body.headwind_configuration_id || null, Date.now()).run();
+          headwind_configuration_id = excluded.headwind_configuration_id,
+          app_default = excluded.app_default, web_mode = excluded.web_mode
+      `).bind(id, name, body.headwind_configuration_id || null, appDefault, webMode, Date.now()).run();
 
-      await audit(env, 'operator', 'policy_saved', id, name);
+      await audit(env, 'operator', 'policy_saved', id, `${name} (${appDefault === 'blocked' ? 'allowlist' : 'blocklist'}${webMode ? `, web ${webMode}` : ''})`);
       return json({ ok: true, id });
     }
 
@@ -105,6 +131,14 @@ export async function handleAdmin(request, env, path) {
       if (!label) return json({ error: 'label is required' }, 400);
       if (!body.policy_id) return json({ error: 'policy_id is required' }, 400);
 
+      // The tag picks the ladder the rung is read on. Anything but a known tag is refused rather
+      // than defaulted: a phone quietly landing on the wrong ladder is the same class of mistake
+      // as the wrong rung.
+      if (body.tag !== undefined && body.tag !== null && body.tag !== '' && normalizeTag(body.tag) !== String(body.tag).trim().toLowerCase()) {
+        return json({ error: `tag must be one of ${Object.keys(TAGS).join(', ')}` }, 400);
+      }
+      const tag = normalizeTag(body.tag);
+
       // A MISSING level clamps to the strictest rung, never the loosest: getting that backwards
       // would mean a typo in a form silently opening a phone up.
       //
@@ -113,14 +147,10 @@ export async function handleAdmin(request, env, path) {
       // for an operator standing at the form, because the clamp lands on rung 1 — no web at all —
       // and the console then reads as though they had chosen the strictest filtering. A live phone
       // spent days unable to load anything or run a single search that way. Say no instead.
-      if (body.level !== undefined && body.level !== null && body.level !== ''
-          && normalizeDeviceLevel(body.level) !== Number(body.level)) {
-        return json({
-          error: `level must be a rung between ${MIN_LEVEL} and ${MAX_DEVICE_LEVEL}; ` +
-            `${JSON.stringify(body.level)} is not one (6/"Never" is a site rating, not a phone rung)`,
-        }, 400);
+      if (body.level !== undefined && body.level !== null && body.level !== '' && !isRung(body.level, tag)) {
+        return json({ error: rungError(body.level, tag) }, 400);
       }
-      const level = normalizeDeviceLevel(body.level ?? 2);
+      const level = normalizeDeviceLevel(body.level ?? 2, tag);
 
       // The proxy login is how the filter tells one phone from another. It must match an account in
       // /etc/squid/passwd; without it the device falls back to the strictest rung on every request.
@@ -143,15 +173,15 @@ export async function handleAdmin(request, env, path) {
         || generateProxyPassword();
       try {
         await env.DB.prepare(`
-          INSERT INTO devices (id, headwind_device_id, label, policy_id, timezone, enrolled_at, level, proxy_user, proxy_password)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          INSERT INTO devices (id, headwind_device_id, label, policy_id, timezone, enrolled_at, level, tag, proxy_user, proxy_password)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(id) DO UPDATE SET
             headwind_device_id = excluded.headwind_device_id, label = excluded.label,
             policy_id = excluded.policy_id, timezone = excluded.timezone,
-            level = excluded.level, proxy_user = excluded.proxy_user,
+            level = excluded.level, tag = excluded.tag, proxy_user = excluded.proxy_user,
             proxy_password = excluded.proxy_password
         `).bind(id, body.headwind_device_id || null, label, body.policy_id,
-                body.timezone || 'UTC', Date.now(), level, proxyUser, proxyPassword).run();
+                body.timezone || 'UTC', Date.now(), level, tag, proxyUser, proxyPassword).run();
       } catch (err) {
         // proxy_user is uniquely indexed: two phones sharing a login would silently share a rung,
         // and whichever was loosest would win for both.
@@ -161,11 +191,11 @@ export async function handleAdmin(request, env, path) {
         throw err;
       }
 
-      await audit(env, 'operator', 'device_saved', id, `${label} -> level ${level}, policy ${body.policy_id}`);
+      await audit(env, 'operator', 'device_saved', id, `${label} -> ${tag} level ${level}, policy ${body.policy_id}`);
       // The htpasswd line is returned ready to paste: the worker cannot reach /etc/squid/passwd, so
       // creating the squid account stays a manual step and this is the part people get wrong.
       return json({
-        ok: true, id, level,
+        ok: true, id, level, tag,
         proxy_user: proxyUser,
         proxy_password: proxyPassword,
         htpasswd: `htpasswd -B -b /etc/squid/passwd ${proxyUser} '${proxyPassword}'`,
@@ -180,6 +210,11 @@ export async function handleAdmin(request, env, path) {
       if (start === end) return json({ error: 'start and end cannot be the same time' }, 400);
       if (!body.base_policy_id || !body.active_policy_id) {
         return json({ error: 'base_policy_id and active_policy_id are required' }, 400);
+      }
+      // A base of `tag:<tag>` covers every phone on that ladder (see policy.js). Only a real tag.
+      const base = String(body.base_policy_id);
+      if (base.startsWith(TAG_BASE_PREFIX) && base !== tagBaseId(base.slice(TAG_BASE_PREFIX.length))) {
+        return json({ error: `base_policy_id ${JSON.stringify(base)} names no known tag (${Object.keys(TAGS).map(tagBaseId).join(', ')})` }, 400);
       }
 
       const dayMask = Number(body.day_mask);
@@ -219,25 +254,28 @@ export async function handleAdmin(request, env, path) {
       return json({ ok: true });
     }
 
-    // Move a phone between rungs. Separate from the full device save so the common operation — "make
-    // this stricter, now" — is one call that cannot accidentally blank another field.
+    // Move a phone between rungs — and, with `tag`, between ladders (this is the migration step:
+    // a yeshiva phone becomes a standard one by being given tag 'standard' and a rung on it).
+    // Separate from the full device save so the common operation — "make this stricter, now" — is
+    // one call that cannot accidentally blank another field.
     case 'POST /api/admin/devices/level': {
       if (!body.id) return json({ error: 'id is required' }, 400);
+      const current = await env.DB.prepare('SELECT tag FROM devices WHERE id = ?').bind(body.id).first();
+      if (!current) return json({ error: 'no such device' }, 404);
+      if (body.tag !== undefined && body.tag !== null && body.tag !== '' && normalizeTag(body.tag) !== String(body.tag).trim().toLowerCase()) {
+        return json({ error: `tag must be one of ${Object.keys(TAGS).join(', ')}` }, 400);
+      }
+      const tag = body.tag ? normalizeTag(body.tag) : normalizeTag(current.tag);
       // Same as the save route: a rung the operator did not ask for is worse than an error. 6 is
       // the one people reach for by mistake — it is a site rating meaning "blocked everywhere", and
       // clamped onto a phone it becomes rung 1, no web.
-      if (normalizeDeviceLevel(body.level) !== Number(body.level)) {
-        return json({
-          error: `level must be a rung between ${MIN_LEVEL} and ${MAX_DEVICE_LEVEL}; ` +
-            `${JSON.stringify(body.level)} is not one`,
-        }, 400);
-      }
-      const level = normalizeDeviceLevel(body.level);
-      const res = await env.DB.prepare('UPDATE devices SET level = ? WHERE id = ?')
-        .bind(level, body.id).run();
+      if (!isRung(body.level, tag)) return json({ error: rungError(body.level, tag) }, 400);
+      const level = normalizeDeviceLevel(body.level, tag);
+      const res = await env.DB.prepare('UPDATE devices SET level = ?, tag = ? WHERE id = ?')
+        .bind(level, tag, body.id).run();
       if (!res.meta?.changes) return json({ error: 'no such device' }, 404);
-      await audit(env, 'operator', 'device_level_set', body.id, `level ${level}`);
-      return json({ ok: true, level });
+      await audit(env, 'operator', 'device_level_set', body.id, `${tag} level ${level}`);
+      return json({ ok: true, level, tag });
     }
 
     // --- overriding the classifier ----------------------------------------------------------------

@@ -1,5 +1,35 @@
 # Next session — start here
 
+## NEWEST — the yeshiva temp tag (branch `claude/yeshiva-temp-tag-shiur-0kgp2f`, 2026-09-06)
+
+Built on top of `claude/gifted-ramanujan-nld0wy` (merged into this branch; PR #2 is still the one
+to merge first, then this). **Nothing from this block is deployed** — no D1 migration, no Worker
+deploy, no server file — and the Vortex tunnel stall below is still the first thing to fix.
+
+What it is: `YESHIVA.md`. In one paragraph: `devices.tag` ('standard' | 'yeshiva') picks the
+ladder; the yeshiva ladder is four rungs (1 apps-only, 2 + Chrome, 3 blocklist without social
+apps, 4 blocklist) with ONE browser profile — blocklists only, no AI, every image replaced by a
+grey placeholder of the same shape, search keyword-screened; a `yeshiva_shiur` policy (essentials
+allowlist, `web_mode 'none'`) is swapped in by four tag-wide schedules Sun–Thu (07:30–08:35,
+09:15–13:45, 15:35–19:15, 20:15–22:00, phone-local, Asia/Jerusalem) and the proxy refuses
+everything while it is in force. The console has a **Yeshiva** tab.
+
+Deploy order and the exact commands are in `YESHIVA.md` "Deploying it". Two things to know before
+touching the server: (1) `squid.conf` changed on two lines — the helper format gains
+`%>ha{Sec-Fetch-Dest}` and `deny_info` gains `&why=%o` — and the live file still has the scoped
+`test_phones` rule + access log, so apply those two lines by hand rather than reinstalling; (2) the
+helper is backward compatible with the old 3-field line, the Worker with the old helper.
+
+The trade-off decided this session: yeshiva phones are **bumped, not spliced**, on approved hosts
+(the helper refuses the splice at the handshake when the Worker says `decrypt: true`), because an
+image can only be blanked on a connection the proxy sees inside. Apps that reject the CA break on
+those phones unless in `splice.txt`. The standard ladder is unchanged (still splices). An idea not
+built: push Chrome-only proxy settings (`ProxyMode`/`ProxyServer` → 3128 over the tunnel) through
+Headwind's per-app managed settings so only Chrome is bumped and apps keep the splice path.
+
+Tests: `npm test` (adds `test/yeshiva.test.mjs`) and `npm run test:helper` (Python, drives the
+helper's line protocol offline). Both green.
+
 ## START HERE — handoff from the 2026-09-01 → 09-06 session (branch `claude/gifted-ramanujan-nld0wy`)
 
 Read this block before anything else. The rest of this file (from "What this project is" on)

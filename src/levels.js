@@ -3,8 +3,15 @@
 // parts (the mode branch, the never-level sentinel, out-of-range input) are testable without
 // standing up any infrastructure. Same shape as policy.js. See test/levels.test.mjs.
 //
-// The model is FIVE rungs, 1 = strictest .. 5 = most open, and each rung is a filtering MODE, not
-// just a bigger allowlist than the one below it:
+// There are now TWO ladders ("tags"), and every device carries which one it is on (devices.tag):
+//
+//   'standard' — the five-rung AI-judged ladder this system was built around (below).
+//   'yeshiva'  — the TEMPORARY four-rung tag for getting the yeshiva phones started before they are
+//                migrated onto the standard ladder. One browser profile (blocklists only, images
+//                blanked, no AI rating), and the rungs differ in their APP model. See YESHIVA.md.
+//
+// The standard model is FIVE rungs, 1 = strictest .. 5 = most open, and each rung is a filtering
+// MODE, not just a bigger allowlist than the one below it:
 //
 //   1  No browser  — no web at all (apps only). webMode 'none'.
 //   2  Text-only   — Essential allowlist, images stripped, text search only. webMode 'allowlist'.
@@ -18,7 +25,7 @@
 // the allowlist/permissive question; the blocklist, the search path and the image rules live in
 // proxy-api.js.
 
-// The rungs a device can actually be on.
+// The rungs a device can actually be on (the standard ladder; the yeshiva ladder has four).
 export const MIN_LEVEL = 1;
 export const MAX_DEVICE_LEVEL = 5;
 
@@ -29,10 +36,13 @@ export const MAX_DEVICE_LEVEL = 5;
 export const NEVER_LEVEL = 6;
 
 // webMode:
-//   'none'  no web at all (rung 1)
-//   'web'   the AI judges every site and search, and it is allowed only if its rating is at or
-//           below the rung. There is no manual allowlist and no allow-by-default — one uniform
-//           rating gate, with the bar sliding up per rung (rung 2 = ratings <=2 .. rung 5 = <=5).
+//   'none'      no web at all (rung 1)
+//   'web'       the AI judges every site and search, and it is allowed only if its rating is at or
+//               below the rung. There is no manual allowlist and no allow-by-default — one uniform
+//               rating gate, with the bar sliding up per rung (rung 2 = ratings <=2 .. rung 5 = <=5).
+//   'blocklist' allow-by-default with NO AI rating: only the explicit and social blocklists, sites an
+//               operator blocked by hand, and anything already on file as NEVER are refused. This is
+//               the yeshiva tag's one browser profile.
 //
 // textSearch / imageSearch gate the search path (proxy-api.js); images gates whether the proxy
 // strips image content; blockSocial says the L2 social blocklist applies at this rung. Mirrors
@@ -46,16 +56,63 @@ export const LEVELS = [
   { level: 5, name: 'Open',       webMode: 'web',  images: true,  textSearch: true,  imageSearch: true,  blockSocial: false },
 ];
 
-export function levelDefinition(level) {
-  return LEVELS.find((l) => l.level === level) || null;
+// The yeshiva temp tag. The BROWSER is the same on every rung that has one: blocklist-only (the
+// explicit list at every rung, the social list too), images blanked, image search off, searches
+// screened by the keyword list and anything already on file as NEVER — no model in the request
+// path. What changes between rungs is the APP model, which Headwind enforces:
+//
+//   1  Apps only            — an ALLOWLIST of apps; the browser is not on it.
+//   2  Apps + browser       — the same allowlist, with Chrome on it.
+//   3  Blocklist, no social — everything except a BLOCKLIST: social, explicit/dating, other
+//                             browsers, VPNs.
+//   4  Blocklist            — the same blocklist minus the social apps.
+//
+// appModel is what policies.app_default mirrors for the policy that pairs with the rung.
+// decrypt: true means the proxy BUMPS every approved host for these phones rather than splicing
+// it (see PROXY.md "Decrypt or pass through"): an image can only be blanked on a connection the
+// proxy can see inside. The cost is that an app which does not trust the filter's certificate
+// breaks unless its hosts are in splice.txt — bounded on rungs 1-2 by the short app allowlist.
+export const YESHIVA_LEVELS = [
+  { level: 1, name: 'Apps only',            webMode: 'none',      images: false, textSearch: false, imageSearch: false, blockSocial: true, appModel: 'allowlist', decrypt: true },
+  { level: 2, name: 'Apps + browser',       webMode: 'blocklist', images: false, textSearch: true,  imageSearch: false, blockSocial: true, appModel: 'allowlist', decrypt: true },
+  { level: 3, name: 'Blocklist, no social', webMode: 'blocklist', images: false, textSearch: true,  imageSearch: false, blockSocial: true, appModel: 'blocklist', decrypt: true },
+  { level: 4, name: 'Blocklist',            webMode: 'blocklist', images: false, textSearch: true,  imageSearch: false, blockSocial: true, appModel: 'blocklist', decrypt: true },
+];
+
+// The tags a device can carry, with the ladder each one uses and the app-policy id convention
+// (policy.js turns a tag + rung into `${policyPrefix}_${rung}`).
+export const TAGS = {
+  standard: { id: 'standard', name: 'Standard (5 rungs)',        levels: LEVELS,         policyPrefix: 'apps_rung' },
+  yeshiva:  { id: 'yeshiva',  name: 'Yeshiva temp tag (4 rungs)', levels: YESHIVA_LEVELS, policyPrefix: 'yeshiva_rung' },
+};
+export const DEFAULT_TAG = 'standard';
+
+// Anything that is not a known tag is the standard ladder: an old row has no tag column, and a
+// typo must not land a phone on a ladder the operator never chose.
+export function normalizeTag(value) {
+  const t = String(value || '').trim().toLowerCase();
+  return Object.prototype.hasOwnProperty.call(TAGS, t) ? t : DEFAULT_TAG;
+}
+
+export function ladderFor(tag) {
+  return TAGS[normalizeTag(tag)].levels;
+}
+
+export function maxLevelFor(tag) {
+  const ladder = ladderFor(tag);
+  return ladder[ladder.length - 1].level;
+}
+
+export function levelDefinition(level, tag = DEFAULT_TAG) {
+  return ladderFor(tag).find((l) => l.level === level) || null;
 }
 
 // Clamps anything that reaches us from a form, an API body or an old row into a usable device rung.
 // Never throws: a device with a corrupt level must not take down a scheduler run for the fleet, and
 // the safe direction to fail is STRICTER, so anything unusable becomes MIN_LEVEL.
-export function normalizeDeviceLevel(value) {
+export function normalizeDeviceLevel(value, tag = DEFAULT_TAG) {
   const n = Number(value);
-  if (!Number.isInteger(n) || n < MIN_LEVEL || n > MAX_DEVICE_LEVEL) return MIN_LEVEL;
+  if (!Number.isInteger(n) || n < MIN_LEVEL || n > maxLevelFor(tag)) return MIN_LEVEL;
   return n;
 }
 
@@ -74,11 +131,15 @@ export function normalizeSiteLevel(value) {
 // Blocklist denials (explicit, social) are applied earlier in proxy-api.js / the Squid helper and
 // never reach here; an UNKNOWN site (no verdict row) is classified inline before this is called, so
 // by the time we get here there is always a rating to test.
+//
+// A 'blocklist' rung (the yeshiva browser) has no rating gate at all: everything not on file as
+// NEVER is visible. That branch is here so one function answers "visible?" for every ladder.
 export function isVisibleAtLevel(verdict, deviceLevel, definition) {
-  const level = normalizeDeviceLevel(deviceLevel);
-  const def = definition || levelDefinition(level);
+  const def = definition || levelDefinition(normalizeDeviceLevel(deviceLevel));
   if (!def || def.webMode === 'none') return false;
-  return normalizeSiteLevel(verdict?.level) <= level;
+  const rating = normalizeSiteLevel(verdict?.level);
+  if (def.webMode === 'blocklist') return rating < NEVER_LEVEL;
+  return rating <= normalizeDeviceLevel(deviceLevel);
 }
 
 // Every ALLOWLIST rung whose devices should resolve a site with this rating — i.e. which per-level

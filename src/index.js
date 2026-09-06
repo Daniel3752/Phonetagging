@@ -25,7 +25,7 @@ import { runPreClassifier } from './preclassify.js';
 import { renderAdminPage } from './admin-page.js';
 import { addHostToAllowlist, removeHostFromAllowlist } from './gateway.js';
 import { sha256Hex, timingSafeEqual } from './crypto.js';
-import { renderBlockPage } from './block-page.js';
+import { renderBlockPage, renderBlankImage } from './block-page.js';
 import { parseSearchUrl } from './search.js';
 import { registrableDomain, normalizeHost } from './domains.js';
 
@@ -97,10 +97,31 @@ export default {
     }
 
     if (url.pathname === '/blocked' && request.method === 'GET') {
-      // Squid passes the denied URL through deny_info. A refused SEARCH gets a different page from a
-      // blocked site: there is nothing to request, and a button that cannot help is worse than none.
+      // Squid passes the denied URL through deny_info, plus the helper's message as `why` (see
+      // squid.conf) so the page can tell a locked phone from a blocked site.
       const blockedUrl = url.searchParams.get('url') || url.searchParams.get('cf_site_uri') || '';
-      const kind = blockedUrl && parseSearchUrl(blockedUrl) ? 'search' : 'site';
+      const why = url.searchParams.get('why') || '';
+
+      // An image the phone's rung stripped lands here too, because Squid redirects every denial
+      // to this URL. Chrome says what it was fetching (Sec-Fetch-Dest: image on <img>, <picture>
+      // and CSS backgrounds), and a blank placeholder keeps the page's layout where the picture
+      // was. Also by extension, for anything older that sends no fetch metadata. Cacheable: the
+      // same placeholder serves every stripped image on every phone.
+      if (isImageFetch(request, blockedUrl)) {
+        return new Response(renderBlankImage(), {
+          headers: {
+            'Content-Type': 'image/svg+xml; charset=utf-8',
+            'Cache-Control': 'public, max-age=86400',
+            'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'",
+          },
+        });
+      }
+
+      // A refused SEARCH gets a different page from a blocked site: there is nothing to request,
+      // and a button that cannot help is worse than none. A LOCKED phone (a shiur window) gets a
+      // page that says when the web comes back rather than blaming the site.
+      const kind = /^locked\b/i.test(why) ? 'locked'
+        : blockedUrl && parseSearchUrl(blockedUrl) ? 'search' : 'site';
       // The site's recorded reason, so the page can say why rather than just that. One lookup;
       // nothing about the phone is revealed, only what the classifier said about the site.
       const rating = kind === 'site' ? await blockReason(env, blockedUrl) : null;
@@ -176,6 +197,12 @@ export default {
 // blocked and NOTHING is cached, so a transient failure never permanently blocks an otherwise-fine
 // site and never permanently "approves" a site that was never actually allowlisted. The next
 // attempt re-judges from scratch.
+const IMAGE_EXTENSION_RE = /\.(jpe?g|png|gif|webp|bmp|svg|ico|tiff?|avif|heic|heif)$/i;
+function isImageFetch(request, blockedUrl) {
+  if ((request.headers.get('Sec-Fetch-Dest') || '').toLowerCase() === 'image') return true;
+  try { return IMAGE_EXTENSION_RE.test(new URL(blockedUrl).pathname); } catch { return false; }
+}
+
 async function blockReason(env, blockedUrl) {
   let hostname;
   try { hostname = normalizeHost(new URL(blockedUrl).hostname); } catch { return ''; }
