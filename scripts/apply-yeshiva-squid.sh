@@ -56,14 +56,15 @@ if ! grep -q '^acl browser_port myportname browser' "$work"; then
     note "4a. added acl browser_port"
   else echo "!! 4a. no 'acl step1 at_step SslBump1' line to anchor on. Not touching it." >&2; fi
 else note "4a. acl browser_port already present"; fi
-#    Anchor: the FIRST splice of filter_allows, whatever ACLs precede it (a live file may carry a
-#    scoped `ssl_bump splice test_phones filter_allows`). The rule goes immediately before it.
-if ! grep -q '^ssl_bump bump browser_port' "$work"; then
-  if grep -qE '^ssl_bump splice .*filter_allows' "$work"; then
-    sed -i -E '0,/^ssl_bump splice .*filter_allows/s//ssl_bump bump browser_port\n&/' "$work"; changed=1
-    note "4b. added ssl_bump bump browser_port before the first filter_allows splice"
-  else echo "!! 4b. no 'ssl_bump splice ... filter_allows' line to anchor on. Not touching it." >&2; fi
-else note "4b. ssl_bump bump browser_port already present"; fi
+#    The rule goes straight after the peek, ahead of EVERY splice (splice.txt included — Chrome
+#    trusts the certificate, and Google serves thumbnails from a splice.txt host). A rule already
+#    present lower down (an earlier run of this script) is moved up.
+if grep -q '^ssl_bump peek step1' "$work"; then
+  if ! sed -n '/^ssl_bump peek step1/{n;p}' "$work" | grep -q '^ssl_bump bump browser_port$'; then
+    sed -i '/^ssl_bump bump browser_port$/d; /^ssl_bump peek step1/a ssl_bump bump browser_port' "$work"; changed=1
+    note "4b. placed ssl_bump bump browser_port right after the peek"
+  else note "4b. ssl_bump bump browser_port already in place"; fi
+else echo "!! 4b. no 'ssl_bump peek step1' line to anchor on. Not touching it." >&2; fi
 
 echo
 if (( DRY )); then
