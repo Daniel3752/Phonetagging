@@ -419,7 +419,9 @@ def _answer(channel, fields):
                 entry = _entry(False, f'helper exception {type(exc).__name__}', False)
             _cache_put(host_key if entry['host_scoped'] else (user, url), entry)
         else:
-            entry = dict(cached, reason='cached')
+            # Keep the reason: squid.conf forwards it to the block page as `why`, and a "locked"
+            # phone must read as locked on the second request too, not only on the first.
+            entry = dict(cached)
 
         if leader:
             with _inflight_lock:

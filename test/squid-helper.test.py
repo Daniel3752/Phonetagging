@@ -105,6 +105,9 @@ answers['10.66.0.4'] = {'allow': False, 'reason': 'This phone is locked for shiu
 r = answer('1 - 10.66.0.4 https://en.wikipedia.org/ document')
 check('the message starts with the action so the block page can say "locked"', r.startswith('1 ERR message="locked: '), r)
 
+r = answer('2 - 10.66.0.4 https://en.wikipedia.org/wiki/Cat document')
+check('a cached denial keeps its reason (the block page reads it)', r.startswith('2 ERR message="locked: '), r)
+
 print('\n5. older squid.conf line shapes')
 reset()
 answers['dovid'] = {'allow': True, 'reason': 'ok', 'action': 'allow', 'host_scoped': True,
