@@ -3,8 +3,22 @@
 ## NEWEST — the yeshiva temp tag (branch `claude/yeshiva-temp-tag-shiur-0kgp2f`, 2026-09-06)
 
 Built on top of `claude/gifted-ramanujan-nld0wy` (merged into this branch; PR #2 is still the one
-to merge first, then this). **Nothing from this block is deployed** — no D1 migration, no Worker
-deploy, no server file — and the Vortex tunnel stall below is still the first thing to fix.
+to merge first, then this).
+
+**DEPLOYED AND VERIFIED on the Vortex, 2026-09-07/08:** migrations 0016–0018 applied through the
+ledger, Worker deployed, live squid.conf patched in place (all four lines — the `ssl_bump bump
+browser_port` line had to be added by hand because the live file's ssl_bump block is the scoped
+test_phones variant; the apply script now anchors correctly), helper installed. Vortex row: tag
+yeshiva, rung 2, Asia/Jerusalem, tunnel IP 10.66.0.4. Headwind: a copy of Background mode named
+"Background agent Yeshiva Temp" with Chrome ProxyMode/ProxyServer application settings; the
+Vortex is on it. Seen working on the phone: tunnel handshake (on a borrowed hotspot; the
+building wifi is still unusable), searches, social + explicit lists, **pictures grey** on
+Wikipedia (the browser-port design holds), the **shiur lock firing on the timetable** during seder
+with the locked block page, the fleet toggle Off releasing it. Google shows its EU cookie-consent
+page once (Squid exits from Germany). NOT yet done: mapping the Headwind configuration ids on the
+Yeshiva tab (scheduler logs "no Headwind configuration mapped" every 5 min for the Vortex and
+Isaac), the `Yeshiva — Shiur` kiosk configuration, and therefore the APP side of the lock.
+Also still to do from the older block: un-bypass Isaac, unscope the ssl_bump rule, access log off.
 
 What it is: `YESHIVA.md`. In one paragraph: `devices.tag` ('standard' | 'yeshiva') picks the
 ladder; the yeshiva ladder is four rungs (1 apps-only, 2 + Chrome, 3 blocklist without social
