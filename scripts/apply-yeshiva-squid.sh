@@ -10,6 +10,8 @@
 #   2. deny_info URL gains &why=%o                             (the block page learns "locked")
 #   3. http_port 3128 gains name=browser                       (the browser's own door)
 #   4. acl browser_port myportname browser + ssl_bump bump browser_port (decrypt only that door)
+#   5. the google_system_hosts pre-filter allow excludes the browser port (else Chrome's requests
+#      to www.gstatic.com / lh3.googleusercontent.com skip the filter and images leak)
 #
 # Usage:  sudo scripts/apply-yeshiva-squid.sh            (from a clone on the deployed branch)
 #         SQUID_CONF=/tmp/x.conf scripts/apply-yeshiva-squid.sh --dry-run
@@ -47,15 +49,15 @@ if grep -qE '^http_port 3128 ssl-bump' "$work"; then
 elif grep -qE '^http_port 3128 name=browser' "$work"; then note "3. http_port 3128: already named"
 else echo "!! 3. could not find 'http_port 3128 ssl-bump'. Not touching it." >&2; fi
 
-# 4. the acl + the bump rule. The acl goes before the ssl_bump block (squid needs it declared
-#    first); the rule goes right after `ssl_bump splice worker_sni`, ahead of any splice of
-#    filter_allows — scoped (test_phones) or not.
-if ! grep -q '^acl browser_port myportname browser' "$work"; then
-  if grep -q '^acl step1 at_step SslBump1' "$work"; then
-    sed -i '/^acl step1 at_step SslBump1/i acl browser_port myportname browser' "$work"; changed=1
-    note "4a. added acl browser_port"
-  else echo "!! 4a. no 'acl step1 at_step SslBump1' line to anchor on. Not touching it." >&2; fi
-else note "4a. acl browser_port already present"; fi
+# 4. the acl + the bump rule. The acl goes right before `acl google_system_hosts` — it must be
+#    declared before the http_access line that excludes it (step 5) and before the ssl_bump
+#    block. An acl already present lower down (an earlier run of this script) is moved up.
+if grep -q '^acl google_system_hosts dstdomain' "$work"; then
+  if ! grep -B1 '^acl google_system_hosts dstdomain' "$work" | grep -q '^acl browser_port myportname browser$'; then
+    sed -i '/^acl browser_port myportname browser$/d; /^acl google_system_hosts dstdomain/i acl browser_port myportname browser' "$work"; changed=1
+    note "4a. placed acl browser_port before google_system_hosts"
+  else note "4a. acl browser_port already in place"; fi
+else echo "!! 4a. no 'acl google_system_hosts' line to anchor on. Not touching it." >&2; fi
 #    The rule goes straight after the peek, ahead of EVERY splice (splice.txt included — Chrome
 #    trusts the certificate, and Google serves thumbnails from a splice.txt host). A rule already
 #    present lower down (an earlier run of this script) is moved up.
@@ -65,6 +67,13 @@ if grep -q '^ssl_bump peek step1' "$work"; then
     note "4b. placed ssl_bump bump browser_port right after the peek"
   else note "4b. ssl_bump bump browser_port already in place"; fi
 else echo "!! 4b. no 'ssl_bump peek step1' line to anchor on. Not touching it." >&2; fi
+
+# 5. keep the Google exemption off the browser port
+if grep -q '^http_access allow google_system_hosts web_ports$' "$work"; then
+  sed -i 's/^http_access allow google_system_hosts web_ports$/http_access allow google_system_hosts web_ports !browser_port/' "$work"; changed=1
+  note "5. google_system_hosts exemption now excludes the browser port"
+elif grep -q '^http_access allow google_system_hosts web_ports !browser_port' "$work"; then note "5. exemption already excludes the browser port"
+else echo "!! 5. could not find 'http_access allow google_system_hosts web_ports'. Not touching it." >&2; fi
 
 echo
 if (( DRY )); then
