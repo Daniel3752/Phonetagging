@@ -106,18 +106,29 @@ out = await (await proxyCheck('10.66.0.4', 'https://shtus.example/', {}, LUNCH))
 check('a rated-5 site is allowed — there is no rating gate on this tag', out.allow === true, JSON.stringify(out));
 check('still no model call', modelCalls === 0, String(modelCalls));
 
+let page;
 console.log('\n4. the yeshiva search: keyword list and what is on file, no model');
 await DB.prepare(`INSERT INTO keyword_rules (scope, lang, pattern, rating, note) VALUES ('search', 'en', 'porn', 6, 'explicit')`).run();
-out = await (await proxyCheck('10.66.0.4', 'https://www.google.com/search?q=free+porn', {}, LUNCH)).json();
-check('an explicit keyword refuses the search', out.allow === false && out.action === 'search', JSON.stringify(out));
-out = await (await proxyCheck('10.66.0.4', 'https://www.google.com/search?q=volcano+facts', {}, LUNCH)).json();
+out = await (await proxyCheck('10.66.0.4', 'https://www.google.com/search?q=free+porn&udm=14', {}, LUNCH)).json();
+check('an explicit keyword refuses the search', out.allow === false && out.action === 'search' && /explicit/.test(out.reason), JSON.stringify(out));
+out = await (await proxyCheck('10.66.0.4', 'https://www.google.com/search?q=volcano+facts&udm=14', {}, LUNCH)).json();
 check('an ordinary search is allowed with images off', out.allow === true && out.images_off === true && out.action === 'allow_text_only', JSON.stringify(out));
 check('no model call for the search', modelCalls === 0, String(modelCalls));
 await admin('/api/admin/searches/level', { query: 'something awful', level: 6 });
-out = await (await proxyCheck('10.66.0.4', 'https://www.google.com/search?q=awful+something', {}, LUNCH)).json();
-check('a search on file as NEVER is refused', out.allow === false);
+out = await (await proxyCheck('10.66.0.4', 'https://www.google.com/search?q=awful+something&udm=14', {}, LUNCH)).json();
+check('a search on file as NEVER is refused', out.allow === false && /awful|Set by operator/i.test(out.reason || ''), JSON.stringify(out));
 out = await (await proxyCheck('10.66.0.4', 'https://www.google.com/search?q=cats&udm=2', {}, LUNCH)).json();
 check('image search is off', out.allow === false && out.action === 'image_search');
+out = await (await proxyCheck('10.66.0.4', 'https://www.google.com/search?q=gemara&hl=en&gl=il&udm=14&safe=active', {}, LUNCH)).json();
+check('a Google search in text-only (Web) mode is allowed', out.allow === true, JSON.stringify(out));
+out = await (await proxyCheck('10.66.0.4', 'https://www.google.com/search?q=gemara&hl=en', {}, LUNCH)).json();
+check('a Google search outside Web mode is refused — thumbnails live in that page', out.allow === false && out.action === 'search' && /address bar/.test(out.reason), JSON.stringify(out));
+out = await (await proxyCheck('10.66.0.4', 'https://duckduckgo.com/?q=gemara', {}, LUNCH)).json();
+check('other engines are unaffected', out.allow === true, JSON.stringify(out));
+out = await (await proxyCheck('10.66.0.3', 'https://www.google.com/search?q=gemara', {}, LUNCH)).json();
+check('the standard ladder is unaffected', out.action !== 'search' || out.allow === true, JSON.stringify(out));
+page = await worker.fetch(new Request('https://w/blocked?url=' + encodeURIComponent('https://www.google.com/search?q=gemara') + '&why=' + encodeURIComponent('search: Google is text-only on this phone: search from the address bar, not from google.com.')), env);
+check('the block page shows the search reason', /address bar/.test(await page.text()));
 out = await (await proxyCheck('10.66.0.4', 'https://www.google.com/', {}, LUNCH)).json();
 check('the search box itself loads', out.allow === true);
 
@@ -191,7 +202,7 @@ await admin('/api/admin/devices/level', { id: 'vortex', level: 1 });
 out = await (await proxyCheck('10.66.0.4', 'https://brand-new-site.example/', {}, LUNCH)).json();
 check('rung 1: no web', out.allow === false && out.action === 'no_web');
 
-let page = await worker.fetch(new Request('https://w/blocked?url=https%3A%2F%2Fx.example%2F&why=locked%3A%20This%20phone%20is%20locked'), env);
+page = await worker.fetch(new Request('https://w/blocked?url=https%3A%2F%2Fx.example%2F&why=locked%3A%20This%20phone%20is%20locked'), env);
 let html = await page.text();
 check('the block page says the phone is locked', /locked right now/i.test(html) && !/This site is blocked/.test(html));
 page = await worker.fetch(new Request('https://w/blocked?url=https%3A%2F%2Fx.example%2Fabc', { headers: { 'Sec-Fetch-Dest': 'image' } }), env);

@@ -247,6 +247,13 @@ export async function handleProxyCheck(request, env, now = new Date()) {
       return json({ ...base, cache_scope: 'url', allow: false, action: 'image_search', engine: search.engine, image_search: true,
         reason: 'Image search is turned off at this level.' });
     }
+    // Google embeds result thumbnails in the page itself, beyond any image stripping. Its "Web"
+    // mode (udm=14) has none, Chrome is given a search URL in that mode, and any other Google
+    // results page is refused here so the phone's own google.com box cannot route around it.
+    if (def.textOnlyGoogle && search.engine === 'google' && u.searchParams.get('udm') !== '14') {
+      return json({ ...base, cache_scope: 'url', allow: false, action: 'search', engine: search.engine, image_search: false,
+        reason: 'Google is text-only on this phone: search from the address bar, not from google.com.' });
+    }
     const rated = await rateSearch(env, search, { noModel: blocklistMode });
     // A blocklist rung has no bar to clear — only NEVER refuses. The standard ladder gates by rung.
     const allow = blocklistMode ? rated.level < NEVER_LEVEL : rated.level <= level;

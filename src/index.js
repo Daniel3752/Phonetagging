@@ -125,7 +125,10 @@ export default {
       // The site's recorded reason, so the page can say why rather than just that. One lookup;
       // nothing about the phone is revealed, only what the classifier said about the site.
       const rating = kind === 'site' ? await blockReason(env, blockedUrl) : null;
-      return new Response(renderBlockPage({ blockedUrl, kind, rating }), {
+      // For a refused search the helper's message carries the Worker's reason ("search: …");
+      // show it, so "search from the address bar" reaches the person instead of a generic no.
+      const detail = kind === 'search' ? why.replace(/^search:\s*/i, '').trim() : '';
+      return new Response(renderBlockPage({ blockedUrl, kind, rating, detail }), {
         headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' },
       });
     }

@@ -113,12 +113,22 @@ server files should go together.
    Do NOT run `install-squid.sh` — it would overwrite the hand edits.
 4. **The phone's row** (Devices tab, Edit): Tag = Yeshiva, Rung = 2, Baseline policy follows
    (`Yeshiva — Rung 2`), Time zone `Asia/Jerusalem`, proxy login = its tunnel IP. Save.
-5. **Chrome's proxy setting**, in Headwind: the phone's configuration → Applications → Chrome →
-   application settings (managed configuration), add:
+5. **Chrome's settings**, in Headwind: the phone's configuration → Applications Settings tab →
+   Add, application `com.android.chrome`, one row each:
    ```
-   ProxyMode     string   fixed_servers
-   ProxyServer   string   10.66.0.1:3128
+   ProxyMode                       fixed_servers
+   ProxyServer                     10.66.0.1:3128
+   DefaultSearchProviderEnabled    true
+   DefaultSearchProviderName       Google
+   DefaultSearchProviderSearchURL  https://www.google.com/search?q={searchTerms}&hl=en&gl=il&udm=14&safe=active
+   DefaultSearchProviderKeyword    google.com
    ```
+   The first two send Chrome to the browser port. The rest make address-bar searches use Google's
+   text-only "Web" results (`udm=14`: no thumbnails — Google embeds them in the page, beyond any
+   image stripping), in English (`hl=en`, `gl=il` — Squid exits from Germany, so Google would
+   otherwise answer in German with an EU consent page), with SafeSearch forced (`safe=active`).
+   The proxy refuses any Google results page on the yeshiva tag that is not in Web mode, so the
+   box on google.com itself says "search from the address bar".
    (`10.66.0.1` is the server's address inside the tunnel, reachable only through it.) Sync the
    phone; `chrome://policy` on the phone lists both values when it took. This is per
    configuration, so put it on every configuration a yeshiva phone can be switched to (rungs and

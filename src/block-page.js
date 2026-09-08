@@ -37,7 +37,7 @@ export function renderBlankImage() {
     'preserveAspectRatio="none"><rect width="160" height="120" fill="#dfe3e8"/></svg>';
 }
 
-export function renderBlockPage({ blockedUrl = '', kind = 'site', rating = null } = {}) {
+export function renderBlockPage({ blockedUrl = '', kind = 'site', rating = null, detail = '' } = {}) {
   const esc = (s) => String(s).slice(0, 300)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
@@ -89,6 +89,7 @@ export function renderBlockPage({ blockedUrl = '', kind = 'site', rating = null 
     <div class="card">
       <p>${body}</p>
       ${!isLocked && whyLine(rating) ? `<p class="why">${esc(whyLine(rating))}</p>` : ''}
+      ${isSearch && detail && !/^cached$/i.test(detail) ? `<p class="why">${esc(detail)}</p>` : ''}
       ${isLocked ? '' : '<p class="why">If you need this for a legitimate reason, ask the person who set up this phone.</p>'}
     </div>
   </div>

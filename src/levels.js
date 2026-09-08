@@ -69,6 +69,12 @@ export const LEVELS = [
 //
 // appModel is what policies.app_default mirrors for the policy that pairs with the rung.
 //
+// textOnlyGoogle: Google embeds result thumbnails INSIDE the results page (no separate image
+// requests), so blanking images cannot touch them. Google's "Web" results mode (udm=14) is plain
+// links with no thumbnails; Chrome is given a search URL in that mode (YESHIVA.md), and the proxy
+// refuses any Google results page that is not in it, so searching from google.com's own box
+// cannot bring the thumbnails back.
+//
 // Images are blanked in the BROWSER only. Chrome is pointed at the proxy's browser port (3128,
 // pushed by Headwind as a Chrome managed setting), where everything is decrypted; app traffic
 // takes the intercept path and is spliced as on the standard ladder, so no app breaks and nothing
@@ -77,9 +83,9 @@ export const LEVELS = [
 // be pushed, at the cost of breaking apps that reject the filter's certificate. Off.
 export const YESHIVA_LEVELS = [
   { level: 1, name: 'Apps only',            webMode: 'none',      images: false, textSearch: false, imageSearch: false, blockSocial: true, appModel: 'allowlist', decrypt: false },
-  { level: 2, name: 'Apps + browser',       webMode: 'blocklist', images: false, textSearch: true,  imageSearch: false, blockSocial: true, appModel: 'allowlist', decrypt: false },
-  { level: 3, name: 'Blocklist, no social', webMode: 'blocklist', images: false, textSearch: true,  imageSearch: false, blockSocial: true, appModel: 'blocklist', decrypt: false },
-  { level: 4, name: 'Blocklist',            webMode: 'blocklist', images: false, textSearch: true,  imageSearch: false, blockSocial: true, appModel: 'blocklist', decrypt: false },
+  { level: 2, name: 'Apps + browser',       webMode: 'blocklist', images: false, textSearch: true,  imageSearch: false, blockSocial: true, appModel: 'allowlist', decrypt: false, textOnlyGoogle: true },
+  { level: 3, name: 'Blocklist, no social', webMode: 'blocklist', images: false, textSearch: true,  imageSearch: false, blockSocial: true, appModel: 'blocklist', decrypt: false, textOnlyGoogle: true },
+  { level: 4, name: 'Blocklist',            webMode: 'blocklist', images: false, textSearch: true,  imageSearch: false, blockSocial: true, appModel: 'blocklist', decrypt: false, textOnlyGoogle: true },
 ];
 
 // The tags a device can carry, with the ladder each one uses and the app-policy id convention
