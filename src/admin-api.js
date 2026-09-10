@@ -8,6 +8,7 @@
 
 import { audit } from './scheduler.js';
 import { runScheduler } from './scheduler.js';
+import { pushPolicyApps } from './headwind.js';
 import { parseTimeOfDay, TAG_BASE_PREFIX, tagBaseId, SHIUR_MODES, normalizeShiurMode } from './policy.js';
 import { normalizeDeviceLevel, normalizeSiteLevel, normalizeTag, maxLevelFor, LEVELS, TAGS, NEVER_LEVEL, MIN_LEVEL } from './levels.js';
 import { searchCacheKey } from './search.js';
@@ -373,6 +374,34 @@ export async function handleAdmin(request, env, path) {
     }
 
     // --- manual scheduler run, so the operator doesn't wait for the next cron tick ---------------
+    // Write a policy's app rules into its Headwind configuration. This is the app side of a rung
+    // becoming real: until it runs, the rules in D1 are intent and the panel's list is whatever an
+    // operator typed. Idempotent — push again after editing rules.
+    case 'POST /api/admin/policies/push-apps': {
+      if (!body.id) return json({ error: 'id is required' }, 400);
+      const policy = await env.DB.prepare('SELECT id, name, headwind_configuration_id FROM policies WHERE id = ?')
+        .bind(body.id).first();
+      if (!policy) return json({ error: 'no such policy' }, 404);
+      if (!policy.headwind_configuration_id) {
+        return json({ error: 'this policy has no Headwind configuration mapped — set it first' }, 400);
+      }
+      const rules = await env.DB.prepare('SELECT package_name, state FROM app_rules WHERE policy_id = ? ORDER BY package_name')
+        .bind(policy.id).all().then((r) => r.results || []);
+      if (rules.length === 0) return json({ error: 'this policy has no app rules to push' }, 400);
+
+      let result;
+      try {
+        result = await pushPolicyApps(env, policy.headwind_configuration_id, rules);
+      } catch (err) {
+        await audit(env, 'operator', 'apps_push_failed', policy.id, err.message);
+        return json({ error: `Headwind push failed: ${err.message}` }, 502);
+      }
+      await audit(env, 'operator', 'apps_pushed', policy.id,
+        `config ${result.configurationId}: ${result.remove} remove, ${result.install} install, ${result.icon} icon-only, ${result.created.length} created` +
+        (result.errors.length ? `, ${result.errors.length} errors` : ''));
+      return json({ ok: true, policy: policy.id, ...result });
+    }
+
     case 'POST /api/admin/apply':
       return json(await runScheduler(env));
 

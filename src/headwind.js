@@ -16,7 +16,18 @@ const ENDPOINTS = {
   deviceSearch: '/rest/private/devices/search',       // POST DeviceSearchRequest -> DeviceListView
   deviceUpdate: '/rest/private/devices',              // PUT Device -> Response
   configurationList: '/rest/private/configurations/list', // GET -> [LookupItem]
+  configurationGet: (id) => `/rest/private/configurations/${id}`, // GET -> Configuration (with applications)
+  configurationUpdate: '/rest/private/configurations',    // PUT Configuration -> Response
+  applicationSearch: '/rest/private/applications/search', // GET -> [Application] (the whole catalogue)
+  applicationCreate: '/rest/private/applications/android', // PUT Application -> Response{data: Application}
 };
+
+// Headwind's per-configuration app action (Application.action / ApplicationConfigurationLink.action
+// in the spec, enum [0,1,2]). 1 = Install is confirmed against the live database; 2 = Remove is
+// what the panel's "Remove" writes; 0 = the app is linked to the configuration but neither
+// installed nor removed ("Do not install"), which is how an allowlisted Play app is expressed —
+// Headwind has no APK for it, so there is nothing to install, only an icon to show.
+export const HW_ACTION = { NONE: 0, INSTALL: 1, REMOVE: 2 };
 
 // Headwind paginates device search. One page this size covers any fleet this system is designed
 // for; a larger deployment would need to walk pages, which is why totalItemsCount is checked.
@@ -154,6 +165,81 @@ export async function setDeviceConfiguration(env, headwindDeviceId, configuratio
   });
 
   return { changed: true, from: current.configurationId, to: configurationId };
+}
+
+// The whole application catalogue, keyed by package name. Headwind only acts on apps it knows,
+// so a rule for a package the catalogue lacks needs an entry created first (below).
+export async function listApplications(env) {
+  const data = payload(await call(env, ENDPOINTS.applicationSearch, { method: 'GET' }));
+  return Array.isArray(data) ? data : [];
+}
+
+// Creates a catalogue entry for a package Headwind has no APK for (a Play app). Enough for the
+// agent to remove it by package name, or to show its icon; nothing to install.
+export async function createApplication(env, { pkg, name }) {
+  const data = payload(await call(env, ENDPOINTS.applicationCreate, {
+    method: 'PUT',
+    body: JSON.stringify({
+      name: name || pkg, pkg, version: '0', type: 'app',
+      showIcon: true, useKiosk: false, system: false, split: false,
+      runAfterInstall: false, runAtBoot: false, skipVersion: false,
+    }),
+  }));
+  return data && typeof data === 'object' ? data : { pkg, name: name || pkg };
+}
+
+export async function getConfiguration(env, configurationId) {
+  return payload(await call(env, ENDPOINTS.configurationGet(configurationId), { method: 'GET' }));
+}
+
+// Writes a policy's app rules into a Headwind configuration.
+//
+// rules: [{ package_name, state }] with state 'allowed' | 'blocked' | 'hidden'. Every rule becomes
+// an entry in the configuration's application list:
+//   blocked / hidden -> action REMOVE (the agent uninstalls a user app; a system app is hidden)
+//   allowed          -> action INSTALL when Headwind holds an APK for it, else NONE, icon shown
+// Entries already in the configuration for other packages are left exactly as they are, so the
+// operator's hand-made list survives a push. Packages missing from the catalogue are created.
+//
+// PUT /private/configurations takes the WHOLE configuration, so the current record is read first
+// and only `applications` is changed — a partial write would blank every other setting.
+export async function pushPolicyApps(env, configurationId, rules) {
+  const config = await getConfiguration(env, configurationId);
+  if (!config || typeof config !== 'object') throw new Error(`Headwind configuration ${configurationId} not found`);
+
+  const catalogue = new Map((await listApplications(env)).map((a) => [String(a.pkg || '').toLowerCase(), a]));
+  const created = [];
+  const errors = [];
+
+  const byId = new Map((Array.isArray(config.applications) ? config.applications : []).map((a) => [a.id, a]));
+  const summary = { remove: 0, install: 0, icon: 0 };
+
+  for (const rule of rules) {
+    const pkg = String(rule.package_name || '').trim().toLowerCase();
+    if (!pkg) continue;
+    let app = catalogue.get(pkg);
+    if (!app) {
+      try {
+        app = await createApplication(env, { pkg, name: rule.label || pkg });
+        if (!app.id) throw new Error('create returned no id');
+        catalogue.set(pkg, app);
+        created.push(pkg);
+      } catch (err) {
+        errors.push(`${pkg}: ${err.message}`);
+        continue;
+      }
+    }
+    const remove = rule.state === 'blocked' || rule.state === 'hidden';
+    const hasApk = Boolean(app.url || app.urlArm64 || app.urlArmeabi);
+    const action = remove ? HW_ACTION.REMOVE : (hasApk ? HW_ACTION.INSTALL : HW_ACTION.NONE);
+    if (remove) summary.remove++; else if (action === HW_ACTION.INSTALL) summary.install++; else summary.icon++;
+    byId.set(app.id, { ...(byId.get(app.id) || {}), ...app, action, showIcon: !remove, remove });
+  }
+
+  config.applications = [...byId.values()];
+  await call(env, ENDPOINTS.configurationUpdate, { method: 'PUT', body: JSON.stringify(config) });
+
+  return { configurationId, entries: config.applications.length, created, errors, ...summary };
 }
 
 // Test hook — lets a test reset the module-level JWT cache between cases.

@@ -385,11 +385,15 @@ export function renderAdminPage() {
     fillLevels('dLevel', id('dTag').value, false);   // a phone's rung on the chosen ladder
     fillLevels('qLevel', 'standard', true);           // a site/search rating: 2-6, Never included
 
-    id('policyTable').innerHTML = table(['Policy', 'Model', 'Headwind config', 'Apps'], state.policies, function (p) {
+    id('policyTable').innerHTML = table(['Policy', 'Model', 'Headwind config', 'Apps', ''], state.policies, function (p) {
       var n = state.appRules.filter(function (r) { return r.policy_id === p.id; }).length;
       return '<tr><td>' + esc(p.name) + '</td><td>' + esc(policyModel(p)) + '</td><td>' +
         (p.headwind_configuration_id ? esc(p.headwind_configuration_id) : '<span class="empty">unmapped</span>') +
-        '</td><td>' + n + ' rule' + (n === 1 ? '' : 's') + '</td></tr>';
+        '</td><td>' + n + ' rule' + (n === 1 ? '' : 's') + '</td><td style="white-space:nowrap">' +
+        (p.headwind_configuration_id
+          ? '<button class="ghost" style="margin:0;padding:4px 10px" data-push-apps="' + esc(p.id) + '" title="Write these app rules into the Headwind configuration">Push apps</button>'
+          : '<span class="empty">map a config first</span>') +
+        '</td></tr>';
     });
 
     renderYeshiva();
@@ -475,9 +479,10 @@ export function renderAdminPage() {
     var btn = id(btnId), msg = id(msgId);
     btn.disabled = true;
     try {
-      await fn();
+      // A handler may return a string to replace the generic success text with specifics.
+      var out = await fn();
       await refresh();
-      say(msg, okText, true);
+      say(msg, typeof out === 'string' ? out : okText, true);
     } catch (e) {
       say(msg, e.message, false);
     } finally {
@@ -737,6 +742,24 @@ export function renderAdminPage() {
     if (ds.devEdit) {
       var d = state.devices.find(function (x) { return x.id === ds.devEdit; });
       if (d) editDevice(d);
+      return;
+    }
+    if (ds.pushApps) {
+      var pol = state.policies.find(function (x) { return x.id === ds.pushApps; });
+      if (!pol) return;
+      if (!confirm('Push ' + state.appRules.filter(function (r) { return r.policy_id === pol.id; }).length +
+        ' app rules from "' + pol.name + '" into Headwind configuration ' + pol.headwind_configuration_id + '?\\n\\n' +
+        'Blocked apps become Remove (uninstalled on every phone on that configuration at its next sync). ' +
+        'Entries for other apps already in the configuration are left alone.')) return;
+      submit('savePolicy', 'policyMsg', function () {
+        return api('/api/admin/policies/push-apps', { id: pol.id }).then(function (r) {
+          var msg = 'Pushed to configuration ' + r.configurationId + ': ' + r.remove + ' remove, ' + r.install + ' install, ' +
+            r.icon + ' icon-only' + (r.created.length ? ', ' + r.created.length + ' created in the catalogue' : '') +
+            (r.errors.length ? '. ERRORS: ' + r.errors.join('; ') : '') + '. Phones pick it up at their next sync (reboot forces it).';
+          if (r.errors.length) throw new Error(msg);
+          return msg;
+        });
+      }, 'Pushed.');
       return;
     }
     if (ds.devDel) {
