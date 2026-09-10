@@ -56,13 +56,14 @@ apps' API/CDN names — TikTok's feed stopped loading once synced); yeshiva app 
 tab writes a policy's rules into its Headwind configuration (see YESHIVA.md "Getting the app
 lists onto the phones"); fleet toggle was set to **Off** for testing — put it back to Timetable.
 
-0. **Direct access (operator is setting this up, 09-10 evening):** the environment should gain
-   outbound network access to `2.28.63.95` and env vars `CLOUDFLARE_API_TOKEN` (Workers Scripts:
-   Edit + D1: Edit) / `CLOUDFLARE_ACCOUNT_ID`. First thing in the new session: `ssh-keygen -t
-   ed25519 -N '' -f ~/.ssh/id_ed25519`, print the public key, have the operator append it to
-   `/root/.ssh/authorized_keys` on the server, then `ssh root@2.28.63.95` and run the server
-   steps yourself; `npx wrangler deploy` / `npm run db:migrate` run from here with the token.
-   Everything below was written for copy-paste; with access, just do it.
+0. **Direct access — do it from the operator's Windows PC, not the cloud.** Anthropic-hosted
+   cloud sessions egress only through an HTTP/HTTPS proxy (docs: "Security proxy"), so SSH to the
+   server can never work from one, whatever the environment's network level. The working setup:
+   `npm install -g @anthropic-ai/claude-code` on the PC, then from `C:\Users\danie\Phonetagging`
+   run `claude --teleport <session-id>` to pull the cloud session into the PC's terminal, where
+   Claude has ssh (to 2.28.63.95, key in `%USERPROFILE%\.ssh\id_ed25519`, public key appended to
+   the server's `/root/.ssh/authorized_keys`), adb (the phone), wrangler (already logged in) and
+   the repo. Everything below was written for copy-paste; from the PC, just do it.
 0b. **Deploy**: `git pull && npm run db:migrate && npx wrangler deploy` (0019, the push button
    and the Headwind login fix are not live until this runs).
 0c. **Headwind login**: the first Push apps failed 401 because the Worker sent a plain password;
