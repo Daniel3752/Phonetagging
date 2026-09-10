@@ -11,6 +11,19 @@
 // Requires env.HEADWIND_BASE_URL (e.g. https://mdm.getshmira.com), plus either
 // env.HEADWIND_API_TOKEN or the env.HEADWIND_USER / env.HEADWIND_PASSWORD pair.
 
+import { md5Hex } from './md5.js';
+
+// Headwind never sees a plain password. Its own login page sends md5(password).toUpperCase() and
+// the JWT endpoint checks that against the hash it stores — a plain password is a 401 every time,
+// which is what the first push produced. HEADWIND_PASSWORD may be given either way: the plain
+// password (hashed here, the same way the page does it) or the 32-hex-digit hash copied straight
+// out of Headwind's users table.
+export function headwindPasswordHash(secret) {
+  const s = String(secret || '').trim();
+  if (/^[0-9a-fA-F]{32}$/.test(s)) return s.toUpperCase();
+  return md5Hex(s).toUpperCase();
+}
+
 const ENDPOINTS = {
   login: '/rest/public/jwt/login',                    // POST {login,password} -> {id_token}
   deviceSearch: '/rest/private/devices/search',       // POST DeviceSearchRequest -> DeviceListView
@@ -58,7 +71,7 @@ async function authHeader(env) {
   const res = await fetch(requireConfig(env) + ENDPOINTS.login, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ login: env.HEADWIND_USER, password: env.HEADWIND_PASSWORD }),
+    body: JSON.stringify({ login: env.HEADWIND_USER, password: headwindPasswordHash(env.HEADWIND_PASSWORD) }),
   });
   if (!res.ok) throw new Error(`Headwind login failed: ${res.status}`);
 

@@ -120,3 +120,27 @@ await check('a package the catalogue refuses is reported, the rest still pushed'
 });
 
 console.log(`\nAll ${passed} Headwind-push checks passed.\n`);
+
+console.log('\n4. the login sends what the panel sends: uppercase MD5');
+{
+  const { headwindPasswordHash } = await import('../src/headwind.js');
+  await check('a plain password is hashed the way the panel hashes it', async () => {
+    assert.equal(headwindPasswordHash('abc'), '900150983CD24FB0D6963F7D28E17F72');
+  });
+  await check('a hash copied from the users table passes through, uppercased', async () => {
+    assert.equal(headwindPasswordHash('900150983cd24fb0d6963f7d28e17f72'), '900150983CD24FB0D6963F7D28E17F72');
+  });
+  reset();
+  let sent = null;
+  const real = globalThis.fetch;
+  globalThis.fetch = async (url, opts) => {
+    if (new URL(url).pathname === '/rest/public/jwt/login') sent = JSON.parse(opts.body);
+    return real(url, opts);
+  };
+  await pushPolicyApps({ ...env, HEADWIND_PASSWORD: 'abc' }, 4, [{ package_name: 'com.whatsapp', state: 'allowed' }]);
+  await check('the login request carries the hash, never the password', async () => {
+    assert.equal(sent.password, '900150983CD24FB0D6963F7D28E17F72');
+    assert.equal(sent.login, 'u');
+  });
+  globalThis.fetch = real;
+}
