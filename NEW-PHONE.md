@@ -41,7 +41,11 @@ enrollment QR (STOCK `com.hmdm.launcher` only — Google's DPC allowlist blocks 
 
 ## C. Filter plumbing
 
-9. ☐ **[PC]** Install the interception CA (still required — search engines are decrypted):
+9. ☐ **[PC]** Install the interception CA (still required — search engines are decrypted).
+   **Before this step the phone must NOT be on a configuration whose restrictions include
+   `no_config_credentials`** — that restriction is exactly "no certificate installs" and the
+   Vortex hit it. Either assign the locked configuration only after step 9, or keep an
+   "Enrolling" configuration (a copy without restrictions) for phones mid-setup.
    `adb push filter-ca.der /sdcard/Download/` → **[phone]** Settings → search "certificate"
    → Install a certificate → CA certificate. (Samsung: Biometrics and security → Other
    security settings.) The scary warning is expected.
@@ -70,7 +74,9 @@ enrollment QR (STOCK `com.hmdm.launcher` only — Google's DPC allowlist blocks 
 
 ## E. Headwind lockdown
 
-19. ☐ **[panel]** MDM Settings → uncheck Permissive mode → restrictions:
+19. ☐ **[panel]** MDM Settings → uncheck Permissive mode → restrictions
+    (allowlist rungs — standard 1–3, yeshiva 1–2 — add `no_install_apps` too: nothing can be
+    installed from Play or sideloaded; the agent can still install what the configuration says):
     `no_install_unknown_sources,no_safe_boot,no_config_credentials,no_config_private_dns,no_add_user`
     - `no_config_vpn`: add ONLY after verifying on this model that it doesn't kill an
       always-on tunnel (on the S22 it forced the tunnel off — with the proxy unset that

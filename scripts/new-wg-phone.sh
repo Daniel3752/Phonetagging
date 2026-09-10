@@ -16,7 +16,11 @@ WG_DIR=/etc/wireguard
 WG_CONF="$WG_DIR/$WG_IF.conf"
 WG_PORT=443
 SUBNET_PREFIX=10.66.0            # must match WG_SUBNET in install-wireguard.sh
-ENDPOINT_HOST=mdm.getshmira.com  # where phones reach the tunnel
+# Where phones reach the tunnel. The ADDRESS, not the name: the WireGuard app resolves the
+# endpoint with the phone's ordinary DNS before the tunnel exists, and on a network whose DNS is
+# broken (the Vortex on the building wifi) a name never connects while an address always does.
+# If the server ever moves, every phone's Endpoint changes — that is the price, and it is rare.
+ENDPOINT_HOST=2.28.63.95
 
 if [[ $EUID -ne 0 ]]; then echo "Run with sudo." >&2; exit 1; fi
 if [[ $# -ne 1 || ! "$1" =~ ^[a-z0-9-]+$ ]]; then

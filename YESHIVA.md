@@ -93,6 +93,34 @@ only*, "applies to" `every phone on Yeshiva`, "switch to" his rung's policy (e.g
 2`), 15:35–16:15, priority 200. Device-specific and higher priority, so it wins over the tag-wide
 lock for those forty minutes; the lock resumes at 16:15. `test/yeshiva.test.mjs` pins exactly this.
 
+## Getting the app lists onto the phones
+
+The rules in D1 do nothing until they are in the Headwind configuration the phone is on. That is
+now one button: **Policies tab → the policy's row → Push apps** (`POST /api/admin/policies/push-apps`).
+It reads the configuration, creates catalogue entries for packages Headwind has never heard of,
+writes every rule in (blocked → **Remove**; allowed → **Install** when Headwind holds an APK,
+otherwise icon-only, since a Play app has nothing to install), leaves any other entry the operator
+added by hand alone, and saves. Push again after editing rules; it is idempotent. Phones apply it
+at their next sync — a reboot forces it.
+
+What **Remove** does on the phone is Headwind's business, and it is the one thing still to be
+confirmed on a live phone: for a user-installed (Play) app the agent uninstalls it; for a system
+app it can only hide it. The first push on the Vortex (rung 2, TikTok installed) is that test.
+
+Two Android restrictions complete the allowlist rungs, in the configuration's MDM Settings:
+
+- `no_install_apps` — nothing can be installed from the Play Store or anywhere else; the agent
+  can still install what the configuration says. Rungs 1 and 2 only.
+- Removing `com.android.vending` (the Play Store, a system app, so it is hidden) — also rungs 1
+  and 2 only. Rungs 3 and 4 need the store.
+
+The Shiur configuration is the same idea with the `yeshiva_shiur` policy: copy the rung's
+configuration, map it in the Yeshiva tab's Shiur row, Push apps. The essentials keep their icons
+and everything else on the list is Remove. Whether a boy's Play apps come *back* when the timetable
+swaps the configuration back is the open question that kiosk mode would have sidestepped —
+Headwind cannot reinstall a Play app, so if Remove uninstalls, the Shiur configuration must NOT
+list Play apps as Remove (hide them another way, or accept kiosk for shiur).
+
 ## Deploying it
 
 Order matters only in that the Worker must be deployed before the migration is useful and the

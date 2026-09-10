@@ -45,39 +45,37 @@ with a fleet toggle (Timetable / Off / Locked now) and a per-phone on/off. Full 
   mode is the answer. Squid exits from Germany, so Google without `hl=en` answers in German with
   an EU consent page; incognito shows the consent page every time.
 
-### What is NOT done — the finishing list, in order
+### What is NOT done — the finishing list, in order (updated 2026-09-10 evening)
 
-1. **Thumbnails.** Windows: `git pull && npx wrangler deploy` (if the udm=14 commit is not
-   live). Headwind: on Yeshiva Temp set the search URL to
-   `https://www.google.com/search?q={searchTerms}&hl=en&gl=il&udm=14&safe=active`, save, sync.
-   Test: an address-bar search = plain text results, no thumbnails; a search typed into
-   google.com's own box = block page "search from the address bar".
-2. **Map Rung 2.** Yeshiva tab → Headwind configurations → Rung 2 = `4`, Save. (The operator
-   had typed it but may not have pressed Save.)
-3. **The Shiur configuration.** In the panel: copy Yeshiva Temp to `Yeshiva Shiur`, Kiosk mode
-   ON, kiosk apps Phone, Contacts, Messages, WhatsApp, Clock; save; its id (URL) goes in the
-   Shiur row on the Yeshiva tab. Kiosk is the one Headwind mechanism known to confine a Device
-   Owner phone to a list of apps; whether the agent enters AND LEAVES kiosk cleanly when the
-   scheduler swaps configurations is the big unverified question of the app side.
-4. **Fleet toggle back to Timetable** (it may be sitting on Off from the image tests). The
-   Vortex line in the Apply summary should then read changed, not "no Headwind configuration
-   mapped".
-5. **Watch the app side** at a window boundary (or force it: Locked now, then Timetable): kiosk
-   with five apps inside a window, normal launcher outside. Record what actually happens.
-6. **Rung 2's app list** in Yeshiva Temp: rung-2 apps as Install, other browsers removed, the
-   rest unlisted. Headwind's Block/Remove semantics are still the open item from the older
-   block below — do it one app at a time on the Vortex and write down what Remove does.
-7. **Server housekeeping** (only once 1–5 hold): remove Isaac's nat bypass (`iptables -t nat -D
-   PREROUTING -i wg0 -s 10.66.0.3 -j RETURN`), replace the scoped ssl_bump block with the
-   repo's unscoped one, `access_log none`, and fix the live helper line — it reads
-   `concurrency=32 children-max=8 children-startup=2` with NO `queue-size`; the repo has
-   `concurrency=64 … queue-size=1024`, and the missing queue-size is what denied everything on a
-   fresh phone's first page load in week one. Then `scripts/check-drift.sh` should be clean
-   except for what is deliberately live-only. Squid also says "System restart required" — a
-   reboot recreates the iptables rules from wg0.conf (which is fine) but drops the hand-added
-   Isaac bypass (also fine once step 7 is done).
-8. **Migration later**: a boy leaves the tag via Yeshiva tab → "standard 4" (or Devices → Edit,
-   Tag = Standard), which flips the baseline policy and stops the windows applying.
+Done today: DefaultSearchProviderEnabled row fixed in config 4 (it was mis-entered as attribute
+`com.android.chrome`, so Chrome ignored the whole search-provider policy → every address-bar
+search went out WITHOUT udm=14 → refused as "text-only"; the offline reproduction of the Worker's
+decisions is in this session's notes and matches); social blocklist expanded 30 → 89 hosts (the
+apps' API/CDN names — TikTok's feed stopped loading once synced); yeshiva app lists refreshed to
+331 rules (migration **0019** — run `npm run db:migrate`); **Push apps** button on the Policies
+tab writes a policy's rules into its Headwind configuration (see YESHIVA.md "Getting the app
+lists onto the phones"); fleet toggle was set to **Off** for testing — put it back to Timetable.
+
+0. **Deploy**: Windows `git pull && npm run db:migrate && npx wrangler deploy` (0019 + the push
+   button are not live until this runs).
+1. **Verify the search on the Vortex** after a reboot: `chrome://policy` must show
+   `DefaultSearchProviderEnabled` true and the URL ending `udm=14&safe=active`; an address-bar
+   search then returns text results. An `ERR_TIMED_OUT` was reported once at the end of the
+   session, untraced: put the helper trace back (the python patch in the older block below),
+   reproduce, and read access.log + `shmira-decision` lines.
+2. **Push apps** for `Yeshiva — Rung 2` (config 4), reboot the Vortex: TikTok (installed there)
+   should be uninstalled — this IS the Remove test. Then add `no_install_apps` to config 4's
+   restrictions and try installing something from Play: it should refuse. Record both results.
+3. **Shiur without kiosk** (operator's decision): copy config 4 → `Yeshiva Shiur`, map it in the
+   Shiur row, Push apps. Read YESHIVA.md's warning first: if Remove UNINSTALLS Play apps (step 2
+   tells you), the shiur policy must not Remove Play apps or they never come back.
+4. Rungs 1, 3, 4: create their configurations (copies of config 4 with the restrictions the rung
+   needs), map them in the Yeshiva tab, Push apps.
+5. **Fleet toggle → Timetable**; watch a window boundary on the Vortex.
+6. **Server housekeeping** (only once 1–5 hold): remove Isaac's nat bypass, unscope the ssl_bump
+   block to the repo's, `access_log none`, reinstall the helper from the repo (drops the trace),
+   `scripts/check-drift.sh` clean. Then decide when Isaac moves to the tag.
+7. **Migration later**: a boy leaves the tag via Yeshiva tab → "standard 4".
 
 ### Useful commands (server)
 
