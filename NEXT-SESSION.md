@@ -1,53 +1,103 @@
 # Next session — start here
 
-## NEWEST — the yeshiva temp tag (branch `claude/yeshiva-temp-tag-shiur-0kgp2f`, 2026-09-06)
+## START HERE — finish the yeshiva temp tag (branch `claude/yeshiva-temp-tag-shiur-0kgp2f`, 2026-09-10)
 
-Built on top of `claude/gifted-ramanujan-nld0wy` (merged into this branch; PR #2 is still the one
-to merge first, then this).
+Read this block first. The two older blocks below it are still true where this one is silent
+(the Vortex tunnel notes, Isaac's bypass, the wiring history); where they disagree, this wins.
 
-**DEPLOYED AND VERIFIED on the Vortex, 2026-09-07/08:** migrations 0016–0018 applied through the
-ledger, Worker deployed, live squid.conf patched in place (all four lines — the `ssl_bump bump
-browser_port` line had to be added by hand because the live file's ssl_bump block is the scoped
-test_phones variant; the apply script now anchors correctly), helper installed. Vortex row: tag
-yeshiva, rung 2, Asia/Jerusalem, tunnel IP 10.66.0.4. Headwind: a copy of Background mode named
-"Background agent Yeshiva Temp" with Chrome ProxyMode/ProxyServer application settings; the
-Vortex is on it. Seen working on the phone: tunnel handshake (on a borrowed hotspot; the
-building wifi is still unusable), searches, social + explicit lists, **pictures grey** on
-Wikipedia (the browser-port design holds), the **shiur lock firing on the timetable** during seder
-with the locked block page, the fleet toggle Off releasing it. Google shows its EU cookie-consent
-page once (Squid exits from Germany). NOT yet done: mapping the Headwind configuration ids on the
-Yeshiva tab (scheduler logs "no Headwind configuration mapped" every 5 min for the Vortex and
-Isaac), the `Yeshiva — Shiur` kiosk configuration, and therefore the APP side of the lock.
-Also still to do from the older block: un-bypass Isaac, unscope the ssl_bump rule, access log off.
+### What the tag is (one paragraph)
 
-What it is: `YESHIVA.md`. In one paragraph: `devices.tag` ('standard' | 'yeshiva') picks the
-ladder; the yeshiva ladder is four rungs (1 apps-only, 2 + Chrome, 3 blocklist without social
-apps, 4 blocklist) with ONE browser profile — blocklists only, no AI, every image replaced by a
-grey placeholder of the same shape, search keyword-screened; a `yeshiva_shiur` policy (essentials
-allowlist, `web_mode 'none'`) is swapped in by four tag-wide schedules Sun–Thu (07:30–08:35,
-09:15–13:45, 15:35–19:15, 20:15–22:00, phone-local, Asia/Jerusalem) and the proxy refuses
-everything while it is in force. The console has a **Yeshiva** tab.
+`devices.tag` ('standard' | 'yeshiva') picks the ladder. The yeshiva ladder is four rungs that
+differ in their APP model (1 allowlist without Chrome, 2 allowlist with Chrome, 3 blocklist incl.
+social apps, 4 blocklist) and share ONE browser: explicit + social blocklists only, no AI, every
+image replaced by a grey placeholder, search keyword-screened, Google only in its text-only
+"Web" mode. A `yeshiva_shiur` policy (essentials allowlist, web off) is swapped in by four
+tag-wide windows Sun–Thu (07:30–08:35, 09:15–13:45, 15:35–19:15, 20:15–22:00, Asia/Jerusalem),
+with a fleet toggle (Timetable / Off / Locked now) and a per-phone on/off. Full design and runbook:
+`YESHIVA.md`. Console: https://phone-url-filter.daniel08-madar.workers.dev/admin → **Yeshiva** tab.
 
-Deploy order and the exact commands are in `YESHIVA.md` "Deploying it". Two things to know before
-touching the server: (1) `squid.conf` changed in four places — the helper format gains
-`%>ha{Sec-Fetch-Dest}`, `deny_info` gains `&why=%o`, `http_port 3128` gains `name=browser`, and
-`acl browser_port` + `ssl_bump bump browser_port` are new — and the live file still has the scoped
-`test_phones` rule + access log, so apply those by hand rather than reinstalling; (2) the helper is
-backward compatible with the old 3-field line, the Worker with the old helper.
+### What is DEPLOYED and PROVEN on the Vortex (10.66.0.4, tag yeshiva, rung 2)
 
-How images get blanked without breaking apps: **only the browser is decrypted**. Port 3128 is now
-the browser's port (`name=browser`, `ssl_bump bump browser_port`); Headwind pushes Chrome a managed
-`ProxyMode=fixed_servers` / `ProxyServer=10.66.0.1:3128`, so Chrome's traffic arrives there and is
-bumped, while every app stays on the intercept path and is spliced as before. No splice entries
-needed. The helper still knows how to force a bump per phone (`decrypt`) as a fallback; it is off
-on every ladder. Unproven on a phone: that Chrome takes the pushed setting (check chrome://policy).
+- D1 migrations 0016, 0017, 0018 applied through the ledger. Worker deployed up to commit
+  "Yeshiva tag: Google results only in text-only Web mode" — **verify** with `git log -1` on the
+  Windows clone vs `npx wrangler deployments list`; if the deploy of that commit was not done,
+  do it (`git pull && npx wrangler deploy`). It carries the udm=14 rule (below).
+- Live `/etc/squid/squid.conf` patched IN PLACE, keeping its hand edits: helper format with
+  `%>ha{Sec-Fetch-Dest}`, `deny_info …&why=%o`, `http_port 3128 name=browser`,
+  `acl browser_port` right before `acl google_system_hosts`, `http_access allow
+  google_system_hosts web_ports !browser_port`, `ssl_bump bump browser_port` as the second
+  ssl_bump line (right after the peek). Backups beside it: `squid.conf.pre-yeshiva.*`,
+  `squid.conf.bak-*`. `scripts/apply-yeshiva-squid.sh` reproduces all of it idempotently.
+- Helper installed from this branch (incl. the "keep the reason on cache hits" fix).
+- Headwind: configuration **"Background agent Yeshiva Temp"** (id **4**), a copy of Background
+  mode, with Chrome application settings `ProxyMode=fixed_servers`,
+  `ProxyServer=10.66.0.1:3128`, `DefaultSearchProviderEnabled=true`,
+  `DefaultSearchProviderName=Google`, `DefaultSearchProviderKeyword=google.com`,
+  `DefaultSearchProviderSearchURL=https://www.google.com/search?q={searchTerms}&hl=en&gl=il`
+  — the URL must gain `&udm=14&safe=active` (step 1 below). The Vortex is on this configuration.
+- Seen working on the phone: tunnel (on a borrowed hotspot; it dropped once for ~5 min and came
+  back by itself), Chrome on the browser port (`chrome://policy` shows the settings), searches,
+  social + explicit lists, pictures grey on Wikipedia, the Google logo grey after the
+  google_system_hosts fix, the shiur lock firing on the timetable with the locked page, the fleet
+  toggle Off releasing it, WhatsApp untested (never set up on this phone).
+- Known and accepted: Google embeds result thumbnails in the results page itself (no image
+  requests — confirmed in access.log), so image stripping cannot remove them; the udm=14 Web
+  mode is the answer. Squid exits from Germany, so Google without `hl=en` answers in German with
+  an EU consent page; incognito shows the consent page every time.
 
-The shiur lock has a fleet **toggle** (Yeshiva tab): Timetable / Off / Locked now — a `settings`
-row (`shiur_lock_mode`, migration 0017) read by the scheduler and the proxy alike — and a
-**per-phone on/off** (`devices.shiur_lock`, migration 0018); per-phone off beats everything.
+### What is NOT done — the finishing list, in order
 
-Tests: `npm test` (adds `test/yeshiva.test.mjs`) and `npm run test:helper` (Python, drives the
-helper's line protocol offline). Both green.
+1. **Thumbnails.** Windows: `git pull && npx wrangler deploy` (if the udm=14 commit is not
+   live). Headwind: on Yeshiva Temp set the search URL to
+   `https://www.google.com/search?q={searchTerms}&hl=en&gl=il&udm=14&safe=active`, save, sync.
+   Test: an address-bar search = plain text results, no thumbnails; a search typed into
+   google.com's own box = block page "search from the address bar".
+2. **Map Rung 2.** Yeshiva tab → Headwind configurations → Rung 2 = `4`, Save. (The operator
+   had typed it but may not have pressed Save.)
+3. **The Shiur configuration.** In the panel: copy Yeshiva Temp to `Yeshiva Shiur`, Kiosk mode
+   ON, kiosk apps Phone, Contacts, Messages, WhatsApp, Clock; save; its id (URL) goes in the
+   Shiur row on the Yeshiva tab. Kiosk is the one Headwind mechanism known to confine a Device
+   Owner phone to a list of apps; whether the agent enters AND LEAVES kiosk cleanly when the
+   scheduler swaps configurations is the big unverified question of the app side.
+4. **Fleet toggle back to Timetable** (it may be sitting on Off from the image tests). The
+   Vortex line in the Apply summary should then read changed, not "no Headwind configuration
+   mapped".
+5. **Watch the app side** at a window boundary (or force it: Locked now, then Timetable): kiosk
+   with five apps inside a window, normal launcher outside. Record what actually happens.
+6. **Rung 2's app list** in Yeshiva Temp: rung-2 apps as Install, other browsers removed, the
+   rest unlisted. Headwind's Block/Remove semantics are still the open item from the older
+   block below — do it one app at a time on the Vortex and write down what Remove does.
+7. **Server housekeeping** (only once 1–5 hold): remove Isaac's nat bypass (`iptables -t nat -D
+   PREROUTING -i wg0 -s 10.66.0.3 -j RETURN`), replace the scoped ssl_bump block with the
+   repo's unscoped one, `access_log none`, and fix the live helper line — it reads
+   `concurrency=32 children-max=8 children-startup=2` with NO `queue-size`; the repo has
+   `concurrency=64 … queue-size=1024`, and the missing queue-size is what denied everything on a
+   fresh phone's first page load in week one. Then `scripts/check-drift.sh` should be clean
+   except for what is deliberately live-only. Squid also says "System restart required" — a
+   reboot recreates the iptables rules from wg0.conf (which is fine) but drops the hand-added
+   Isaac bypass (also fine once step 7 is done).
+8. **Migration later**: a boy leaves the tag via Yeshiva tab → "standard 4" (or Devices → Edit,
+   Tag = Standard), which flips the baseline policy and stops the windows applying.
+
+### Useful commands (server)
+
+    wg show wg0 latest-handshakes                       # 10.66.0.4's peer must move when the tunnel toggles
+    tail -f /var/log/squid/access.log | grep 10.66.0.4  # HIER_DIRECT = browser port, ORIGINAL_DST = intercept (apps)
+    grep -E ' (GET|POST) ' /var/log/squid/access.log | tail -30
+    grep -n 'browser_port\|Sec-Fetch-Dest\|why=%o' /etc/squid/squid.conf
+    scripts/apply-yeshiva-squid.sh --dry-run            # what the repo would still change
+
+Ask the Worker what Squid asks (from the server, `source /etc/squid/filter.env` first):
+
+    curl -sS -X POST "$SHMIRA_WORKER_URL/api/proxy/check" -H "Authorization: Bearer $SHMIRA_PROXY_KEY" \
+      -H 'Content-Type: application/json' -H 'User-Agent: shmira-filter-proxy/1.0' \
+      -d '{"user":"10.66.0.4","url":"https://en.wikipedia.org/","dest":"document","features":["strip_images"]}'
+
+Tests: `npm test` (adds `test/yeshiva.test.mjs`), `npm run test:helper` (Python, the helper's
+line protocol). Both green at this commit. PR #2 (`claude/gifted-ramanujan-nld0wy` → main) is
+still the one to merge first; this branch contains it and merges cleanly after.
+
+---
 
 ## START HERE — handoff from the 2026-09-01 → 09-06 session (branch `claude/gifted-ramanujan-nld0wy`)
 
