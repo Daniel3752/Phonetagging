@@ -56,8 +56,20 @@ apps' API/CDN names — TikTok's feed stopped loading once synced); yeshiva app 
 tab writes a policy's rules into its Headwind configuration (see YESHIVA.md "Getting the app
 lists onto the phones"); fleet toggle was set to **Off** for testing — put it back to Timetable.
 
-0. **Deploy**: Windows `git pull && npm run db:migrate && npx wrangler deploy` (0019 + the push
-   button are not live until this runs).
+0. **Direct access (operator is setting this up, 09-10 evening):** the environment should gain
+   outbound network access to `2.28.63.95` and env vars `CLOUDFLARE_API_TOKEN` (Workers Scripts:
+   Edit + D1: Edit) / `CLOUDFLARE_ACCOUNT_ID`. First thing in the new session: `ssh-keygen -t
+   ed25519 -N '' -f ~/.ssh/id_ed25519`, print the public key, have the operator append it to
+   `/root/.ssh/authorized_keys` on the server, then `ssh root@2.28.63.95` and run the server
+   steps yourself; `npx wrangler deploy` / `npm run db:migrate` run from here with the token.
+   Everything below was written for copy-paste; with access, just do it.
+0b. **Deploy**: `git pull && npm run db:migrate && npx wrangler deploy` (0019, the push button
+   and the Headwind login fix are not live until this runs).
+0c. **Headwind login**: the first Push apps failed 401 because the Worker sent a plain password;
+   Headwind wants md5(password).toUpperCase() (its login page does exactly that). Fixed in the
+   Worker (`src/md5.js`, `headwindPasswordHash`). If it still 401s: `sudo -u postgres psql hmdm
+   -c "select id, login, password from users;"` shows the real login and the stored hash; set
+   HEADWIND_USER to that login and HEADWIND_PASSWORD to the hash itself (accepted as-is).
 1. **Verify the search on the Vortex** after a reboot: `chrome://policy` must show
    `DefaultSearchProviderEnabled` true and the URL ending `udm=14&safe=active`; an address-bar
    search then returns text results. An `ERR_TIMED_OUT` was reported once at the end of the
