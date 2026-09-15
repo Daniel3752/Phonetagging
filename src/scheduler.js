@@ -17,10 +17,13 @@ import { resolveEffectivePolicy } from './policy.js';
 import { setDeviceConfiguration } from './headwind.js';
 
 export async function runScheduler(env, now = new Date()) {
-  const [devices, schedules, policies] = await Promise.all([
+  const [devices, schedules, policies, shiurMode] = await Promise.all([
     env.DB.prepare('SELECT * FROM devices').all().then((r) => r.results || []),
     env.DB.prepare('SELECT * FROM schedules').all().then((r) => r.results || []),
     env.DB.prepare('SELECT * FROM policies').all().then((r) => r.results || []),
+    // The shiur lock toggle. A missing row (or a database without the table yet) is 'schedule'.
+    env.DB.prepare(`SELECT value FROM settings WHERE key = 'shiur_lock_mode'`).first()
+      .then((r) => r?.value).catch(() => undefined),
   ]);
 
   const policyById = new Map(policies.map((p) => [p.id, p]));
@@ -28,7 +31,7 @@ export async function runScheduler(env, now = new Date()) {
 
   for (const device of devices) {
     try {
-      const { policyId, scheduleId } = resolveEffectivePolicy(device, schedules, now);
+      const { policyId, scheduleId, forced } = resolveEffectivePolicy(device, schedules, now, { shiurMode });
 
       if (policyId === device.last_applied_policy_id) {
         summary.unchanged++;
@@ -53,7 +56,7 @@ export async function runScheduler(env, now = new Date()) {
         .bind(policyId, device.id).run();
 
       await audit(env, 'scheduler', 'policy_applied', device.id,
-        `${device.last_applied_policy_id || '(none)'} -> ${policyId}${scheduleId ? ` via schedule ${scheduleId}` : ' (baseline)'}`);
+        `${device.last_applied_policy_id || '(none)'} -> ${policyId}${scheduleId ? ` via schedule ${scheduleId}` : forced ? ' (shiur lock switched on)' : ' (baseline)'}`);
 
       summary.changed++;
     } catch (err) {

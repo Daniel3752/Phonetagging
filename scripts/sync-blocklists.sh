@@ -66,3 +66,40 @@ for name in level1 level2; do
     rm -f "$tmp"
   fi
 done
+
+# Flatten level1 into a plain domain list for squid's l1_hosts ssl::server_name ACL: on the
+# splice-by-default tunnel path, known-explicit hosts are BUMPED so a visit gets the block page
+# instead of a bare connection error. Leading dot = the domain and every subdomain. The file must
+# always exist (squid refuses to start on a missing ACL file), and squid only rereads file ACLs on
+# reconfigure, so nudge it when the content changed.
+DOMAINS="$DIR/level1.domains"
+if [[ -f "$DIR/level1.json" ]]; then
+  tmp="$(mktemp)"
+  python3 - "$DIR/level1.json" > "$tmp" <<'PY'
+import json, sys
+def walk(o):
+    if isinstance(o, dict):
+        for v in o.values(): yield from walk(v)
+    elif isinstance(o, list):
+        for v in o: yield from walk(v)
+    elif isinstance(o, str) and o.strip():
+        yield o.strip().lower().rstrip('.')
+doms = set(walk(json.load(open(sys.argv[1]))))
+# squid FATALs on an ACL where one entry is a subdomain of another ("You need to remove ...").
+# A leading-dot entry already covers every subdomain, so drop any domain with an ancestor present.
+def shadowed(d):
+    parts = d.split('.')
+    return any('.'.join(parts[i:]) in doms for i in range(1, len(parts) - 1))
+for d in sorted(d for d in doms if not shadowed(d)):
+    print('.' + d)
+PY
+  if [[ -s "$tmp" ]] && ! cmp -s "$tmp" "$DOMAINS" 2>/dev/null; then
+    mv "$tmp" "$DOMAINS"
+    chmod 0644 "$DOMAINS"
+    squid -k reconfigure 2>/dev/null || true
+    echo "$(date -u +%FT%TZ) updated level1.domains ($(wc -l < "$DOMAINS") domains), squid reconfigured"
+  else
+    rm -f "$tmp"
+  fi
+fi
+touch "$DOMAINS"; chmod 0644 "$DOMAINS"

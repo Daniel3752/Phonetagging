@@ -25,8 +25,9 @@ import { runPreClassifier } from './preclassify.js';
 import { renderAdminPage } from './admin-page.js';
 import { addHostToAllowlist, removeHostFromAllowlist } from './gateway.js';
 import { sha256Hex, timingSafeEqual } from './crypto.js';
-import { renderBlockPage } from './block-page.js';
+import { renderBlockPage, renderBlankImage } from './block-page.js';
 import { parseSearchUrl } from './search.js';
+import { registrableDomain, normalizeHost } from './domains.js';
 
 const FETCH_TIMEOUT_MS = 8000;
 const PAGE_TEXT_LIMIT = 4000;
@@ -96,11 +97,38 @@ export default {
     }
 
     if (url.pathname === '/blocked' && request.method === 'GET') {
-      // Squid passes the denied URL through deny_info. A refused SEARCH gets a different page from a
-      // blocked site: there is nothing to request, and a button that cannot help is worse than none.
+      // Squid passes the denied URL through deny_info, plus the helper's message as `why` (see
+      // squid.conf) so the page can tell a locked phone from a blocked site.
       const blockedUrl = url.searchParams.get('url') || url.searchParams.get('cf_site_uri') || '';
-      const kind = blockedUrl && parseSearchUrl(blockedUrl) ? 'search' : 'site';
-      return new Response(renderBlockPage({ blockedUrl, kind }), {
+      const why = url.searchParams.get('why') || '';
+
+      // An image the phone's rung stripped lands here too, because Squid redirects every denial
+      // to this URL. Chrome says what it was fetching (Sec-Fetch-Dest: image on <img>, <picture>
+      // and CSS backgrounds), and a blank placeholder keeps the page's layout where the picture
+      // was. Also by extension, for anything older that sends no fetch metadata. Cacheable: the
+      // same placeholder serves every stripped image on every phone.
+      if (isImageFetch(request, blockedUrl)) {
+        return new Response(renderBlankImage(), {
+          headers: {
+            'Content-Type': 'image/svg+xml; charset=utf-8',
+            'Cache-Control': 'public, max-age=86400',
+            'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'",
+          },
+        });
+      }
+
+      // A refused SEARCH gets a different page from a blocked site: there is nothing to request,
+      // and a button that cannot help is worse than none. A LOCKED phone (a shiur window) gets a
+      // page that says when the web comes back rather than blaming the site.
+      const kind = /^locked\b/i.test(why) ? 'locked'
+        : blockedUrl && parseSearchUrl(blockedUrl) ? 'search' : 'site';
+      // The site's recorded reason, so the page can say why rather than just that. One lookup;
+      // nothing about the phone is revealed, only what the classifier said about the site.
+      const rating = kind === 'site' ? await blockReason(env, blockedUrl) : null;
+      // For a refused search the helper's message carries the Worker's reason ("search: …");
+      // show it, so "search from the address bar" reaches the person instead of a generic no.
+      const detail = kind === 'search' ? why.replace(/^search:\s*/i, '').trim() : '';
+      return new Response(renderBlockPage({ blockedUrl, kind, rating, detail }), {
         headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' },
       });
     }
@@ -172,6 +200,28 @@ export default {
 // blocked and NOTHING is cached, so a transient failure never permanently blocks an otherwise-fine
 // site and never permanently "approves" a site that was never actually allowlisted. The next
 // attempt re-judges from scratch.
+const IMAGE_EXTENSION_RE = /\.(jpe?g|png|gif|webp|bmp|svg|ico|tiff?|avif|heic|heif)$/i;
+function isImageFetch(request, blockedUrl) {
+  if ((request.headers.get('Sec-Fetch-Dest') || '').toLowerCase() === 'image') return true;
+  try { return IMAGE_EXTENSION_RE.test(new URL(blockedUrl).pathname); } catch { return false; }
+}
+
+async function blockReason(env, blockedUrl) {
+  let hostname;
+  try { hostname = normalizeHost(new URL(blockedUrl).hostname); } catch { return ''; }
+  const domain = registrableDomain(hostname);
+  const hashes = [await sha256Hex(hostname)];
+  if (domain && domain !== hostname) hashes.push(await sha256Hex(domain));
+  const rows = await env.DB.prepare(
+    `SELECT url_hash, level, reason FROM url_verdicts WHERE scope = 'host' AND url_hash IN (${hashes.map(() => '?').join(', ')})`
+  ).bind(...hashes).all().then((r) => r.results || []).catch(() => []);
+  for (const h of hashes) {
+    const row = rows.find((r) => r.url_hash === h);
+    if (row) return { level: normalizeSiteLevel(row.level), reason: String(row.reason || '') };
+  }
+  return null;
+}
+
 async function handleVerdict(request, env) {
   const body = await request.json().catch(() => null);
   if (!body?.url) return json({ error: 'url is required' }, 400);

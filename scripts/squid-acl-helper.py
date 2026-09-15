@@ -11,6 +11,10 @@ and must be answered with
     <channel-id> OK
     <channel-id> ERR message="..."
 
+squid.conf actually sends four fields — "%un %SRC %URI %>ha{Sec-Fetch-Dest}" — the login (or "-"),
+the client address, the URL, and what the browser said it was fetching ("image", "document", "-").
+Older 2- and 3-field forms are still accepted so a config and helper can be upgraded separately.
+
 Everything here is shaped by one fact: a person is waiting on a page. A single page load fans out
 into dozens of requests, most of them to hosts already decided moments ago, so the local cache below
 is not an optimisation — without it every image on a page would cost a round trip to the Worker and
@@ -24,10 +28,12 @@ brain is unavailable is indistinguishable from no filter, and the failure mode o
 import json
 import os
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 
 WORKER_URL = os.environ.get('SHMIRA_WORKER_URL', 'https://phone-url-filter.daniel08-madar.workers.dev')
 PROXY_KEY = os.environ.get('SHMIRA_PROXY_KEY', '')
@@ -116,31 +122,43 @@ def _domain_blocked(host, blockset):
 CACHE_TTL = float(os.environ.get('SHMIRA_CACHE_TTL', '60'))
 CACHE_MAX = 5000
 
-_cache: "dict[tuple[str, str], tuple[float, bool]]" = {}
+# key -> (expiry, entry) where entry is a decision dict (see _entry below).
+_cache: "dict[tuple[str, str], tuple[float, dict]]" = {}
 
 
 def _cache_get(key):
     hit = _cache.get(key)
     if not hit:
         return None
-    expires, allow = hit
+    expires, entry = hit
     if expires < time.time():
         _cache.pop(key, None)
         return None
-    return allow
+    return entry
 
 
-def _cache_put(key, allow):
+def _cache_put(key, entry):
     # Crude eviction: when full, drop the whole thing rather than track recency. This cache is a
     # latency shim, not a store — a cold start costs one round trip per host and nothing else.
     if len(_cache) >= CACHE_MAX:
         _cache.clear()
-    _cache[key] = (time.time() + CACHE_TTL, allow)
+    _cache[key] = (time.time() + CACHE_TTL, entry)
 
 
-def ask_worker(user, url):
-    """Returns (allow: bool, reason: str, level: int|None). Raises nothing — failure means blocked."""
-    payload = json.dumps({'user': user, 'url': url}).encode()
+# What this helper can act on itself, told to the Worker so it may hand back answers an older
+# helper would misapply: with strip_images the Worker keeps a site answer host-scoped on an
+# images-off phone and flags it, and the image URLs are denied HERE without a round trip each.
+HELPER_FEATURES = ['strip_images', 'decrypt']
+
+
+def _worker_failure(reason):
+    return {'allow': False, 'reason': reason, 'level': None, 'images_off': False,
+            'host_scoped': False, 'strip': False, 'decrypt': False, 'block_social': None, 'action': 'error'}
+
+
+def ask_worker(user, url, dest=''):
+    """Returns a decision dict. Raises nothing — failure means blocked."""
+    payload = json.dumps({'user': user, 'url': url, 'dest': dest or '', 'features': HELPER_FEATURES}).encode()
     req = urllib.request.Request(
         f'{WORKER_URL}/api/proxy/check',
         data=payload,
@@ -168,18 +186,43 @@ def ask_worker(user, url):
             detail = exc.read().decode()[:120]
         except Exception:
             pass
-        return False, f'filter error HTTP {exc.code} {detail}'.strip(), None, False
+        return _worker_failure(f'filter error HTTP {exc.code} {detail}'.strip())
     except (urllib.error.URLError, OSError, ValueError, json.JSONDecodeError) as exc:
-        return False, f'filter unreachable ({type(exc).__name__})', None, False
+        return _worker_failure(f'filter unreachable ({type(exc).__name__})')
 
     level = body.get('device_level')
     level = level if isinstance(level, int) else None
-    return (
-        bool(body.get('allow')),
-        body.get('reason') or body.get('action') or 'blocked',
-        level,
-        body.get('images_off') is True,
-    )
+    block_social = body.get('block_social')
+    return {
+        'allow': bool(body.get('allow')),
+        'reason': body.get('reason') or body.get('action') or 'blocked',
+        'action': body.get('action') or '',
+        'level': level,
+        'images_off': body.get('images_off') is True,
+        'host_scoped': body.get('cache_scope') == 'host',
+        # Deny image URLs locally on this host (images-off phone, host-scoped answer).
+        'strip': body.get('strip_images') is True,
+        # Decrypt this phone's approved hosts instead of splicing them (see squid.conf ssl_bump).
+        'decrypt': body.get('decrypt') is True,
+        # Whether the social list applies; None from an older Worker → infer from the rung.
+        'block_social': block_social if isinstance(block_social, bool) else None,
+    }
+
+
+_IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg', '.ico', '.tif',
+                     '.tiff', '.avif', '.heic', '.heif')
+
+
+def _is_image_request(url, dest):
+    """What the Worker would say: Sec-Fetch-Dest: image (Chrome sends it on every <img>, <picture>
+    and CSS background fetch, extension or not), or an image file extension."""
+    if dest == 'image':
+        return True
+    try:
+        path = (urllib.parse.urlsplit(url).path or '').lower()
+    except ValueError:
+        return False
+    return path.endswith(_IMAGE_EXTENSIONS)
 
 
 def _host_of(url):
@@ -196,6 +239,13 @@ THUMB_SUPPRESS_SECS = 45.0
 _thumb_suppress: "dict[str, float]" = {}  # user -> expiry time
 
 
+def _sweep_thumb_suppress():
+    """Drop expired entries so the dict stays bounded by active users, not by every login ever seen."""
+    now = time.time()
+    for user in [u for u, exp in _thumb_suppress.items() if exp <= now]:
+        _thumb_suppress.pop(user, None)
+
+
 def _is_search_thumb_host(host):
     return (
         host.startswith('encrypted-tbn') or          # Google image/result thumbnails
@@ -204,33 +254,75 @@ def _is_search_thumb_host(host):
     )
 
 
-def decide(user, url):
-    """The full local decision: search-thumbnail suppression → L1 blocklist (all rungs) → Worker →
-    L2 blocklist (rungs 1-4).
+# Request paths answered locally, instantly, without the Worker. Search AUTOCOMPLETE fires one
+# request per keystroke, each a unique URL — rating those would cost a model call per letter typed
+# and stall the helper behind a wall of lookups (the /search request then overflows squid's queue
+# and gets denied out of hand, which looked exactly like "all searches blocked"). Denying them is
+# invisible: Chrome just shows no suggestions while typing. gen_204/client_204 are telemetry pings.
+_FAST_DENY_PREFIXES = ('/complete/', '/gen_204', '/client_204', '/async/')
+
+
+def _fast_local_path(url):
+    try:
+        path = urllib.parse.urlsplit(url).path or '/'
+    except ValueError:
+        return None
+    if any(path.startswith(p) for p in _FAST_DENY_PREFIXES):
+        return False, 'suggestions/telemetry disabled', False
+    return None
+
+
+def _entry(allow, reason, host_scoped, strip=False, decrypt=False):
+    """A cache entry / decision: allow, why, how widely it may be reused, and two per-phone flags
+    the answer is derived from at use time — strip (deny image URLs on this host) and decrypt (at
+    the TLS handshake, refuse the splice so squid bumps the connection)."""
+    return {'allow': allow, 'reason': reason, 'host_scoped': host_scoped, 'strip': strip, 'decrypt': decrypt}
+
+
+def decide(user, url, dest=''):
+    """The full local decision: fast local paths → search-thumbnail suppression → L1 blocklist (all
+    rungs) → Worker → L2 blocklist (where the Worker says the rung blocks social). Returns an entry
+    (see _entry).
 
     L1 is checked locally and first so an explicit host is denied without a Worker round trip and can
     never slip through the Worker's default-allow on a permissive rung. L2 is rung-dependent, so it is
-    applied after the Worker answers with device_level."""
+    applied after the Worker answers.
+
+    host_scoped is True when the answer depended on the hostname alone (the Worker says so, and the
+    local lists are hostname-based anyway), so the caller may reuse it for every URL on that host."""
+    fast = _fast_local_path(url)
+    if fast is not None:
+        return _entry(*fast)
+
     host = _host_of(url)
 
-    # A result thumbnail while this user's last search asked for images-off.
+    # A result thumbnail while this user's last search asked for images-off. Per URL, per moment.
     if host and _is_search_thumb_host(host) and _thumb_suppress.get(user, 0) > time.time():
-        return False, 'search images stripped'
+        return _entry(False, 'search images stripped', False)
 
     if host and _domain_blocked(host, _blocklists['level1']):
-        return False, 'blocklist: explicit'
+        return _entry(False, 'blocklist: explicit', True)
 
-    allow, reason, level, images_off = ask_worker(user, url)
+    w = ask_worker(user, url, dest)
+    allow, reason = w['allow'], w['reason']
+    # Prefix the action so the block page can tell a locked phone from a blocked site (squid.conf
+    # forwards this message as the page's `why`).
+    if not allow and w['action'] and not reason.lower().startswith(w['action']):
+        reason = f"{w['action']}: {reason}"
 
     # Arm thumbnail suppression for this user when a search was allowed text-only.
-    if allow and images_off:
+    if allow and w['images_off']:
+        _sweep_thumb_suppress()
         _thumb_suppress[user] = time.time() + THUMB_SUPPRESS_SECS
 
-    # Social is blocked on every rung except the most open (5).
-    if allow and host and level is not None and level <= 4 and _domain_blocked(host, _blocklists['level2']):
-        return False, 'blocklist: social'
+    # The social list: where the Worker says the rung blocks it, or (older Worker) below rung 5.
+    block_social = w['block_social']
+    if block_social is None:
+        block_social = w['level'] is not None and w['level'] <= 4
+    if allow and host and block_social and _domain_blocked(host, _blocklists['level2']):
+        return _entry(False, 'blocklist: social', True)
 
-    return allow, reason
+    return _entry(allow, reason, w['host_scoped'], strip=w['strip'], decrypt=w['decrypt'])
 
 
 def main():
@@ -249,36 +341,121 @@ def main():
         else:
             channel, fields = None, parts
 
-        if len(fields) < 2:
-            out = 'ERR message="malformed helper request"'
+        if channel is not None:
+            # Concurrent mode: one blocking Worker round-trip must never stall the line. A page
+            # load — a Google results page especially — bursts dozens of lookups at once, and a
+            # helper that answers them one at a time overflows squid's lookup queue, which squid
+            # fails CLOSED (instant deny). Channels exist precisely so answers can return out of
+            # order; use them.
+            _pool.submit(_answer, channel, fields)
         else:
-            user = urllib.parse.unquote(fields[0])
+            _answer(channel, fields)
+
+
+def _answer(channel, fields):
+    if len(fields) < 2:
+        out = 'ERR message="malformed helper request"'
+    else:
+        # squid.conf sends "%un %SRC %URI %>ha{Sec-Fetch-Dest}" (%un, not %LOGIN — see squid.conf).
+        # A password-path phone has a login; a WireGuard phone has none ("-"), so its tunnel IP
+        # (%SRC) is its identity — the Worker looks both up in the same devices.proxy_user column.
+        # The 2- and 3-field forms are accepted so an old squid.conf keeps working against a new
+        # helper during an upgrade.
+        user = urllib.parse.unquote(fields[0])
+        dest = ''
+        if len(fields) >= 3:
+            src = urllib.parse.unquote(fields[1])
+            url = urllib.parse.unquote(fields[2])
+            if user == '-' or not user:
+                user = src
+            if len(fields) >= 4 and fields[3] != '-':
+                dest = urllib.parse.unquote(fields[3]).strip().lower()
+        else:
             url = urllib.parse.unquote(fields[1])
-            # On an HTTPS CONNECT, Squid passes the target as "host:port" with no scheme — there is
-            # no URL yet, the tunnel hasn't been opened. Treat it as a request to that host so the
-            # site check can run at the CONNECT gate. After ssl-bump the decrypted GET arrives with
-            # the full "https://host/path?query", which is re-checked here — that is where a search
-            # query actually gets judged, so nothing is lost by coarse-checking the CONNECT.
-            if '://' not in url:
-                host = url.rsplit(':', 1)[0] if ':' in url else url
-                url = 'https://' + host + '/'
-            # Squid sends "-" for an unauthenticated login; the Worker treats an unknown user as the
-            # strictest rung rather than denying outright, so pass it through as-is.
-            if user == '-':
-                user = ''
+        # On an HTTPS CONNECT — and at the TLS handshake, where squid.conf decides whether to splice
+        # or bump — Squid passes the target as "host:port" with no scheme. Treat it as a request to
+        # that host so the site check runs on the hostname. For a bumped host the decrypted GET
+        # arrives later with the full "https://host/path?query" and is checked again — that is
+        # where a search query is judged, so nothing is lost by coarse-checking the handshake.
+        handshake = '://' not in url
+        if handshake:
+            host = url.rsplit(':', 1)[0] if ':' in url else url
+            url = 'https://' + host + '/'
+        # Squid sends "-" for an unauthenticated login; the Worker treats an unknown user as the
+        # strictest rung rather than denying outright, so pass it through as-is.
+        if user == '-':
+            user = ''
 
-            key = (user, url)
-            cached = _cache_get(key)
-            if cached is None:
-                allow, reason = decide(user, url)
-                _cache_put(key, allow)
-            else:
-                allow, reason = cached, 'cached'
+        # Two cache keys. A page load fans out into dozens of URLs on one host, and for an ordinary
+        # site the answer is the same for all of them — so when the Worker says its decision was
+        # per-host (cache_scope: 'host'), it is cached under the host and every other URL on that
+        # host is answered locally. Searches and per-URL image decisions stay keyed by full URL.
+        host_key = (user, 'host:' + _host_of(url))
+        cached = _cache_get(host_key)
+        if cached is None:
+            cached = _cache_get((user, url))
 
-            out = 'OK' if allow else f'ERR message={json.dumps(reason)}'
+        # A page load is a BURST: its dozens of requests arrive before the first answer is back, so
+        # a cache alone still sends every one of them to the Worker. The first request for a host
+        # leads; the rest wait for it, then read the cache it just filled. If the leader's answer
+        # turns out to be per-URL (a search), the followers simply do their own lookup.
+        leader = False
+        if cached is None:
+            with _inflight_lock:
+                done = _inflight.get(host_key)
+                if done is None:
+                    done = _inflight[host_key] = threading.Event()
+                    leader = True
+            if not leader:
+                done.wait(TIMEOUT + 1)
+                cached = _cache_get(host_key)
+                if cached is None:
+                    cached = _cache_get((user, url))
 
+        if cached is None:
+            try:
+                entry = decide(user, url, dest)
+            except Exception as exc:  # a crashed lookup must still answer, and must fail closed
+                entry = _entry(False, f'helper exception {type(exc).__name__}', False)
+            _cache_put(host_key if entry['host_scoped'] else (user, url), entry)
+        else:
+            # Keep the reason: squid.conf forwards it to the block page as `why`, and a "locked"
+            # phone must read as locked on the second request too, not only on the first.
+            entry = dict(cached)
+
+        if leader:
+            with _inflight_lock:
+                _inflight.pop(host_key, None)
+            done.set()
+
+        allow, reason = entry['allow'], entry['reason']
+        # Two per-phone rules applied at use time, so one host-scoped answer serves every request
+        # on the host:
+        #   * an images-off phone: an image URL on an approved host is denied here; squid sends it
+        #     to the block page, which answers an image fetch with a blank placeholder.
+        #   * a decrypt phone, at the TLS handshake: the splice is refused so squid falls through
+        #     to `ssl_bump bump all` and can see the images inside. The decrypted requests that
+        #     follow are answered from the same cache entry — allowed, image URLs excepted.
+        if allow and handshake and entry['decrypt']:
+            allow, reason = False, 'decrypt: bumped so images can be stripped'
+        elif allow and not handshake and entry['strip'] and _is_image_request(url, dest):
+            allow, reason = False, 'image_blocked: images are turned off at this level'
+
+        out = 'OK' if allow else f'ERR message={json.dumps(reason)}'
+
+    # One writer at a time: an interleaved line desynchronizes every channel after it.
+    with _stdout_lock:
         sys.stdout.write(f'{channel} {out}\n' if channel else f'{out}\n')
         sys.stdout.flush()
+
+
+_stdout_lock = threading.Lock()
+_inflight_lock = threading.Lock()
+_inflight: "dict[tuple[str, str], threading.Event]" = {}
+# Sized well above squid's per-helper concurrency (64 in squid.conf). Threads spend their time
+# blocked on the Worker call or waiting for a leader's answer, so they are cheap — and running out
+# of them is not: squid's lookup queue then overflows and squid FAILS CLOSED, denying everything.
+_pool = ThreadPoolExecutor(max_workers=128)
 
 
 if __name__ == '__main__':
