@@ -144,8 +144,10 @@ export function renderAdminPage() {
         <h2>App rules</h2>
         <p class="sub" style="margin:0 0 10px">
           <strong>blocked</strong> prevents install and removes the app.
-          <strong>hidden</strong> keeps it installed but conceals it — this is how apps the phone
-          shipped with get disabled. <strong>allowed</strong> permits it explicitly.
+          <strong>hidden</strong> is pushed to Headwind exactly like blocked (Remove) and only
+          differs for a system app, which Headwind can conceal but not uninstall — on a Play app it
+          uninstalls, and Headwind cannot put a Play app back.
+          <strong>allowed</strong> permits it explicitly.
         </p>
         <div id="appTable"></div>
         <div class="row">
@@ -356,11 +358,17 @@ export function renderAdminPage() {
     return p ? p.name : pid;
   }
 
+  // Rebuilding a select's options throws away what was selected, and render() runs after EVERY
+  // submit on any tab — so an open edit form silently fell back to the first option. On the phone
+  // form that is the Baseline policy, whose first entry by name is 'Apps — Rung 1', and saving then
+  // put the phone on a policy nobody chose. Keep the current value whenever it still exists.
   function fillSelect(el, items, valueKey, labelFn, includeBlank) {
+    var keep = el.value;
     el.innerHTML = (includeBlank ? '<option value="">(all phones)</option>' : '') +
       items.map(function (i) {
         return '<option value="' + esc(i[valueKey]) + '">' + esc(labelFn(i)) + '</option>';
       }).join('');
+    if (keep && items.some(function (i) { return String(i[valueKey]) === keep; })) el.value = keep;
   }
 
   function render() {
