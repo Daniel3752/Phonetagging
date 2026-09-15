@@ -104,6 +104,12 @@ else
 Address = $WG_SERVER_IP/24
 ListenPort = $WG_PORT
 PrivateKey = $(cat "$WG_DIR/server.key")
+# 1280 rather than WireGuard's 1420 default. Every byte a phone sends is inside the tunnel
+# (AllowedIPs 0.0.0.0/0), and mobile data and hotspots routinely cannot carry a 1420-byte inner
+# packet: small packets pass, big ones (a TLS handshake with its certificate chain) vanish, and
+# the phone sees Chrome ERR_TIMED_OUT on some sites and not others while the MDM agent hangs on
+# its sync. 1280 is the IPv6 minimum, carried everywhere. The phone side sets the same.
+MTU = 1280
 
 # All rules are scoped to the tunnel interface so the rest of the box (panel, 3128 path) is
 # untouched. PostUp/PostDown keep them exactly as alive as the tunnel itself.
@@ -129,6 +135,10 @@ PostUp = iptables -t nat -A PREROUTING -i $WG_IF -p tcp --dport 443 -j REDIRECT 
 PostUp = iptables -A FORWARD -i $WG_IF -p udp --dport 443 -j REJECT
 PostUp = iptables -A FORWARD -i $WG_IF -j ACCEPT
 PostUp = iptables -A FORWARD -o $WG_IF -m state --state ESTABLISHED,RELATED -j ACCEPT
+# Clamp TCP MSS on flows forwarded out of the tunnel (apps that NAT straight out). A phone whose
+# own MTU was never lowered still negotiates segments that fit; the intercept path is covered by
+# the interface MTU above, since squid terminates those flows on this box.
+PostUp = iptables -t mangle -A FORWARD -i $WG_IF -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
 PostUp = iptables -t nat -A POSTROUTING -s $WG_SUBNET -o $EXT_IF -j MASQUERADE
 PostDown = iptables -t nat -D PREROUTING -i $WG_IF -p tcp -d $SERVER_IP --dport 443 -j REDIRECT --to-ports 8443
 PostDown = iptables -t nat -D OUTPUT -p tcp -d $SERVER_IP --dport 443 -j REDIRECT --to-ports 8443
@@ -137,6 +147,7 @@ PostDown = iptables -t nat -D PREROUTING -i $WG_IF -p tcp --dport 443 -j REDIREC
 PostDown = iptables -D FORWARD -i $WG_IF -p udp --dport 443 -j REJECT
 PostDown = iptables -D FORWARD -i $WG_IF -j ACCEPT
 PostDown = iptables -D FORWARD -o $WG_IF -m state --state ESTABLISHED,RELATED -j ACCEPT
+PostDown = iptables -t mangle -D FORWARD -i $WG_IF -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
 PostDown = iptables -t nat -D POSTROUTING -s $WG_SUBNET -o $EXT_IF -j MASQUERADE
 CONF
 fi

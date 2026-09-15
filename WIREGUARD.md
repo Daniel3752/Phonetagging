@@ -79,6 +79,23 @@ Phone: turn off always-on/lockdown, disable the tunnel, restore
 Server: `systemctl disable --now wg-quick@wg0` removes the interface AND its iptables rules
 (PostDown). The intercept ports in squid.conf are inert with no traffic redirected into them.
 
+## MTU: the cause of "some sites time out, others load"
+
+Both ends run at **MTU 1280**, not WireGuard's 1420 default, and the server clamps TCP MSS on
+flows it forwards out of the tunnel. This was learned the hard way. Every byte a phone sends goes
+inside the tunnel (`AllowedIPs = 0.0.0.0/0`), and mobile data and hotspots routinely cannot carry
+a 1420-byte inner packet. Small packets get through; big ones — a TLS handshake carrying a
+certificate chain, a full-size data segment — are silently dropped. On the phone that looks like
+Chrome `ERR_TIMED_OUT` on some sites and not others, the same site flipping between the two, and
+the MDM agent hanging ("isn't responding" / "isn't running") because its sync to the panel is one
+of the big exchanges. 1280 is the IPv6 minimum and is carried everywhere.
+
+A phone enrolled before this was set: in the WireGuard app, edit the tunnel → Interface → **MTU
+1280** → save, then toggle the tunnel off and on. On a server set up before this: apply live with
+`ip link set mtu 1280 dev wg0` plus the mangle rule from `install-wireguard.sh`, and add
+`MTU = 1280` and the two rule lines to `/etc/wireguard/wg0.conf` so it survives a reboot — do
+**not** re-run the installer over a hand-edited config.
+
 ## Known limits / open questions
 
 - **Server down = tunnelled phones fully offline** (lockdown is absolute). The health check is

@@ -63,6 +63,7 @@ CLIENT_CONF="[Interface]
 PrivateKey = $PRIV
 Address = $PHONE_IP/32
 DNS = 10.66.0.1
+MTU = 1280
 
 [Peer]
 PublicKey = $SERVER_PUB
