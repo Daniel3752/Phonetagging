@@ -34,13 +34,22 @@ rung 4 in `YESHIVA_LEVELS` (`src/levels.js`) — one word.
   flat light-grey SVG that stretches to whatever box the page gave the picture. Layout survives;
   the picture is a grey rectangle. This works for images with no file extension too, because the
   helper forwards `Sec-Fetch-Dest` (squid.conf now passes `%>ha{Sec-Fetch-Dest}`).
-- **Search:** allowed, screened by the keyword list (`keyword_rules`, e.g. `porn` → refused) and by
-  anything already on file as NEVER from the standard phones; image search off; result thumbnails
-  are images and get blanked like everything else. Not model-judged. Known gap: a text search for
-  explicit material that dodges the keyword list returns text results (the sites themselves are
-  then on the explicit list). If that matters before migration, the one-line fix is to pass
-  `noModel: false` for blocklist rungs in `proxy-api.js` `rateSearch` — the model then rates every
-  search and NEVER refuses it, at a model call per new query.
+- **Search:** allowed, screened by the keyword list (`keyword_rules`) and by anything already on
+  file as NEVER from the standard phones; image search off; result thumbnails are images and get
+  blanked like everything else. Not model-judged.
+  A keyword hit refuses at **rating 5 or above** — 6 is NEVER (explicit) and 5 is the seed's
+  "immodest" band (bikini, lingerie, swimwear, cleavage, miniskirt …). Until 2026-09-15 only 6
+  refused here, which left this tag *looser* than standard rung 4, where a rating-5 query is
+  refused. `KEYWORD_REFUSE_LEVEL` in `src/proxy-api.js` is the one place that threshold lives.
+  Every path an engine answers a query on is screened, not just its main results path — video and
+  news searches (`bing /videos/search`, `brave /videos`, `yandex /video/search` …) used to be
+  unrecognised as searches and were waved through as the engine's homepage with the words never
+  seen. `ENGINES` in `src/search.js` is the list; an engine path missing there is a hole.
+  Known gap that remains: a text search for explicit material that dodges the keyword list returns
+  text results (the sites themselves are then on the explicit list). If that matters before
+  migration, the one-line fix is to pass `noModel: false` for blocklist rungs in `proxy-api.js`
+  `rateSearch` — the model then rates every search and NEVER refuses it, at a model call per new
+  query.
 - **Only the browser is decrypted; no app is touched.** To blank an image the proxy has to see
   inside the connection, and Squid cannot tell an app's connection from Chrome's by hostname. So
   Chrome gets its own door: Headwind pushes Chrome a managed proxy setting pointing at Squid's
@@ -116,10 +125,15 @@ Two Android restrictions complete the allowlist rungs, in the configuration's MD
 
 The Shiur configuration is the same idea with the `yeshiva_shiur` policy: copy the rung's
 configuration, map it in the Yeshiva tab's Shiur row, Push apps. The essentials keep their icons
-and everything else on the list is Remove. Whether a boy's Play apps come *back* when the timetable
-swaps the configuration back is the open question that kiosk mode would have sidestepped —
-Headwind cannot reinstall a Play app, so if Remove uninstalls, the Shiur configuration must NOT
-list Play apps as Remove (hide them another way, or accept kiosk for shiur).
+and everything else on the list is Remove.
+
+**Kiosk is ruled out** (operator's decision, 2026-09-15): shiur uses an ordinary configuration
+swap, not kiosk mode. That leaves one question live, and it must be answered before the Shiur
+configuration lists a single Play app as Remove: **does Remove uninstall a Play app, and does it
+come back when the timetable swaps the configuration out again?** Headwind cannot reinstall a Play
+app it has no APK for, so if Remove uninstalls, a boy loses WhatsApp permanently the first time a
+window ends. Step 2 of the finishing list is exactly this test, on the Vortex, with TikTok. Until
+it has been run, keep the Shiur configuration's Remove entries to system apps only.
 
 ## Deploying it
 
@@ -169,14 +183,16 @@ From here the WEB side of the tag and the shiur lock are live for that phone. Th
      NEW-PHONE.md §E; app list per the policy (Install the allowed ones; for the allowlist rungs
      Delete/hide Chrome on rung 1 and the rest of what the phone ships with that is not listed —
      Headwind's exact Block semantics are still the open item in NEXT-SESSION.md).
-   - `Yeshiva — Shiur`: **kiosk mode** with the essentials as the kiosk apps (Phone, Contacts,
-     Messages, WhatsApp, Clock). Kiosk is the one Headwind mechanism that reliably confines a
-     phone to a list of apps as Device Owner.
+   - `Yeshiva — Shiur`: a **copy of the rung's configuration** whose app list is the essentials
+     (Phone, Contacts, Messages, WhatsApp, Clock, Settings, the agent, WireGuard) — *not* kiosk
+     mode; that was ruled out deliberately. Read the warning under "Getting the app lists onto the
+     phones" before adding any Play app as Remove here.
    Paste each configuration's id on the Yeshiva tab (Headwind configurations card). Until then the
    scheduler reports "no Headwind configuration mapped" for yeshiva phones every five minutes —
    noisy in the audit log, harmless.
-7. **Apply now** and watch the phone: inside a window the agent should sync into kiosk with the
-   essentials; outside it, back to the rung's configuration. The agent polls; a reboot forces it.
+7. **Apply now** and watch the phone: inside a window the agent should sync onto the Shiur
+   configuration with only the essentials; outside it, back to the rung's configuration. The agent
+   polls; a reboot forces it.
 
 ## Testing on the Vortex
 
@@ -214,8 +230,7 @@ and squid.conf changes, the migration.
 
 Depends on the phone: Chrome honouring the pushed ProxyMode/ProxyServer (a documented Chrome
 managed policy on Android, pushed through Headwind's per-app settings — unproven here), image
-blanking on Android Chrome (deny_info → `/blocked` → SVG; unproven on a device), kiosk-mode
-switching by the scheduler (the scheduler's
-configuration swap is tested against a fake Headwind; kiosk entry/exit on the agent is not),
-which stock package names the Vortex actually has, and which apps on rungs 3–4 need splice
-entries.
+blanking on Android Chrome (deny_info → `/blocked` → SVG; unproven on a device), the configuration
+swap by the scheduler (tested against a fake Headwind; never yet seen on the agent), what Headwind
+Remove actually does to a Play app, which stock package names the Vortex actually has, and which
+apps on rungs 3–4 need splice entries.

@@ -1,6 +1,139 @@
 # Next session — start here
 
-## START HERE — finish the yeshiva temp tag (branch `claude/yeshiva-temp-tag-shiur-0kgp2f`, 2026-09-10)
+## START HERE — audit + fixes (branch `claude/dreamy-newton-8rlo23`, 2026-09-15)
+
+This session audited the whole temp tag against the live system and fixed what it found. Nothing
+was deployed and nothing on the server or the phones was touched — **every fix below is code on
+this branch, inert until someone runs `npx wrangler deploy`.** The block under this one is still
+the design and runbook; where the two disagree, this one wins.
+
+### Decisions recorded (from the operator, this session)
+
+- The Vortex stays a **test phone**, so the fleet shiur toggle stays **Off**. Do not put it on
+  Timetable until the app side is proven.
+- **Shiur will not use kiosk mode.** It is an ordinary configuration swap. `YESHIVA.md` is updated.
+- **Isaac's `apps_rung_4` mapping is deferred** until the yeshiva side is finished.
+
+### The one thing to do before anything else
+
+**The live Worker is running code that is in no git branch.** Production's `findDevice` matches a
+Headwind device by id OR number; every branch matched by id only. D1 stores the *number*
+(`4908545443`, too large to be an int32 id), so the repo version cannot find the phone and the
+scheduler reports "Headwind device 4908545443 not found" every run. Somebody fixed this live and
+never committed it — look for an uncommitted change in the Windows clone.
+
+This branch now contains that fix with a test, so deploying **this** branch is safe. Deploying
+`main`, or the yeshiva branch, is **not** — it silently regresses the live Worker.
+
+### What was fixed here (all with tests; `npm test` and `npm run test:helper` green)
+
+Filtering holes, worst first:
+
+1. **Searches went unjudged for 60 s at a time.** The search-engine "homepage" answer was
+   host-scoped; the helper checks its host cache before the URL cache, so a Google results page's
+   own same-host subresources primed that entry and every search on the engine for the next minute
+   — keyword-blocked ones included — was answered OK with no Worker call. Engine hosts now answer
+   per URL.
+2. **"Locked now" did not lock the web.** `locked` was read from a map holding only the baseline
+   policy and the policies of *joined* schedules, so the forced shiur policy (no schedule points at
+   it, and none exist at all once the windows are deleted for bein hazmanim) read as unlocked. The
+   console said locked while every phone browsed freely.
+3. **Immodest keywords did not refuse on the tag** — only NEVER did, leaving the yeshiva browser
+   looser than standard rung 4. Now rating 5 and above refuses.
+4. **Video and news searches were never screened** (`bing /videos/search` and friends were not
+   recognised as searches at all).
+5. **An operator's block on a search-engine host was ignored** for its non-search URLs.
+6. **`/api/verdict` was unauthenticated** — anyone could make the Worker fetch sites and call
+   Gemini. It is behind the operator key now.
+
+Things that quietly rewrote state the caller never mentioned (each landed on the permissive side):
+
+7. **Mapping a configuration from a terminal wiped the policy's model.** The upsert treated an
+   omitted `app_default` as "allowed" and an omitted `web_mode` as NULL — so the documented way to
+   map `yeshiva_shiur` would have turned it into a blocklist with its web lock **off**. Omitted
+   fields are now kept. `headwind_configuration_id` is validated as digits (`cfg 4` became
+   `configurationId: null` on a live phone).
+8. **Re-saving a phone without a tag took it off the ladder** (every curl example predating tags
+   omits it), out of the shiur windows, while leaving its yeshiva policy behind.
+9. **The per-phone shiur switch failed open**: any value it could not read — a missing field, the
+   string `"true"` — meant OFF, exempting the phone from everything.
+10. **The rung change did not move the app baseline**, so the scheduler kept pushing the old
+    ladder's configuration. The console hid it behind a second save; an API caller did not get one.
+11. **The console's Baseline dropdown reset to the first policy** (`Apps — Rung 1`) on every
+    re-render, so editing a phone and touching another tab saved it onto a policy nobody chose.
+
+Headwind push (it has never once succeeded — every attempt was a 401, now fixed):
+
+12. Package names were **lowercased** before the catalogue entry was created; Android package names
+    are case-sensitive and `com.google.android.GoogleCamera` is on the rung-1 allowlist.
+13. The push **spread the whole catalogue app object** into the configuration save, echoing back a
+    `configurations` array carrying every other configuration's admin password hash.
+14. A **200 response carrying `status: "ERROR"`** was treated as success, so a rejected update was
+    logged as applied.
+15. A created app whose response omitted its id was **silently dropped**; it is looked up now.
+
+Noise: the scheduler wrote an identical `policy_apply_failed` row every five minutes (~9,950 of
+them for Isaac). It now logs a repeat only when the message changes or the device recovers.
+
+### Deploy checklist (from the Windows PC, where wrangler is logged in)
+
+```
+git fetch origin && git checkout claude/dreamy-newton-8rlo23 && git pull
+git status                  # if findDevice is uncommitted here, this branch already has it
+npm test && npm run test:helper
+npx wrangler deploy
+```
+No migration is needed — nothing here changes the schema.
+
+### Still to do — needs the panel, the server or a phone
+
+- **Rotate Isaac's proxy password.** `bec-339-wwx` was typed in chat and is still in D1. It is
+  cosmetic in the WireGuard model (identity is the tunnel IP, `proxy_user`; `proxy_password` is
+  never read by the verdict path) but it should not sit there. Generate and apply without the value
+  passing through a chat window:
+  ```
+  npx wrangler d1 execute phone-url-filter-db --remote --command \
+    "UPDATE devices SET proxy_password = '$(openssl rand -hex 4 | fold -w3 | head -3 | paste -sd-)' WHERE id = 'dev_b73af724'"
+  ```
+- **Push apps for `Yeshiva — Rung 2` (config 4) and reboot the Vortex.** TikTok is installed there:
+  this is the Remove test, and its answer decides what the Shiur configuration may list (see
+  YESHIVA.md). Nothing else should list a Play app as Remove until it is answered.
+- **Create and map the Shiur configuration** (not kiosk), then rungs 1, 3, 4.
+- **Verify on the phone**: `chrome://policy` shows the search URL ending `udm=14&safe=active`; a
+  grey-image check on Wikipedia; then two searches within a minute — "volcano" then "porn" — which
+  is the regression test for fix 1 above and would have failed before this branch.
+- **Server housekeeping**: `scripts/check-drift.sh`, remove Isaac's nat bypass, unscope the
+  ssl_bump block, `access_log none`, reinstall the helper from the repo.
+- **Merge**: `main` is far behind production. PR #2 is still open; this branch contains it.
+
+### Known and NOT fixed (deliberate — read before trusting the filter)
+
+- **Image blanking is defeated by a document navigation.** Blanking keys off `Sec-Fetch-Dest:
+  image` or a file extension, so opening a grey box in a new tab, a `fetch()`-loaded image, or any
+  image on an `http://` page (Chrome sends no fetch metadata there) renders. The real fix is on the
+  server, filtering by *response* type, which the Worker cannot see:
+  `acl image_reply rep_mime_type ^image/` + `http_reply_access deny image_reply browser_port`.
+- A **spliced host is completely unfiltered**, as ever.
+- DuckDuckGo and Yahoo **image search** are judged as text searches (their results still blank).
+- The stored fleet-toggle words are `schedule` / `off` / `on`, not the UI's Timetable / Off /
+  Locked now. A hand-written `'timetable'` or `'locked'` in D1 does **not** do what it looks like.
+- `POST /api/admin/settings` does not itself run the scheduler; only the console's button does, so
+  a curl toggle leaves the app side waiting for the next cron tick.
+- A device-specific exemption window saved at the form's **default priority 0** loses to the
+  tag-wide lock at 100 and silently does nothing; and one saved with the phone field blank applies
+  to the whole tag.
+
+### About the audit
+
+Eight subsystem readers were planned; a usage limit stopped it after three (browser path, scheduler
+and policy, console), and the adversarial verification pass never ran. Every finding acted on above
+was re-checked by hand against the code before it was touched. **The Headwind client was separately
+reconciled against the live Swagger spec** (121 endpoints) — that is where fixes 12–15 come from.
+Not yet audited at all: the migrations, the block page, the squid config and helper, and the docs.
+
+---
+
+## Finishing the yeshiva temp tag (branch `claude/yeshiva-temp-tag-shiur-0kgp2f`, 2026-09-10)
 
 Read this block first. The two older blocks below it are still true where this one is silent
 (the Vortex tunnel notes, Isaac's bypass, the wiring history); where they disagree, this wins.
