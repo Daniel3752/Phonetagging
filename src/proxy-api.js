@@ -272,9 +272,21 @@ export async function handleProxyCheck(request, env, now = new Date()) {
     return json({ ...base, cache_scope: 'url', allow: false, action: 'image_blocked', hostname, reason: 'Images are turned off at this level.' });
   }
 
-  // 4. A search engine's bare homepage (no query) — let the box load wherever search is enabled.
+  // 4. A search engine's bare homepage or a same-host subresource (no query) — let the box load
+  //    wherever search is enabled. Two things this must NOT do:
+  //    - It must stay URL-scoped. A host-scoped 'allow' here would be cached by the helper under the
+  //      host (the helper checks the host key before the URL key), and then reused for the actual
+  //      search URLs on that host — letting a keyword-screened search through unscreened for the
+  //      cache's lifetime. Search engines are exactly the hosts where the URL, not the host, decides.
+  //    - It must still honour an operator block on the engine's own host (a NEVER/blocked verdict),
+  //      rather than waving the homepage through ahead of the verdict lookup.
   if (def.textSearch && isSearchEngineHost(hostname)) {
-    return json({ ...base, allow: true, action: 'allow', hostname, reason: 'Search homepage.' });
+    const engineVerdict = await verdictPromise;
+    if (engineVerdict && engineVerdict.site_mode === 'blocked') {
+      return json({ ...base, cache_scope: 'url', allow: false, action: 'blocked', hostname,
+        level: normalizeSiteLevel(engineVerdict.level), reason: engineVerdict.reason });
+    }
+    return json({ ...base, cache_scope: 'url', allow: true, action: 'allow', hostname, reason: 'Search homepage.' });
   }
 
   // 5. Ordinary site: known verdict, else classify the whole domain inline (standard ladder) or

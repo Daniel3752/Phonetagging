@@ -243,6 +243,18 @@ await check('a search answer is per URL — the words matter', async () => {
   const r = await (await ask({ user: 'phone-open', url: 'https://www.google.com/search?q=cats' })).json();
   assert.equal(r.cache_scope, 'url');
 });
+await check('a search engine homepage is per URL too, so it cannot poison the host cache for real searches', async () => {
+  const r = await (await ask({ user: 'phone-open', url: 'https://www.google.com/' })).json();
+  assert.equal(r.allow, true);
+  assert.equal(r.action, 'allow');
+  assert.equal(r.cache_scope, 'url');
+});
+await check('an operator block on a search engine host wins over the homepage rule', async () => {
+  siteVerdicts.set(await sha('www.pinterest.com'), { level: 3, is_doorway: 0, reason: 'Blocked by the operator.', site_mode: 'blocked' });
+  const r = await (await ask({ user: 'phone-open', url: 'https://www.pinterest.com/' })).json();
+  assert.equal(r.allow, false);
+  assert.equal(r.action, 'blocked');
+});
 await check('a rung with images off decides per URL, so nothing is host-scoped there', async () => {
   siteVerdicts.set(await sha('news.example.com'), { level: 2, is_doorway: 0, reason: 'News.', site_mode: 'filtered' });
   const r = await (await ask({ user: 'phone-a', url: 'https://news.example.com/' })).json();
