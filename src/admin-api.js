@@ -9,7 +9,7 @@
 import { audit } from './scheduler.js';
 import { runScheduler } from './scheduler.js';
 import { pushPolicyApps } from './headwind.js';
-import { parseTimeOfDay, TAG_BASE_PREFIX, tagBaseId, SHIUR_MODES, normalizeShiurMode } from './policy.js';
+import { parseTimeOfDay, TAG_BASE_PREFIX, tagBaseId, SHIUR_MODES, normalizeShiurMode, appPolicyIdForLevel } from './policy.js';
 import { normalizeDeviceLevel, normalizeSiteLevel, normalizeTag, maxLevelFor, LEVELS, TAGS, NEVER_LEVEL, MIN_LEVEL } from './levels.js';
 import { searchCacheKey } from './search.js';
 import { sha256Hex , generateProxyPassword, proxyUserFromLabel } from './crypto.js';
@@ -88,19 +88,45 @@ export async function handleAdmin(request, env, path) {
       const name = String(body.name || '').trim();
       if (!name) return json({ error: 'name is required' }, 400);
 
-      const appDefault = body.app_default === undefined || body.app_default === null || body.app_default === ''
-        ? 'allowed' : String(body.app_default);
+      const id = body.id || newId('pol');
+      // This is an upsert, so a caller who sends only id/name/headwind_configuration_id — which is
+      // exactly how a configuration gets mapped from a terminal — must not have the policy's model
+      // silently reset underneath them. An omitted field KEEPS what the row has; only an explicitly
+      // sent one changes it. Getting this wrong turned yeshiva_shiur into a blocklist with the web
+      // lock off, and nothing in the audit row said so.
+      const existing = body.id
+        ? await env.DB.prepare('SELECT app_default, web_mode, headwind_configuration_id FROM policies WHERE id = ?')
+            .bind(id).first()
+        : null;
+
+      const appDefaultGiven = body.app_default !== undefined && body.app_default !== null && body.app_default !== '';
+      const appDefault = appDefaultGiven ? String(body.app_default)
+        : (existing ? existing.app_default : 'allowed');
       if (!APP_DEFAULTS.has(appDefault)) return json({ error: 'app_default must be allowed (blocklist) or blocked (allowlist)' }, 400);
-      const webMode = body.web_mode ? String(body.web_mode) : null;
+
+      // Sending web_mode explicitly (even as null or '') clears it; omitting the key keeps it.
+      const webMode = 'web_mode' in body
+        ? (body.web_mode ? String(body.web_mode) : null)
+        : (existing ? existing.web_mode : null);
       if (webMode && !POLICY_WEB_MODES.has(webMode)) return json({ error: 'web_mode must be empty (the rung decides) or none' }, 400);
 
-      const id = body.id || newId('pol');
+      // The scheduler puts this straight into a Headwind Device PUT and the push uses it in a URL
+      // path, so anything but digits ends up as configurationId null on a live phone.
+      const configGiven = 'headwind_configuration_id' in body;
+      const configRaw = configGiven
+        ? String(body.headwind_configuration_id ?? '').trim()
+        : (existing ? existing.headwind_configuration_id : null);
+      if (configRaw && !/^\d+$/.test(String(configRaw))) {
+        return json({ error: "headwind_configuration_id must be the configuration's numeric id, digits only" }, 400);
+      }
+      const configId = configRaw || null;
+
       await env.DB.prepare(`
         INSERT INTO policies (id, name, headwind_configuration_id, app_default, web_mode, created_at) VALUES (?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET name = excluded.name,
           headwind_configuration_id = excluded.headwind_configuration_id,
           app_default = excluded.app_default, web_mode = excluded.web_mode
-      `).bind(id, name, body.headwind_configuration_id || null, appDefault, webMode, Date.now()).run();
+      `).bind(id, name, configId, appDefault, webMode, Date.now()).run();
 
       await audit(env, 'operator', 'policy_saved', id, `${name} (${appDefault === 'blocked' ? 'allowlist' : 'blocklist'}${webMode ? `, web ${webMode}` : ''})`);
       return json({ ok: true, id });
@@ -138,13 +164,23 @@ export async function handleAdmin(request, env, path) {
       if (!label) return json({ error: 'label is required' }, 400);
       if (!body.policy_id) return json({ error: 'policy_id is required' }, 400);
 
+      const id = body.id || newId('dev');
+      // One read of the row this save may be updating. Everything the caller omits is taken from
+      // here rather than from a default, so a partial save never silently rewrites the phone.
+      const existing = body.id
+        ? await env.DB.prepare('SELECT tag, shiur_lock, proxy_password FROM devices WHERE id = ?').bind(id).first()
+        : null;
+
       // The tag picks the ladder the rung is read on. Anything but a known tag is refused rather
       // than defaulted: a phone quietly landing on the wrong ladder is the same class of mistake
-      // as the wrong rung.
+      // as the wrong rung. An OMITTED tag keeps the one the row has — every curl example written
+      // before the tag existed omits it, and defaulting those to 'standard' quietly took a yeshiva
+      // phone off its ladder (and out of the shiur windows) while leaving its policy behind.
       if (body.tag !== undefined && body.tag !== null && body.tag !== '' && normalizeTag(body.tag) !== String(body.tag).trim().toLowerCase()) {
         return json({ error: `tag must be one of ${Object.keys(TAGS).join(', ')}` }, 400);
       }
-      const tag = normalizeTag(body.tag);
+      const tagGiven = body.tag !== undefined && body.tag !== null && body.tag !== '';
+      const tag = tagGiven ? normalizeTag(body.tag) : normalizeTag(existing ? existing.tag : undefined);
 
       // A MISSING level clamps to the strictest rung, never the loosest: getting that backwards
       // would mean a typo in a form silently opening a phone up.
@@ -167,19 +203,15 @@ export async function handleAdmin(request, env, path) {
         return json({ error: 'proxy_user must be 2-64 chars: letters, digits, dot, dash, underscore' }, 400);
       }
 
-      const id = body.id || newId('dev');
       // Per-phone shiur lock. Omitted = keep what the row has (or on, for a new phone).
-      const existingLock = await env.DB.prepare('SELECT shiur_lock FROM devices WHERE id = ?').bind(id).first();
       const shiurLock = body.shiur_lock === undefined || body.shiur_lock === null
-        ? (existingLock ? Number(existingLock.shiur_lock) : 1)
+        ? (existing ? Number(existing.shiur_lock) : 1)
         : (body.shiur_lock === true || body.shiur_lock === 1 || body.shiur_lock === '1' || body.shiur_lock === 'on' ? 1 : 0);
 
       // Generate a password per phone rather than letting the operator pick one — a chosen password
       // gets reused across phones, and reuse is the only way one leaked login becomes a fleet-wide
       // one. Kept if the device already has one, so re-saving a phone to change its level does not
       // silently invalidate the credential already typed into its Chrome.
-      const existing = await env.DB.prepare('SELECT proxy_password FROM devices WHERE id = ?')
-        .bind(id).first();
       const proxyPassword = String(body.proxy_password || '').trim()
         || existing?.proxy_password
         || generateProxyPassword();
@@ -283,11 +315,25 @@ export async function handleAdmin(request, env, path) {
       // clamped onto a phone it becomes rung 1, no web.
       if (!isRung(body.level, tag)) return json({ error: rungError(body.level, tag) }, 400);
       const level = normalizeDeviceLevel(body.level, tag);
-      const res = await env.DB.prepare('UPDATE devices SET level = ?, tag = ? WHERE id = ?')
-        .bind(level, tag, body.id).run();
+
+      // This is the migration step ("standard 4" on the Yeshiva tab), so it must move the phone's
+      // APP baseline too. Changing only rung and tag left the scheduler pushing the old ladder's
+      // configuration forever — the console papered over it with a second full save, so an API
+      // caller, or a page whose second call failed, was left half-migrated with no error.
+      const policyId = appPolicyIdForLevel(level, tag);
+      const policyExists = policyId
+        ? await env.DB.prepare('SELECT id FROM policies WHERE id = ?').bind(policyId).first()
+        : null;
+
+      const res = policyExists
+        ? await env.DB.prepare('UPDATE devices SET level = ?, tag = ?, policy_id = ? WHERE id = ?')
+            .bind(level, tag, policyId, body.id).run()
+        : await env.DB.prepare('UPDATE devices SET level = ?, tag = ? WHERE id = ?')
+            .bind(level, tag, body.id).run();
       if (!res.meta?.changes) return json({ error: 'no such device' }, 404);
-      await audit(env, 'operator', 'device_level_set', body.id, `${tag} level ${level}`);
-      return json({ ok: true, level, tag });
+      await audit(env, 'operator', 'device_level_set', body.id,
+        `${tag} level ${level}${policyExists ? `, policy ${policyId}` : ' (no matching app policy)'}`);
+      return json({ ok: true, level, tag, policy_id: policyExists ? policyId : null });
     }
 
     // Switch the shiur lock on or off for one phone. Off = exempt from the windows and from the
@@ -295,7 +341,15 @@ export async function handleAdmin(request, env, path) {
     // without re-sending the whole device.
     case 'POST /api/admin/devices/shiur': {
       if (!body.id) return json({ error: 'id is required' }, 400);
-      const on = body.on === true || body.on === 1 || body.on === '1' || body.on === 'on';
+      // Refuse anything that is not plainly on or off. This used to treat every unrecognised value
+      // — including a missing field and the string "true" — as OFF, which exempts the phone from
+      // every shiur window and from "Locked now". An unreadable request must never land on the
+      // permissive side.
+      const TRUTHY = [true, 1, '1', 'on', 'true', 'yes'];
+      const FALSY = [false, 0, '0', 'off', 'false', 'no'];
+      const given = typeof body.on === 'string' ? body.on.trim().toLowerCase() : body.on;
+      const on = TRUTHY.includes(given) ? true : FALSY.includes(given) ? false : null;
+      if (on === null) return json({ error: 'on must be true or false' }, 400);
       const res = await env.DB.prepare('UPDATE devices SET shiur_lock = ? WHERE id = ?')
         .bind(on ? 1 : 0, body.id).run();
       if (!res.meta?.changes) return json({ error: 'no such device' }, 404);

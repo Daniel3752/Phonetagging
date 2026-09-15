@@ -179,6 +179,38 @@ console.log('\n7c. an unchanged repeating failure is logged once, not every run'
   check('three identical failures still leave one row', after3 === 1, String(after3));
 }
 
+console.log('\n7d. a partial save must not rewrite what it leaves out');
+{
+  // Mapping a configuration from a terminal sends only id/name/headwind_configuration_id. The
+  // policy's model has to survive that, or the shiur policy quietly stops locking the web.
+  await adminJson('/api/admin/policies', { id: 'yeshiva_shiur', name: 'Yeshiva — Shiur (locked to essentials)', headwind_configuration_id: '41' });
+  const pol = env.DB._db.prepare("SELECT app_default, web_mode, headwind_configuration_id FROM policies WHERE id = 'yeshiva_shiur'").get();
+  check('mapping a configuration keeps web_mode none', pol.web_mode === 'none', JSON.stringify(pol));
+  check('and keeps the allowlist model', pol.app_default === 'blocked', JSON.stringify(pol));
+  check('and stores the new configuration id', String(pol.headwind_configuration_id) === '41', JSON.stringify(pol));
+  const badCfg = await admin('/api/admin/policies', { id: 'yeshiva_shiur', name: 'x', headwind_configuration_id: 'cfg 4' });
+  check('a non-numeric configuration id is refused', badCfg.status === 400, String(badCfg.status));
+
+  // Re-saving a phone with a body written before tags existed must not move it off its ladder.
+  await adminJson('/api/admin/devices', { id: bochur.id, label: 'Bochur', policy_id: 'yeshiva_rung_2', timezone: 'Asia/Jerusalem' });
+  const dev = env.DB._db.prepare('SELECT tag FROM devices WHERE id = ?').get(bochur.id);
+  check('a save that omits the tag keeps the phone on its ladder', dev.tag === 'yeshiva', JSON.stringify(dev));
+
+  // The per-phone shiur switch must refuse a value it cannot read, never default to exempt.
+  const garbage = await admin('/api/admin/devices/shiur', { id: bochur.id, on: 'maybe' });
+  check('an unreadable shiur value is refused, not treated as off', garbage.status === 400, String(garbage.status));
+  check('and the lock is left as it was',
+    Number(env.DB._db.prepare('SELECT shiur_lock FROM devices WHERE id = ?').get(bochur.id).shiur_lock) === 1);
+  const asString = await adminJson('/api/admin/devices/shiur', { id: bochur.id, on: 'true' });
+  check('the string "true" now means on', asString.shiur_lock === 1, JSON.stringify(asString));
+
+  // The migration step has to move the app baseline, not just the rung.
+  await adminJson('/api/admin/policies', { id: 'yeshiva_rung_1', name: 'Yeshiva — Rung 1 (Apps only)', app_default: 'blocked' });
+  await adminJson('/api/admin/devices/level', { id: bochur.id, tag: 'yeshiva', level: 1 });
+  const moved = env.DB._db.prepare('SELECT policy_id, level FROM devices WHERE id = ?').get(bochur.id);
+  check('changing the rung moves the app baseline with it', moved.policy_id === 'yeshiva_rung_1', JSON.stringify(moved));
+}
+
 console.log('\n8. audit log records both operator and scheduler actions');
 const audit = await adminJson('/api/admin/audit');
 check('operator actions logged', audit.entries.some((e) => e.actor === 'operator' && e.action === 'policy_saved'));
