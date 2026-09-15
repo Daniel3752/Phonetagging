@@ -36,7 +36,7 @@ import { keywordRating } from './keywords.js';
 import { classifyDomain } from './classify.js';
 import { registrableDomain, normalizeHost } from './domains.js';
 import { isVisibleAtLevel, levelDefinition, normalizeDeviceLevel, normalizeSiteLevel, normalizeTag, MIN_LEVEL, NEVER_LEVEL, DEFAULT_TAG } from './levels.js';
-import { resolveEffectivePolicy } from './policy.js';
+import { resolveEffectivePolicy, SHIUR_POLICY_ID } from './policy.js';
 import { sha256Hex, timingSafeEqual } from './crypto.js';
 
 function json(data, status = 200) {
@@ -101,11 +101,21 @@ async function resolveDevice(env, proxyUser, now) {
   }
 
   const { policyId } = resolveEffectivePolicy(device, schedules, now, { shiurMode: row.shiur_mode });
+  // The web_mode map only holds the baseline policy and the active policy of each JOINED schedule.
+  // "Locked now" forces the shiur policy without any schedule pointing at it, and the tag's windows
+  // can be deleted (bein hazmanim) — in both cases the map has no row for it and the phone would
+  // read as unlocked while the console says locked. The shiur policy means no web by definition.
+  const locked = policyId === SHIUR_POLICY_ID || webModeByPolicy.get(policyId) === 'none';
   return {
     level, tag, def: levelDefinition(level, tag), deviceId: row.id, known: true,
-    policyId, locked: webModeByPolicy.get(policyId) === 'none',
+    policyId, locked,
   };
 }
+
+// On a blocklist (yeshiva) rung there is no rating bar, so a keyword rule is the only screen a
+// typed search gets. A hit at this rating or above refuses. 5 is "immodest" in the seed list
+// (migrations/0010_keyword_seed.sql); 6 is NEVER and refuses on every rung anyway.
+const KEYWORD_REFUSE_LEVEL = 5;
 
 const IMAGE_EXTENSIONS = new Set([
   'jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'ico', 'tif', 'tiff', 'avif', 'heic', 'heif',
@@ -130,7 +140,9 @@ async function rateSearch(env, search, { noModel = false } = {}) {
   const rules = await env.DB.prepare(`SELECT pattern, rating, note FROM keyword_rules WHERE scope = 'search'`)
     .all().then((r) => r.results || []).catch(() => []);
   const kw = keywordRating(search.query, rules);
-  if (kw) return { level: kw.rating, imagesOk: true, reason: kw.note || 'Matched a keyword rule.' };
+  // `keyword` marks the hit as coming from the operator's word list rather than a rating, so the
+  // blocklist rungs can refuse an immodest term outright — see KEYWORD_REFUSE_LEVEL.
+  if (kw) return { level: kw.rating, imagesOk: true, reason: kw.note || 'Matched a keyword rule.', keyword: true };
 
   const hash = await sha256Hex(normalized);
   const cached = await env.DB.prepare(`SELECT level, images_ok, reason FROM search_verdicts WHERE query_hash = ?`)
@@ -255,8 +267,14 @@ export async function handleProxyCheck(request, env, now = new Date()) {
         reason: 'Google is text-only on this phone: search from the address bar, not from google.com.' });
     }
     const rated = await rateSearch(env, search, { noModel: blocklistMode });
-    // A blocklist rung has no bar to clear — only NEVER refuses. The standard ladder gates by rung.
-    const allow = blocklistMode ? rated.level < NEVER_LEVEL : rated.level <= level;
+    // A blocklist rung has no rating bar to clear — an unjudged search is simply allowed. But the
+    // operator's KEYWORD list is the one screen this browser does have, and taking only NEVER from
+    // it left the tag LOOSER than standard rung 4: the seed's immodest terms (bikini, lingerie,
+    // swimwear …) are rated 5, which rung 4 refuses and the tag was letting through. So a keyword
+    // hit at KEYWORD_REFUSE_LEVEL or above refuses here too. The standard ladder gates by rung.
+    const allow = blocklistMode
+      ? rated.level < NEVER_LEVEL && !(rated.keyword && rated.level >= KEYWORD_REFUSE_LEVEL)
+      : rated.level <= level;
     // Text answer permitted, result images stripped: the model said so, or the rung has no images.
     const imagesOff = allow && (rated.imagesOk === false || !def.images);
     return json({

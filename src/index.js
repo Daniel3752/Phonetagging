@@ -139,7 +139,13 @@ export default {
       return handleProxyCheck(request, env);
     }
 
+    // Classifying a site fetches it and calls the model, so this is an expensive route to leave
+    // open: any phone (or anyone on the internet) could burn the Gemini quota and write verdict
+    // rows. The block page no longer offers a "request this site" button, so nothing but an
+    // operator calls it. Gate it like the other operator routes.
     if (url.pathname === '/api/verdict' && request.method === 'POST') {
+      const denied = requireOperator(request, env);
+      if (denied) return denied;
       return handleVerdict(request, env);
     }
 

@@ -17,15 +17,19 @@
 // google.de and www.google.com are all Google, and a filter knowing only .com is sidestepped by
 // typing a different country — WITHOUT also matching google.evil.com, which a naive prefix or
 // substring test happily accepts.
+// Every path on which an engine answers a typed query, not just its main web-results path. A path
+// missing here is not recognised as a search at all, so the words are never screened and the URL is
+// waved through as the engine's homepage — which is how a video or news search became the easiest
+// way to put an unscreened query in front of the phone.
 const ENGINES = [
   { name: 'google',     hosts: ['google'],        paths: ['/search', '/imghp'], params: ['q', 'query'] },
-  { name: 'bing',       hosts: ['bing'],          paths: ['/search', '/images'], params: ['q'] },
+  { name: 'bing',       hosts: ['bing'],          paths: ['/search', '/images', '/videos/search', '/news/search'], params: ['q'] },
   { name: 'duckduckgo', hosts: ['duckduckgo'],    paths: ['/'],                 params: ['q'] },
-  { name: 'yahoo',      hosts: ['yahoo'],         paths: ['/search'],           params: ['p', 'q'] },
-  { name: 'yandex',     hosts: ['yandex'],        paths: ['/search', '/images'], params: ['text', 'q'] },
-  { name: 'ecosia',     hosts: ['ecosia'],        paths: ['/search', '/images'], params: ['q'] },
+  { name: 'yahoo',      hosts: ['yahoo'],         paths: ['/search', '/search/images', '/search/video'], params: ['p', 'q'] },
+  { name: 'yandex',     hosts: ['yandex'],        paths: ['/search', '/images', '/video/search'], params: ['text', 'q'] },
+  { name: 'ecosia',     hosts: ['ecosia'],        paths: ['/search', '/images', '/videos', '/news'], params: ['q'] },
   { name: 'startpage',  hosts: ['startpage'],     paths: ['/search', '/sp/search'], params: ['query', 'q'] },
-  { name: 'brave',      hosts: ['search.brave'],  paths: ['/search', '/images'], params: ['q'] },
+  { name: 'brave',      hosts: ['search.brave'],  paths: ['/search', '/images', '/videos', '/news'], params: ['q'] },
   { name: 'youtube',    hosts: ['youtube'],       paths: ['/results'],          params: ['search_query', 'q'] },
   { name: 'pinterest',  hosts: ['pinterest'],     paths: ['/search'],           params: ['q'] },
   { name: 'reddit',     hosts: ['reddit'],        paths: ['/search'],           params: ['q'] },

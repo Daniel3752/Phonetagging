@@ -212,6 +212,39 @@ check('an image URL with no fetch metadata gets one too', page.headers.get('Cont
 page = await worker.fetch(new Request('https://w/blocked?url=https%3A%2F%2Fx.example%2F'), env);
 check('an ordinary denial is still the block page', (await page.text()).includes('This site is blocked'));
 
+console.log('\n6b. the screens that were leaking');
+// An earlier section left the phone on rung 1 (no web); put it back on the browser rung.
+await admin('/api/admin/devices/level', { id: 'vortex', tag: 'yeshiva', level: 2 });
+const modelCallsBefore = modelCalls;
+// A rating-5 "immodest" keyword must refuse on the tag too. Taking only NEVER from the keyword list
+// left the yeshiva browser looser than standard rung 4, which refuses a rating-5 query.
+await DB.prepare(`INSERT INTO keyword_rules (scope, lang, pattern, rating, note) VALUES ('search', 'en', 'swimwear', 5, 'immodest')`).run();
+out = await (await proxyCheck('10.66.0.4', 'https://www.google.com/search?q=swimwear+models&udm=14', {}, LUNCH)).json();
+check('a rating-5 immodest keyword refuses the search on the tag', out.allow === false && out.action === 'search', JSON.stringify(out));
+out = await (await proxyCheck('10.66.0.3', 'https://www.google.com/search?q=swimwear+models', {}, LUNCH)).json();
+check('and still refuses it on the standard ladder', out.allow === false, JSON.stringify(out));
+check('a keyword hit needs no model call', modelCalls === modelCallsBefore, `${modelCallsBefore} -> ${modelCalls}`);
+
+// A video/news search path is still a typed query and must be screened, not waved through as the
+// engine's homepage.
+out = await (await proxyCheck('10.66.0.4', 'https://www.bing.com/videos/search?q=free+porn', {}, LUNCH)).json();
+check('a video-search path is screened like any other search', out.allow === false && out.action === 'search', JSON.stringify(out));
+
+// A search engine's own non-search URLs must not be host-cacheable, or the helper reuses that
+// answer for the real searches on the host and they go unscreened.
+out = await (await proxyCheck('10.66.0.4', 'https://www.google.com/xjs/_/js/k=x', {}, LUNCH)).json();
+check('a search engine subresource is answered per URL, never per host', out.cache_scope === 'url', JSON.stringify(out));
+
+// "Locked now" must lock the web even with no shiur window in the table (bein hazmanim, when the
+// operator has deleted the four rows) — the forced policy is the lock, not the schedule.
+await DB.prepare(`DELETE FROM schedules WHERE base_policy_id = 'tag:yeshiva'`).run();
+await admin('/api/admin/settings', { key: 'shiur_lock_mode', value: 'on' });
+out = await (await proxyCheck('10.66.0.4', 'https://brand-new-site.example/', {}, LUNCH)).json();
+check('"Locked now" locks the web with the windows deleted', out.allow === false && out.action === 'locked', JSON.stringify(out));
+await admin('/api/admin/settings', { key: 'shiur_lock_mode', value: 'schedule' });
+out = await (await proxyCheck('10.66.0.4', 'https://brand-new-site.example/', {}, LUNCH)).json();
+check('and releases it again when the toggle goes back', out.allow === true, JSON.stringify(out));
+
 console.log('\n7. migrating off the tag');
 res = await admin('/api/admin/devices/level', { id: 'vortex', tag: 'standard', level: 4 });
 body = await res.json();

@@ -60,8 +60,17 @@ globalThis.fetch = async (url, opts) => {
 };
 
 // --- Helpers -------------------------------------------------------------
+// /api/verdict classifies a site (a fetch plus a model call), so it is an operator route and
+// carries the key by default here, like /api/admin/*. Pass `{ Authorization: undefined }` to
+// exercise the unauthenticated case.
 const post = (path, body, headers = {}) => worker.fetch(new Request('https://w.dev' + path, {
-  method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body),
+  method: 'POST',
+  headers: Object.fromEntries(Object.entries({
+    'Content-Type': 'application/json',
+    Authorization: 'Bearer ' + env.OPERATOR_KEY,
+    ...headers,
+  }).filter(([, v]) => v !== undefined)),
+  body: JSON.stringify(body),
 }), env);
 
 let failures = 0;
@@ -99,7 +108,7 @@ check('not allowlisted', !gatewayList.has('bad.example'));
 geminiSafe = true;
 
 console.log('\n4. operator allow + revoke');
-r = await post('/api/admin/allow', { url: 'bad.example' });
+r = await post('/api/admin/allow', { url: 'bad.example' }, { Authorization: undefined });
 check('unauthorized without key', r.status === 401);
 r = await (await post('/api/admin/allow', { url: 'bad.example' }, { Authorization: 'Bearer secret-operator-key' })).json();
 check('operator override allows', gatewayList.has('bad.example'), JSON.stringify(r));
@@ -109,6 +118,8 @@ r = await (await post('/api/verdict', { url: 'https://bad.example/x' })).json();
 check('revoked site reads as blocked', r.verdict === 'blocked' && r.cached === true, JSON.stringify(r));
 
 console.log('\n5. input validation');
+check('classifying a site requires the operator key (it fetches and calls the model)',
+  (await post('/api/verdict', { url: 'https://en.wikipedia.org/' }, { Authorization: undefined })).status === 401);
 check('bare domain accepted', (await (await post('/api/verdict', { url: 'example.org' })).json()).verdict === 'clean');
 check('ftp rejected', (await post('/api/verdict', { url: 'ftp://x.com' })).status === 400);
 check('missing url rejected', (await post('/api/verdict', {})).status === 400);
