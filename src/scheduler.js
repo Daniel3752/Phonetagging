@@ -62,7 +62,16 @@ export async function runScheduler(env, now = new Date()) {
     } catch (err) {
       summary.failed++;
       summary.errors.push(`${device.id}: ${err.message}`);
-      await audit(env, 'scheduler', 'policy_apply_failed', device.id, err.message).catch(() => {});
+      // Don't reprint an identical failure every five minutes. A device stuck on an unmapped policy
+      // would otherwise write one row per run forever (thousands of identical lines burying the log).
+      // Record a failure only when it differs from this device's most recent audit row — so the
+      // first occurrence is logged, and it is logged again after any recovery or change.
+      const last = await env.DB.prepare(
+        'SELECT action, detail FROM audit_log WHERE target = ? ORDER BY id DESC LIMIT 1'
+      ).bind(device.id).first().catch(() => null);
+      if (!last || last.action !== 'policy_apply_failed' || last.detail !== err.message) {
+        await audit(env, 'scheduler', 'policy_apply_failed', device.id, err.message).catch(() => {});
+      }
     }
   }
 

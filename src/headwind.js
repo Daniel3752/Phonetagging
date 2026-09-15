@@ -32,6 +32,7 @@ const ENDPOINTS = {
   configurationGet: (id) => `/rest/private/configurations/${id}`, // GET -> Configuration (with applications)
   configurationUpdate: '/rest/private/configurations',    // PUT Configuration -> Response
   applicationSearch: '/rest/private/applications/search', // GET -> [Application] (the whole catalogue)
+  applicationSearchValue: (v) => `/rest/private/applications/search/${encodeURIComponent(v)}`, // GET -> [Application] filtered
   applicationCreate: '/rest/private/applications/android', // PUT Application -> Response{data: Application}
 };
 
@@ -95,7 +96,16 @@ async function call(env, path, options = {}) {
       headers: { 'Authorization': auth, 'Content-Type': 'application/json', ...(options.headers || {}) },
     });
 
-    if (res.ok) return res.json();
+    if (res.ok) {
+      const body = await res.json();
+      // A write can be refused with HTTP 200 and a Response envelope of {status:'ERROR', message}.
+      // Treating that as success let the scheduler log 'policy_applied' and push-apps log a success
+      // for a change the server rejected. Surface it as an error so it is retried and recorded.
+      if (body && typeof body === 'object' && !Array.isArray(body) && body.status === 'ERROR') {
+        throw new Error(`Headwind ${path} returned status ERROR: ${body.message || '(no message)'}`);
+      }
+      return body;
+    }
 
     // A stale cached JWT looks like a 401; drop it so the next attempt re-authenticates.
     if (res.status === 401) cachedToken = null;
@@ -139,9 +149,16 @@ export async function listDevices(env) {
   return items;
 }
 
+// A device is matched by Headwind's numeric `id` OR its textual `number` (the "Device ID" typed
+// into the agent at enrollment). devices.headwind_device_id in D1 holds the number for phones
+// enrolled that way (e.g. '4908545443', which is larger than an int32 id can be), so matching id
+// alone silently fails to find the phone and the scheduler reports it "not found" every run.
 export async function findDevice(env, headwindDeviceId) {
+  const key = String(headwindDeviceId);
   const devices = await listDevices(env);
-  return devices.find((d) => String(d.id) === String(headwindDeviceId)) || null;
+  return devices.find((d) => String(d.id) === key)
+    || devices.find((d) => String(d.number) === key)
+    || null;
 }
 
 // The single write the scheduler performs: point one device at a different configuration.
@@ -187,8 +204,20 @@ export async function listApplications(env) {
   return Array.isArray(data) ? data : [];
 }
 
+// Look one package up in the catalogue by name (the server's search-by-value endpoint). Used to
+// recover the id of an app we just created when the create response did not carry it.
+async function findApplicationByPkg(env, pkg) {
+  const data = payload(await call(env, ENDPOINTS.applicationSearchValue(pkg), { method: 'GET' }));
+  const list = Array.isArray(data) ? data : [];
+  return list.find((a) => String(a.pkg) === String(pkg)) || null;
+}
+
 // Creates a catalogue entry for a package Headwind has no APK for (a Play app). Enough for the
 // agent to remove it by package name, or to show its icon; nothing to install.
+//
+// The create endpoint's Response.data is typed only as "object" in the spec — some builds return
+// the created Application (with its id), some return nothing useful. When the id is absent, look
+// the package back up so the caller always gets a real id rather than silently skipping the app.
 export async function createApplication(env, { pkg, name }) {
   const data = payload(await call(env, ENDPOINTS.applicationCreate, {
     method: 'PUT',
@@ -198,6 +227,9 @@ export async function createApplication(env, { pkg, name }) {
       runAfterInstall: false, runAtBoot: false, skipVersion: false,
     }),
   }));
+  if (data && typeof data === 'object' && data.id) return data;
+  const found = await findApplicationByPkg(env, pkg);
+  if (found) return found;
   return data && typeof data === 'object' ? data : { pkg, name: name || pkg };
 }
 
@@ -228,14 +260,18 @@ export async function pushPolicyApps(env, configurationId, rules) {
   const summary = { remove: 0, install: 0, icon: 0 };
 
   for (const rule of rules) {
-    const pkg = String(rule.package_name || '').trim().toLowerCase();
+    // Android package names are case-sensitive, so the catalogue entry must be created with the
+    // package exactly as written (`com.google.android.GoogleCamera`). The lowercased form is only
+    // a lookup key, to match case-insensitively against whatever Headwind already stored.
+    const pkg = String(rule.package_name || '').trim();
     if (!pkg) continue;
-    let app = catalogue.get(pkg);
+    const key = pkg.toLowerCase();
+    let app = catalogue.get(key);
     if (!app) {
       try {
         app = await createApplication(env, { pkg, name: rule.label || pkg });
         if (!app.id) throw new Error('create returned no id');
-        catalogue.set(pkg, app);
+        catalogue.set(key, app);
         created.push(pkg);
       } catch (err) {
         errors.push(`${pkg}: ${err.message}`);
@@ -246,7 +282,12 @@ export async function pushPolicyApps(env, configurationId, rules) {
     const hasApk = Boolean(app.url || app.urlArm64 || app.urlArmeabi);
     const action = remove ? HW_ACTION.REMOVE : (hasApk ? HW_ACTION.INSTALL : HW_ACTION.NONE);
     if (remove) summary.remove++; else if (action === HW_ACTION.INSTALL) summary.install++; else summary.icon++;
-    byId.set(app.id, { ...(byId.get(app.id) || {}), ...app, action, showIcon: !remove, remove });
+    // Keep an entry that is already in the configuration exactly as it is, changing only the action
+    // and icon; for a newly linked app write a minimal entry. Never spread the whole catalogue
+    // Application here: it carries a `configurations` array (every other configuration using the
+    // app, each with its own admin password hash), which would be echoed back into this PUT.
+    const existing = byId.get(app.id) || { id: app.id, pkg: app.pkg, name: app.name };
+    byId.set(app.id, { ...existing, action, showIcon: !remove, remove });
   }
 
   config.applications = [...byId.values()];

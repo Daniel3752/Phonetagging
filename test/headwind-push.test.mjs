@@ -144,3 +144,132 @@ console.log('\n4. the login sends what the panel sends: uppercase MD5');
   });
   globalThis.fetch = real;
 }
+
+// Sections 3 and 4 left globalThis.fetch wrapped (create returns 400); restore a clean fake.
+const baseFetch = async (url, opts = {}) => {
+  const path = new URL(url).pathname;
+  const method = opts.method || 'GET';
+  calls.push(`${method} ${path}`);
+  const ok = (data) => Response.json({ status: 'OK', data });
+  if (path === '/rest/public/jwt/login') return ok({ id_token: 'jwt' });
+  if (path === '/rest/private/applications/search') return ok(catalogue);
+  if (path === '/rest/private/applications/android' && method === 'PUT') {
+    const body = JSON.parse(opts.body);
+    const app = { id: nextId++, pkg: body.pkg, name: body.name };
+    catalogue.push(app);
+    return ok(app);
+  }
+  if (path === '/rest/private/configurations/4' && method === 'GET') return ok(JSON.parse(JSON.stringify(configuration)));
+  if (path === '/rest/private/configurations' && method === 'PUT') { configuration = JSON.parse(opts.body); return ok(null); }
+  return new Response('not found', { status: 404 });
+};
+
+console.log('\n5. a package new to the catalogue keeps its exact case (Android package names are case-sensitive)');
+reset();
+globalThis.fetch = baseFetch;
+await pushPolicyApps(env, 4, [{ package_name: 'com.google.android.GoogleCamera', state: 'allowed' }]);
+await check('the created entry is the original case, not lowercased', async () => {
+  assert.ok(catalogue.some((a) => a.pkg === 'com.google.android.GoogleCamera'), 'catalogue keeps case');
+  assert.ok(configuration.applications.some((a) => a.pkg === 'com.google.android.GoogleCamera'), 'config keeps case');
+  assert.ok(!catalogue.some((a) => a.pkg === 'com.google.android.googlecamera'), 'no lowercased duplicate');
+});
+
+console.log('\n6. no catalogue Application is spread wholesale into the configuration (no nested configurations/passwords echoed back)');
+reset();
+globalThis.fetch = baseFetch;
+// The catalogue entry for a blocked Play app carries a `configurations` array in the real server;
+// the pushed configuration entry must not carry it back.
+catalogue.push({ id: 21, pkg: 'com.sideload.thing', name: 'Thing', configurations: [{ id: 4, password: 'SECRETHASH' }] });
+await pushPolicyApps(env, 4, [{ package_name: 'com.sideload.thing', state: 'blocked' }]);
+await check('the linked entry has only link fields, no nested configurations', async () => {
+  const e = configuration.applications.find((a) => a.pkg === 'com.sideload.thing');
+  assert.equal(e.action, 2);
+  assert.equal(e.remove, true);
+  assert.equal(e.configurations, undefined, 'must not echo the catalogue app\'s configurations array');
+  assert.ok(!JSON.stringify(configuration).includes('SECRETHASH'), 'no other config\'s password leaks into the PUT');
+});
+
+console.log('\n7. a create response with no id is recovered by searching the catalogue');
+reset();
+{
+  const real = globalThis.fetch;
+  globalThis.fetch = async (url, opts = {}) => {
+    const path = new URL(url).pathname;
+    const method = opts.method || 'GET';
+    calls.push(`${method} ${path}`);
+    if (path === '/rest/public/jwt/login') return Response.json({ status: 'OK', data: { id_token: 'jwt' } });
+    if (path === '/rest/private/applications/search') return Response.json({ status: 'OK', data: catalogue });
+    if (path === '/rest/private/applications/android' && method === 'PUT') {
+      // The server accepted the create but returns an opaque envelope with no id (a real build does this).
+      const body = JSON.parse(opts.body);
+      catalogue.push({ id: 555, pkg: body.pkg, name: body.name });
+      return Response.json({ status: 'OK', data: {} });
+    }
+    if (path.startsWith('/rest/private/applications/search/')) {
+      const value = decodeURIComponent(path.split('/').pop());
+      return Response.json({ status: 'OK', data: catalogue.filter((a) => a.pkg === value) });
+    }
+    if (path === '/rest/private/configurations/4' && method === 'GET') return Response.json({ status: 'OK', data: JSON.parse(JSON.stringify(configuration)) });
+    if (path === '/rest/private/configurations' && method === 'PUT') { configuration = JSON.parse(opts.body); return Response.json({ status: 'OK', data: null }); }
+    return new Response('not found', { status: 404 });
+  };
+  const r7 = await pushPolicyApps(env, 4, [{ package_name: 'com.brand.new', state: 'blocked' }]);
+  await check('the app is linked with the id found by search, not dropped as an error', async () => {
+    assert.deepEqual(r7.errors, []);
+    const e = configuration.applications.find((a) => a.pkg === 'com.brand.new');
+    assert.ok(e && e.id === 555, 'linked with the searched id');
+    assert.equal(e.action, 2);
+  });
+  globalThis.fetch = real;
+}
+
+console.log('\n8. a 200 response carrying status ERROR is treated as a failure, not a success');
+reset();
+{
+  const real = globalThis.fetch;
+  globalThis.fetch = async (url, opts = {}) => {
+    const path = new URL(url).pathname;
+    const method = opts.method || 'GET';
+    if (path === '/rest/public/jwt/login') return Response.json({ status: 'OK', data: { id_token: 'jwt' } });
+    if (path === '/rest/private/applications/search') return Response.json({ status: 'OK', data: catalogue });
+    if (path === '/rest/private/configurations/4' && method === 'GET') return Response.json({ status: 'OK', data: JSON.parse(JSON.stringify(configuration)) });
+    if (path === '/rest/private/configurations' && method === 'PUT') return Response.json({ status: 'ERROR', message: 'configuration is locked' });
+    return new Response('not found', { status: 404 });
+  };
+  let threw = null;
+  try { await pushPolicyApps(env, 4, [{ package_name: 'com.android.chrome', state: 'allowed' }]); }
+  catch (e) { threw = e; }
+  await check('the ERROR envelope surfaces as a thrown error', async () => {
+    assert.ok(threw, 'must throw');
+    assert.match(threw.message, /ERROR|locked/i);
+  });
+  globalThis.fetch = real;
+}
+
+console.log('\n9. findDevice matches by numeric id OR textual number');
+reset();
+{
+  const { findDevice } = await import('../src/headwind.js');
+  const real = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    if (new URL(url).pathname === '/rest/public/jwt/login') return Response.json({ status: 'OK', data: { id_token: 'jwt' } });
+    return Response.json({ status: 'OK', data: { devices: { items: [
+      { id: 7, number: '4908545443', configurationId: 4 },
+      { id: 8, number: 'phone-b', configurationId: 4 },
+    ], totalItemsCount: 2 } } });
+  };
+  await check('a device is found by its large textual number (not an int32 id)', async () => {
+    const d = await findDevice(env, '4908545443');
+    assert.ok(d && d.id === 7, 'matched by number');
+  });
+  await check('a device is still found by its numeric id', async () => {
+    const d = await findDevice(env, '8');
+    assert.ok(d && d.number === 'phone-b', 'matched by id');
+  });
+  await check('an unknown identifier returns null', async () => {
+    assert.equal(await findDevice(env, 'nope'), null);
+  });
+  globalThis.fetch = real;
+}
+
+console.log('\nAll Headwind-push checks passed.\n');

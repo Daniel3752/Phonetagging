@@ -162,6 +162,23 @@ s = await runScheduler(env, new Date('2026-09-06T13:05:00Z'));
 check('back on the timetable, seder locks him', Number(hwDevices.find((d) => d.id === 9).configurationId) === 40, JSON.stringify(s));
 hwDevices = hwDevices.filter((d) => d.id !== 9);  // the Headwind-shape checks below count two devices
 
+console.log('\n7c. an unchanged repeating failure is logged once, not every run');
+{
+  // A device stuck on a policy with no Headwind configuration fails identically every five minutes.
+  // The first failure is logged; identical repeats are not, so the log does not fill with copies.
+  await adminJson('/api/admin/policies', { id: 'unmapped_pol', name: 'Unmapped' }); // no headwind_configuration_id
+  const stuck = await adminJson('/api/admin/devices', { label: 'Stuck', headwind_device_id: '77', policy_id: 'unmapped_pol', timezone: 'UTC' });
+  const countFor = () => env.DB._db.prepare(
+    "SELECT COUNT(*) n FROM audit_log WHERE target = ? AND action = 'policy_apply_failed'").get(stuck.id).n;
+  await runScheduler(env, new Date('2026-08-27T10:00:00Z'));
+  const after1 = countFor();
+  await runScheduler(env, new Date('2026-08-27T10:05:00Z'));
+  await runScheduler(env, new Date('2026-08-27T10:10:00Z'));
+  const after3 = countFor();
+  check('the first failure is recorded', after1 === 1, String(after1));
+  check('three identical failures still leave one row', after3 === 1, String(after3));
+}
+
 console.log('\n8. audit log records both operator and scheduler actions');
 const audit = await adminJson('/api/admin/audit');
 check('operator actions logged', audit.entries.some((e) => e.actor === 'operator' && e.action === 'policy_saved'));
