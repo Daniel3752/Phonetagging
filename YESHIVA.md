@@ -60,6 +60,36 @@ rung 4 in `YESHIVA_LEVELS` (`src/levels.js`) — one word.
   applied, Chrome falls back to the intercept path: still filtered by hostname (both lists, the
   shiur lock), but images load — so verify it on the phone (chrome://policy shows the values).
 
+### Chrome must be recent, or every Google search is refused
+
+**Google will not serve `udm=14` to a browser older than the feature.** `udm=14` shipped in 2024;
+a phone on, say, Chrome 105 (2022) gets its search answered with a `302` to the *same* search with
+`udm=14` stripped out, which the proxy then correctly refuses. The phone shows the block page on
+every single search and nothing in the setup looks wrong — the policy is right, the URL is right,
+the tunnel is fine.
+
+Proven on the Vortex, 2026-09-15, by changing nothing but the user-agent:
+
+```
+curl -A '…Chrome/105.0.0.0 Mobile…' 'https://www.google.com/search?q=volcano&udm=14'
+  -> 302  location: https://www.google.com/search?q=volcano      # udm stripped
+curl -A '…Chrome/120.0.0.0 Mobile…' 'https://www.google.com/search?q=volcano&udm=14'
+  -> 200
+```
+
+So: **check Chrome's version before blaming anything else**, and update it through the Play Store
+as part of setting a phone up. `chrome://version` on the phone, or read the `User-Agent` in a
+squid header dump. This is the first thing to rule out when "every search is blocked".
+
+Things that are NOT the cause, all eliminated on that phone: the other search parameters (`hl`,
+`gl`, `safe` — Google strips `udm` whatever they are), cookies, being signed in to a Google
+account, `Via` / `X-Forwarded-For` (both already off), HTTP/1.1 versus HTTP/2, and every Chrome
+request header.
+
+> Debugging note: if you dump squid headers (`debug_options ALL,1 11,2`) to investigate this,
+> the dump contains the phone's **Google session cookies**, which are account credentials. Redact
+> the `Cookie:` line before pasting it anywhere, and truncate `cache.log` afterwards.
+
 ## The shiur lock
 
 "The entire phone besides essential items doesn't work during shiur." Two halves:

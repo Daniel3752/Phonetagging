@@ -7,6 +7,20 @@ was deployed and nothing on the server or the phones was touched — **every fix
 this branch, inert until someone runs `npx wrangler deploy`.** The block under this one is still
 the design and runbook; where the two disagree, this one wins.
 
+### Two live faults found and fixed on the evening of 2026-09-15
+
+1. **The tunnel had no MTU**, so it ran at WireGuard's 1420 default with every byte of the phone's
+   traffic inside it. Big packets (a TLS handshake carrying a certificate chain) were silently
+   dropped while small ones passed: Chrome `ERR_TIMED_OUT` on some sites and not others, the same
+   site flipping, and the MDM agent showing "isn't responding" on every reboot because its sync is
+   one of the big exchanges. Fixed at 1280 on both ends plus MSS clamping — see `WIREGUARD.md`.
+   Applied live on the server and on the Vortex; **Isaac's phone still needs `MTU 1280` set in its
+   WireGuard app.**
+2. **Every Google search was refused because the phone's Chrome was version 105.** Google will not
+   serve `udm=14` to a browser older than the feature and redirects the search with `udm` stripped,
+   which the proxy then correctly refuses. Not a bug in this system — see the new section in
+   `YESHIVA.md`. **Update Chrome as part of phone setup.**
+
 ### Decisions recorded (from the operator, this session)
 
 - The Vortex stays a **test phone**, so the fleet shiur toggle stays **Off**. Do not put it on
