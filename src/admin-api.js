@@ -8,8 +8,9 @@
 
 import { audit } from './scheduler.js';
 import { runScheduler } from './scheduler.js';
-import { parseTimeOfDay } from './policy.js';
-import { normalizeDeviceLevel, normalizeSiteLevel, LEVELS, NEVER_LEVEL } from './levels.js';
+import { pushPolicyApps } from './headwind.js';
+import { parseTimeOfDay, TAG_BASE_PREFIX, tagBaseId, SHIUR_MODES, normalizeShiurMode, appPolicyIdForLevel } from './policy.js';
+import { normalizeDeviceLevel, normalizeSiteLevel, normalizeTag, maxLevelFor, LEVELS, TAGS, NEVER_LEVEL, MIN_LEVEL } from './levels.js';
 import { searchCacheKey } from './search.js';
 import { sha256Hex , generateProxyPassword, proxyUserFromLabel } from './crypto.js';
 
@@ -25,6 +26,25 @@ function newId(prefix) {
 }
 
 const APP_STATES = new Set(['allowed', 'blocked', 'hidden']);
+// Operator-wide switches and what each accepts. Anything else is refused: a setting nobody reads
+// is a typo, and a value nobody understands would silently mean "default".
+const SETTINGS = { shiur_lock_mode: new Set(SHIUR_MODES) };
+// What a policy says about an app it has no rule for: 'blocked' = allowlist, 'allowed' = blocklist.
+const APP_DEFAULTS = new Set(['allowed', 'blocked']);
+// A policy's own say over the browser: NULL/'' = the rung decides, 'none' = no web while in force.
+const POLICY_WEB_MODES = new Set(['none']);
+
+// Is this a rung on this tag's ladder? A rung the operator did not ask for is refused, not clamped
+// (see the device routes for why): the clamp lands on rung 1 — no web at all — and the console then
+// reads as though they had chosen the strictest filtering.
+function isRung(level, tag) {
+  return level !== undefined && level !== null && level !== ''
+    && normalizeDeviceLevel(level, tag) === Number(level);
+}
+function rungError(level, tag) {
+  return `level must be a rung between ${MIN_LEVEL} and ${maxLevelFor(tag)} on the ${normalizeTag(tag)} ladder; ` +
+    `${JSON.stringify(level)} is not one (6/"Never" is a site rating, not a phone rung)`;
+}
 
 // Android package names: dot-separated segments, each starting with a letter. Validated because
 // these strings are pushed to phones — a typo silently fails to block the app the operator meant.
@@ -36,15 +56,21 @@ export async function handleAdmin(request, env, path) {
   switch (`${request.method} ${path}`) {
     // --- read-only views the admin page renders ------------------------------------------------
     case 'GET /api/admin/state': {
-      const [devices, policies, appRules, schedules] = await Promise.all([
+      const [devices, policies, appRules, schedules, settingRows] = await Promise.all([
         all(env, 'SELECT * FROM devices ORDER BY label'),
         all(env, 'SELECT * FROM policies ORDER BY name'),
         all(env, 'SELECT * FROM app_rules ORDER BY policy_id, package_name'),
         all(env, 'SELECT * FROM schedules ORDER BY priority DESC, created_at DESC'),
+        all(env, 'SELECT key, value FROM settings').catch(() => []),
       ]);
-      // The ladder ships with the state so the page never hard-codes rung names — they live in
+      const settings = Object.fromEntries(settingRows.map((r) => [r.key, r.value]));
+      settings.shiur_lock_mode = normalizeShiurMode(settings.shiur_lock_mode);
+      // The ladders ship with the state so the page never hard-codes rung names — they live in
       // levels.js, and a page that duplicated them would drift from what is actually enforced.
-      return json({ devices, policies, appRules, schedules, levels: LEVELS });
+      // `levels` is the standard ladder (kept for anything that reads it); `tags` carries every
+      // ladder with its name, keyed by the tag a device stores.
+      const tags = Object.values(TAGS).map((t) => ({ id: t.id, name: t.name, levels: t.levels, policyPrefix: t.policyPrefix }));
+      return json({ devices, policies, appRules, schedules, settings, levels: LEVELS, tags });
     }
 
     case 'GET /api/admin/verdicts':
@@ -63,13 +89,46 @@ export async function handleAdmin(request, env, path) {
       if (!name) return json({ error: 'name is required' }, 400);
 
       const id = body.id || newId('pol');
-      await env.DB.prepare(`
-        INSERT INTO policies (id, name, headwind_configuration_id, created_at) VALUES (?, ?, ?, ?)
-        ON CONFLICT(id) DO UPDATE SET name = excluded.name,
-          headwind_configuration_id = excluded.headwind_configuration_id
-      `).bind(id, name, body.headwind_configuration_id || null, Date.now()).run();
+      // This is an upsert, so a caller who sends only id/name/headwind_configuration_id — which is
+      // exactly how a configuration gets mapped from a terminal — must not have the policy's model
+      // silently reset underneath them. An omitted field KEEPS what the row has; only an explicitly
+      // sent one changes it. Getting this wrong turned yeshiva_shiur into a blocklist with the web
+      // lock off, and nothing in the audit row said so.
+      const existing = body.id
+        ? await env.DB.prepare('SELECT app_default, web_mode, headwind_configuration_id FROM policies WHERE id = ?')
+            .bind(id).first()
+        : null;
 
-      await audit(env, 'operator', 'policy_saved', id, name);
+      const appDefaultGiven = body.app_default !== undefined && body.app_default !== null && body.app_default !== '';
+      const appDefault = appDefaultGiven ? String(body.app_default)
+        : (existing ? existing.app_default : 'allowed');
+      if (!APP_DEFAULTS.has(appDefault)) return json({ error: 'app_default must be allowed (blocklist) or blocked (allowlist)' }, 400);
+
+      // Sending web_mode explicitly (even as null or '') clears it; omitting the key keeps it.
+      const webMode = 'web_mode' in body
+        ? (body.web_mode ? String(body.web_mode) : null)
+        : (existing ? existing.web_mode : null);
+      if (webMode && !POLICY_WEB_MODES.has(webMode)) return json({ error: 'web_mode must be empty (the rung decides) or none' }, 400);
+
+      // The scheduler puts this straight into a Headwind Device PUT and the push uses it in a URL
+      // path, so anything but digits ends up as configurationId null on a live phone.
+      const configGiven = 'headwind_configuration_id' in body;
+      const configRaw = configGiven
+        ? String(body.headwind_configuration_id ?? '').trim()
+        : (existing ? existing.headwind_configuration_id : null);
+      if (configRaw && !/^\d+$/.test(String(configRaw))) {
+        return json({ error: "headwind_configuration_id must be the configuration's numeric id, digits only" }, 400);
+      }
+      const configId = configRaw || null;
+
+      await env.DB.prepare(`
+        INSERT INTO policies (id, name, headwind_configuration_id, app_default, web_mode, created_at) VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET name = excluded.name,
+          headwind_configuration_id = excluded.headwind_configuration_id,
+          app_default = excluded.app_default, web_mode = excluded.web_mode
+      `).bind(id, name, configId, appDefault, webMode, Date.now()).run();
+
+      await audit(env, 'operator', 'policy_saved', id, `${name} (${appDefault === 'blocked' ? 'allowlist' : 'blocklist'}${webMode ? `, web ${webMode}` : ''})`);
       return json({ ok: true, id });
     }
 
@@ -105,9 +164,36 @@ export async function handleAdmin(request, env, path) {
       if (!label) return json({ error: 'label is required' }, 400);
       if (!body.policy_id) return json({ error: 'policy_id is required' }, 400);
 
-      // A missing or nonsensical level clamps to the strictest rung, never the loosest. Getting
-      // this backwards would mean a typo in a form silently opening a phone up.
-      const level = normalizeDeviceLevel(body.level ?? 2);
+      const id = body.id || newId('dev');
+      // One read of the row this save may be updating. Everything the caller omits is taken from
+      // here rather than from a default, so a partial save never silently rewrites the phone.
+      const existing = body.id
+        ? await env.DB.prepare('SELECT tag, shiur_lock, proxy_password FROM devices WHERE id = ?').bind(id).first()
+        : null;
+
+      // The tag picks the ladder the rung is read on. Anything but a known tag is refused rather
+      // than defaulted: a phone quietly landing on the wrong ladder is the same class of mistake
+      // as the wrong rung. An OMITTED tag keeps the one the row has — every curl example written
+      // before the tag existed omits it, and defaulting those to 'standard' quietly took a yeshiva
+      // phone off its ladder (and out of the shiur windows) while leaving its policy behind.
+      if (body.tag !== undefined && body.tag !== null && body.tag !== '' && normalizeTag(body.tag) !== String(body.tag).trim().toLowerCase()) {
+        return json({ error: `tag must be one of ${Object.keys(TAGS).join(', ')}` }, 400);
+      }
+      const tagGiven = body.tag !== undefined && body.tag !== null && body.tag !== '';
+      const tag = tagGiven ? normalizeTag(body.tag) : normalizeTag(existing ? existing.tag : undefined);
+
+      // A MISSING level clamps to the strictest rung, never the loosest: getting that backwards
+      // would mean a typo in a form silently opening a phone up.
+      //
+      // A level that was SUPPLIED but is not a rung is refused instead of clamped. Clamping is the
+      // right answer for a corrupt row the scheduler stumbles over at 3am; it is the wrong answer
+      // for an operator standing at the form, because the clamp lands on rung 1 — no web at all —
+      // and the console then reads as though they had chosen the strictest filtering. A live phone
+      // spent days unable to load anything or run a single search that way. Say no instead.
+      if (body.level !== undefined && body.level !== null && body.level !== '' && !isRung(body.level, tag)) {
+        return json({ error: rungError(body.level, tag) }, 400);
+      }
+      const level = normalizeDeviceLevel(body.level ?? 2, tag);
 
       // The proxy login is how the filter tells one phone from another. It must match an account in
       // /etc/squid/passwd; without it the device falls back to the strictest rung on every request.
@@ -117,28 +203,29 @@ export async function handleAdmin(request, env, path) {
         return json({ error: 'proxy_user must be 2-64 chars: letters, digits, dot, dash, underscore' }, 400);
       }
 
-      const id = body.id || newId('dev');
+      // Per-phone shiur lock. Omitted = keep what the row has (or on, for a new phone).
+      const shiurLock = body.shiur_lock === undefined || body.shiur_lock === null
+        ? (existing ? Number(existing.shiur_lock) : 1)
+        : (body.shiur_lock === true || body.shiur_lock === 1 || body.shiur_lock === '1' || body.shiur_lock === 'on' ? 1 : 0);
 
       // Generate a password per phone rather than letting the operator pick one — a chosen password
       // gets reused across phones, and reuse is the only way one leaked login becomes a fleet-wide
       // one. Kept if the device already has one, so re-saving a phone to change its level does not
       // silently invalidate the credential already typed into its Chrome.
-      const existing = await env.DB.prepare('SELECT proxy_password FROM devices WHERE id = ?')
-        .bind(id).first();
       const proxyPassword = String(body.proxy_password || '').trim()
         || existing?.proxy_password
         || generateProxyPassword();
       try {
         await env.DB.prepare(`
-          INSERT INTO devices (id, headwind_device_id, label, policy_id, timezone, enrolled_at, level, proxy_user, proxy_password)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          INSERT INTO devices (id, headwind_device_id, label, policy_id, timezone, enrolled_at, level, tag, shiur_lock, proxy_user, proxy_password)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(id) DO UPDATE SET
             headwind_device_id = excluded.headwind_device_id, label = excluded.label,
             policy_id = excluded.policy_id, timezone = excluded.timezone,
-            level = excluded.level, proxy_user = excluded.proxy_user,
-            proxy_password = excluded.proxy_password
+            level = excluded.level, tag = excluded.tag, shiur_lock = excluded.shiur_lock,
+            proxy_user = excluded.proxy_user, proxy_password = excluded.proxy_password
         `).bind(id, body.headwind_device_id || null, label, body.policy_id,
-                body.timezone || 'UTC', Date.now(), level, proxyUser, proxyPassword).run();
+                body.timezone || 'UTC', Date.now(), level, tag, shiurLock, proxyUser, proxyPassword).run();
       } catch (err) {
         // proxy_user is uniquely indexed: two phones sharing a login would silently share a rung,
         // and whichever was loosest would win for both.
@@ -148,11 +235,11 @@ export async function handleAdmin(request, env, path) {
         throw err;
       }
 
-      await audit(env, 'operator', 'device_saved', id, `${label} -> level ${level}, policy ${body.policy_id}`);
+      await audit(env, 'operator', 'device_saved', id, `${label} -> ${tag} level ${level}, policy ${body.policy_id}`);
       // The htpasswd line is returned ready to paste: the worker cannot reach /etc/squid/passwd, so
       // creating the squid account stays a manual step and this is the part people get wrong.
       return json({
-        ok: true, id, level,
+        ok: true, id, level, tag,
         proxy_user: proxyUser,
         proxy_password: proxyPassword,
         htpasswd: `htpasswd -B -b /etc/squid/passwd ${proxyUser} '${proxyPassword}'`,
@@ -167,6 +254,11 @@ export async function handleAdmin(request, env, path) {
       if (start === end) return json({ error: 'start and end cannot be the same time' }, 400);
       if (!body.base_policy_id || !body.active_policy_id) {
         return json({ error: 'base_policy_id and active_policy_id are required' }, 400);
+      }
+      // A base of `tag:<tag>` covers every phone on that ladder (see policy.js). Only a real tag.
+      const base = String(body.base_policy_id);
+      if (base.startsWith(TAG_BASE_PREFIX) && base !== tagBaseId(base.slice(TAG_BASE_PREFIX.length))) {
+        return json({ error: `base_policy_id ${JSON.stringify(base)} names no known tag (${Object.keys(TAGS).map(tagBaseId).join(', ')})` }, 400);
       }
 
       const dayMask = Number(body.day_mask);
@@ -206,16 +298,104 @@ export async function handleAdmin(request, env, path) {
       return json({ ok: true });
     }
 
-    // Move a phone between rungs. Separate from the full device save so the common operation — "make
-    // this stricter, now" — is one call that cannot accidentally blank another field.
+    // Move a phone between rungs — and, with `tag`, between ladders (this is the migration step:
+    // a yeshiva phone becomes a standard one by being given tag 'standard' and a rung on it).
+    // Separate from the full device save so the common operation — "make this stricter, now" — is
+    // one call that cannot accidentally blank another field.
     case 'POST /api/admin/devices/level': {
       if (!body.id) return json({ error: 'id is required' }, 400);
-      const level = normalizeDeviceLevel(body.level);
-      const res = await env.DB.prepare('UPDATE devices SET level = ? WHERE id = ?')
-        .bind(level, body.id).run();
+      const current = await env.DB.prepare('SELECT tag, allow_youtube FROM devices WHERE id = ?').bind(body.id).first();
+      if (!current) return json({ error: 'no such device' }, 404);
+      if (body.tag !== undefined && body.tag !== null && body.tag !== '' && normalizeTag(body.tag) !== String(body.tag).trim().toLowerCase()) {
+        return json({ error: `tag must be one of ${Object.keys(TAGS).join(', ')}` }, 400);
+      }
+      const tag = body.tag ? normalizeTag(body.tag) : normalizeTag(current.tag);
+      // Same as the save route: a rung the operator did not ask for is worse than an error. 6 is
+      // the one people reach for by mistake — it is a site rating meaning "blocked everywhere", and
+      // clamped onto a phone it becomes rung 1, no web.
+      if (!isRung(body.level, tag)) return json({ error: rungError(body.level, tag) }, 400);
+      const level = normalizeDeviceLevel(body.level, tag);
+
+      // This is the migration step ("standard 4" on the Yeshiva tab), so it must move the phone's
+      // APP baseline too. Changing only rung and tag left the scheduler pushing the old ladder's
+      // configuration forever — the console papered over it with a second full save, so an API
+      // caller, or a page whose second call failed, was left half-migrated with no error.
+      // The phone keeps its YouTube answer across a rung move: the flag is remembered on the row
+      // and only decides anything on yeshiva rung 3.
+      const allowYoutube = Number(current.allow_youtube) === 1;
+      const policyId = appPolicyIdForLevel(level, tag, { allowYoutube });
+      const policyExists = policyId
+        ? await env.DB.prepare('SELECT id FROM policies WHERE id = ?').bind(policyId).first()
+        : null;
+
+      const res = policyExists
+        ? await env.DB.prepare('UPDATE devices SET level = ?, tag = ?, policy_id = ? WHERE id = ?')
+            .bind(level, tag, policyId, body.id).run()
+        : await env.DB.prepare('UPDATE devices SET level = ?, tag = ? WHERE id = ?')
+            .bind(level, tag, body.id).run();
       if (!res.meta?.changes) return json({ error: 'no such device' }, 404);
-      await audit(env, 'operator', 'device_level_set', body.id, `level ${level}`);
-      return json({ ok: true, level });
+      await audit(env, 'operator', 'device_level_set', body.id,
+        `${tag} level ${level}${policyExists ? `, policy ${policyId}` : ' (no matching app policy)'}`);
+      return json({ ok: true, level, tag, policy_id: policyExists ? policyId : null });
+    }
+
+    // Switch the shiur lock on or off for one phone. Off = exempt from the windows and from the
+    // fleet "Locked now"; on = governed by them. Its own route so the Yeshiva tab can flip it
+    // without re-sending the whole device.
+    case 'POST /api/admin/devices/shiur': {
+      if (!body.id) return json({ error: 'id is required' }, 400);
+      // Refuse anything that is not plainly on or off. This used to treat every unrecognised value
+      // — including a missing field and the string "true" — as OFF, which exempts the phone from
+      // every shiur window and from "Locked now". An unreadable request must never land on the
+      // permissive side.
+      const TRUTHY = [true, 1, '1', 'on', 'true', 'yes'];
+      const FALSY = [false, 0, '0', 'off', 'false', 'no'];
+      const given = typeof body.on === 'string' ? body.on.trim().toLowerCase() : body.on;
+      const on = TRUTHY.includes(given) ? true : FALSY.includes(given) ? false : null;
+      if (on === null) return json({ error: 'on must be true or false' }, 400);
+      const res = await env.DB.prepare('UPDATE devices SET shiur_lock = ? WHERE id = ?')
+        .bind(on ? 1 : 0, body.id).run();
+      if (!res.meta?.changes) return json({ error: 'no such device' }, 404);
+      await audit(env, 'operator', 'device_shiur_lock_set', body.id, on ? 'on' : 'off');
+      return json({ ok: true, shiur_lock: on ? 1 : 0 });
+    }
+
+    // May this phone have the YouTube app? Only yeshiva rung 3 has the option; the flag is stored
+    // on every phone so it survives a rung move, and picks between the two rung-3 policies. Its own
+    // route so the Yeshiva tab can flip it without re-sending the whole device.
+    case 'POST /api/admin/devices/youtube': {
+      if (!body.id) return json({ error: 'id is required' }, 400);
+      // Same discipline as the shiur switch: a value we cannot read is refused, never taken as the
+      // permissive answer.
+      const TRUTHY = [true, 1, '1', 'on', 'true', 'yes'];
+      const FALSY = [false, 0, '0', 'off', 'false', 'no'];
+      const given = typeof body.on === 'string' ? body.on.trim().toLowerCase() : body.on;
+      const on = TRUTHY.includes(given) ? true : FALSY.includes(given) ? false : null;
+      if (on === null) return json({ error: 'on must be true or false' }, 400);
+
+      const device = await env.DB.prepare('SELECT tag, level FROM devices WHERE id = ?').bind(body.id).first();
+      if (!device) return json({ error: 'no such device' }, 404);
+
+      const tag = normalizeTag(device.tag);
+      const level = normalizeDeviceLevel(device.level, tag);
+      const policyId = appPolicyIdForLevel(level, tag, { allowYoutube: on });
+      const policyExists = await env.DB.prepare('SELECT id FROM policies WHERE id = ?').bind(policyId).first();
+
+      // Move the app baseline with the flag, so the scheduler pushes the right configuration
+      // without a second call — the same trap the rung route used to fall into.
+      const res = policyExists
+        ? await env.DB.prepare('UPDATE devices SET allow_youtube = ?, policy_id = ? WHERE id = ?')
+            .bind(on ? 1 : 0, policyId, body.id).run()
+        : await env.DB.prepare('UPDATE devices SET allow_youtube = ? WHERE id = ?')
+            .bind(on ? 1 : 0, body.id).run();
+      if (!res.meta?.changes) return json({ error: 'no such device' }, 404);
+
+      await audit(env, 'operator', 'device_youtube_set', body.id,
+        `${on ? 'allowed' : 'blocked'}${policyExists ? `, policy ${policyId}` : ''}`);
+      return json({
+        ok: true, allow_youtube: on ? 1 : 0, policy_id: policyExists ? policyId : null,
+        applies: tag === 'yeshiva' && level === 3,
+      });
     }
 
     // --- overriding the classifier ----------------------------------------------------------------
@@ -274,7 +454,49 @@ export async function handleAdmin(request, env, path) {
       return json({ ok: true, level });
     }
 
+    // --- operator-wide switches (the shiur lock toggle) ----------------------------------------
+    case 'POST /api/admin/settings': {
+      const key = String(body.key || '');
+      if (!SETTINGS[key]) return json({ error: `unknown setting; one of ${Object.keys(SETTINGS).join(', ')}` }, 400);
+      const value = String(body.value ?? '').trim().toLowerCase();
+      if (!SETTINGS[key].has(value)) return json({ error: `${key} must be one of ${[...SETTINGS[key]].join(', ')}` }, 400);
+      await env.DB.prepare(`
+        INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+      `).bind(key, value, Date.now()).run();
+      await audit(env, 'operator', 'setting_changed', key, value);
+      return json({ ok: true, key, value });
+    }
+
     // --- manual scheduler run, so the operator doesn't wait for the next cron tick ---------------
+    // Write a policy's app rules into its Headwind configuration. This is the app side of a rung
+    // becoming real: until it runs, the rules in D1 are intent and the panel's list is whatever an
+    // operator typed. Idempotent — push again after editing rules.
+    case 'POST /api/admin/policies/push-apps': {
+      if (!body.id) return json({ error: 'id is required' }, 400);
+      const policy = await env.DB.prepare('SELECT id, name, headwind_configuration_id FROM policies WHERE id = ?')
+        .bind(body.id).first();
+      if (!policy) return json({ error: 'no such policy' }, 404);
+      if (!policy.headwind_configuration_id) {
+        return json({ error: 'this policy has no Headwind configuration mapped — set it first' }, 400);
+      }
+      const rules = await env.DB.prepare('SELECT package_name, state FROM app_rules WHERE policy_id = ? ORDER BY package_name')
+        .bind(policy.id).all().then((r) => r.results || []);
+      if (rules.length === 0) return json({ error: 'this policy has no app rules to push' }, 400);
+
+      let result;
+      try {
+        result = await pushPolicyApps(env, policy.headwind_configuration_id, rules);
+      } catch (err) {
+        await audit(env, 'operator', 'apps_push_failed', policy.id, err.message);
+        return json({ error: `Headwind push failed: ${err.message}` }, 502);
+      }
+      await audit(env, 'operator', 'apps_pushed', policy.id,
+        `config ${result.configurationId}: ${result.remove} remove, ${result.install} install, ${result.icon} icon-only, ${result.created.length} created` +
+        (result.errors.length ? `, ${result.errors.length} errors` : ''));
+      return json({ ok: true, policy: policy.id, ...result });
+    }
+
     case 'POST /api/admin/apply':
       return json(await runScheduler(env));
 

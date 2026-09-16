@@ -26,6 +26,13 @@ A separate **doorway** flag covers sites whose function is reaching content they
 search engines, image search, open user-content platforms. It overrides the rating, because such a
 site's own homepage always looks harmless and allowing it allows everything behind it.
 
+### The yeshiva temp tag
+
+A second, temporary ladder for the yeshiva phones: four rungs that differ in their app model, one
+blocklist-only browser with every image blanked, and a Sunday–Thursday shiur lock that confines the
+phone to essentials. A device carries `tag` to say which ladder its rung is read on. See
+[YESHIVA.md](YESHIVA.md).
+
 ### App control
 
 Policies are named sets of app rules, each mapped onto a Headwind configuration. A rule is one of:
@@ -83,12 +90,12 @@ Worth knowing before promising anything to families:
 | `src/index.js` | Router, `/api/verdict`, `/admin`, cron entry point |
 | `src/gemini.js` | Gemini site classifier (`classifySite`) |
 | `src/gateway.js` | Cloudflare Gateway client — hostname and (dormant) URL allowlists |
-| `src/policy.js` | Pure resolver: device + instant → effective policy |
+| `src/policy.js` | Pure resolver: device + instant → effective policy (a schedule's base may be a whole tag) |
 | `src/scheduler.js` | Cron job that pushes policy changes to Headwind |
 | `src/headwind.js` | Headwind MDM REST client (endpoints taken from the live server's Swagger spec) |
 | `src/admin-api.js` | Operator API behind `/api/admin/*` |
 | `src/admin-page.js` | Operator console (`/admin`) |
-| `src/block-page.js` | Request-access page (`/blocked`) |
+| `src/block-page.js` | Block page (`/blocked`); also the blank placeholder served for a stripped image |
 | `schema.sql`, `migrations/` | D1 schema |
 | `scripts/setup-gateway.sh` | One-time Gateway config |
 | `test/` | Offline test suite |

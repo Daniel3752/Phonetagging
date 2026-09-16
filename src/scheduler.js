@@ -17,10 +17,13 @@ import { resolveEffectivePolicy } from './policy.js';
 import { setDeviceConfiguration } from './headwind.js';
 
 export async function runScheduler(env, now = new Date()) {
-  const [devices, schedules, policies] = await Promise.all([
+  const [devices, schedules, policies, shiurMode] = await Promise.all([
     env.DB.prepare('SELECT * FROM devices').all().then((r) => r.results || []),
     env.DB.prepare('SELECT * FROM schedules').all().then((r) => r.results || []),
     env.DB.prepare('SELECT * FROM policies').all().then((r) => r.results || []),
+    // The shiur lock toggle. A missing row (or a database without the table yet) is 'schedule'.
+    env.DB.prepare(`SELECT value FROM settings WHERE key = 'shiur_lock_mode'`).first()
+      .then((r) => r?.value).catch(() => undefined),
   ]);
 
   const policyById = new Map(policies.map((p) => [p.id, p]));
@@ -28,7 +31,7 @@ export async function runScheduler(env, now = new Date()) {
 
   for (const device of devices) {
     try {
-      const { policyId, scheduleId } = resolveEffectivePolicy(device, schedules, now);
+      const { policyId, scheduleId, forced } = resolveEffectivePolicy(device, schedules, now, { shiurMode });
 
       if (policyId === device.last_applied_policy_id) {
         summary.unchanged++;
@@ -53,13 +56,22 @@ export async function runScheduler(env, now = new Date()) {
         .bind(policyId, device.id).run();
 
       await audit(env, 'scheduler', 'policy_applied', device.id,
-        `${device.last_applied_policy_id || '(none)'} -> ${policyId}${scheduleId ? ` via schedule ${scheduleId}` : ' (baseline)'}`);
+        `${device.last_applied_policy_id || '(none)'} -> ${policyId}${scheduleId ? ` via schedule ${scheduleId}` : forced ? ' (shiur lock switched on)' : ' (baseline)'}`);
 
       summary.changed++;
     } catch (err) {
       summary.failed++;
       summary.errors.push(`${device.id}: ${err.message}`);
-      await audit(env, 'scheduler', 'policy_apply_failed', device.id, err.message).catch(() => {});
+      // Don't reprint an identical failure every five minutes. A device stuck on an unmapped policy
+      // would otherwise write one row per run forever (thousands of identical lines burying the log).
+      // Record a failure only when it differs from this device's most recent audit row — so the
+      // first occurrence is logged, and it is logged again after any recovery or change.
+      const last = await env.DB.prepare(
+        'SELECT action, detail FROM audit_log WHERE target = ? ORDER BY id DESC LIMIT 1'
+      ).bind(device.id).first().catch(() => null);
+      if (!last || last.action !== 'policy_apply_failed' || last.detail !== err.message) {
+        await audit(env, 'scheduler', 'policy_apply_failed', device.id, err.message).catch(() => {});
+      }
     }
   }
 

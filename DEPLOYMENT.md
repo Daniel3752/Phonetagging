@@ -33,7 +33,7 @@ Worker secrets (set via `wrangler secret put`, not in the repo): `GEMINI_API_KEY
 
 | | |
 |---|---|
-| Panel | https://mdm.getshmira.com (Ubuntu 22.04, Hetzner CPX12, 2GB) |
+| Panel | https://mdm.getshmira.com (Ubuntu 22.04, Hetzner CX23: 2 vCPU, 4GB RAM, 40GB disk, 20TB egress/mo, Nuremberg) |
 | Stack | Tomcat 9 (8080/8443), PostgreSQL, Let's Encrypt |
 | DB | database `hmdm`, user `hmdm` |
 | API spec | `GET /rest/swagger.json` — the source of truth for `src/headwind.js` |

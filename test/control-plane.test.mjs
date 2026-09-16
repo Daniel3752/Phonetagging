@@ -141,6 +141,105 @@ s = await runScheduler(env, new Date('2026-08-26T23:00:00Z'));
 check('reported as failed, not thrown', s.failed === 1, JSON.stringify(s));
 check('other devices unaffected', s.errors.length === 1 && /not linked/.test(s.errors[0]), JSON.stringify(s.errors));
 
+console.log('\n7b. the shiur toggle drives the scheduler too');
+hwDevices.push({ id: 9, number: 'yeshiva-a', configurationId: '30', groups: [], mdmMode: true, serial: 'CCC333' });
+await adminJson('/api/admin/policies', { id: 'yeshiva_rung_2', name: 'Yeshiva — Rung 2 (Apps + browser)', headwind_configuration_id: '30', app_default: 'blocked' });
+await adminJson('/api/admin/policies', { id: 'yeshiva_shiur', name: 'Yeshiva — Shiur (locked to essentials)', headwind_configuration_id: '40', app_default: 'blocked', web_mode: 'none' });
+const bochur = await adminJson('/api/admin/devices', { label: 'Bochur', headwind_device_id: '9', policy_id: 'yeshiva_rung_2', timezone: 'Asia/Jerusalem', tag: 'yeshiva', level: 2 });
+check('a yeshiva phone was created', !!bochur.id && bochur.tag === 'yeshiva', JSON.stringify(bochur));
+// Sunday 2026-09-06 15:00 Israel (12:00Z): lunch, so the timetable would leave him on his rung.
+s = await runScheduler(env, new Date('2026-09-06T12:00:00Z'));
+check('on the timetable, lunch means his rung config', Number(hwDevices.find((d) => d.id === 9).configurationId) === 30, JSON.stringify(s));
+await adminJson('/api/admin/settings', { key: 'shiur_lock_mode', value: 'on' });
+s = await runScheduler(env, new Date('2026-09-06T12:05:00Z'));
+check('"locked now" moves him to the shiur config at lunch', Number(hwDevices.find((d) => d.id === 9).configurationId) === 40, JSON.stringify(s));
+await adminJson('/api/admin/settings', { key: 'shiur_lock_mode', value: 'off' });
+// 16:00 Israel (13:00Z): second seder, but the toggle is off.
+s = await runScheduler(env, new Date('2026-09-06T13:00:00Z'));
+check('"off" keeps him on his rung config during seder', Number(hwDevices.find((d) => d.id === 9).configurationId) === 30, JSON.stringify(s));
+await adminJson('/api/admin/settings', { key: 'shiur_lock_mode', value: 'schedule' });
+s = await runScheduler(env, new Date('2026-09-06T13:05:00Z'));
+check('back on the timetable, seder locks him', Number(hwDevices.find((d) => d.id === 9).configurationId) === 40, JSON.stringify(s));
+hwDevices = hwDevices.filter((d) => d.id !== 9);  // the Headwind-shape checks below count two devices
+
+console.log('\n7c. an unchanged repeating failure is logged once, not every run');
+{
+  // A device stuck on a policy with no Headwind configuration fails identically every five minutes.
+  // The first failure is logged; identical repeats are not, so the log does not fill with copies.
+  await adminJson('/api/admin/policies', { id: 'unmapped_pol', name: 'Unmapped' }); // no headwind_configuration_id
+  const stuck = await adminJson('/api/admin/devices', { label: 'Stuck', headwind_device_id: '77', policy_id: 'unmapped_pol', timezone: 'UTC' });
+  const countFor = () => env.DB._db.prepare(
+    "SELECT COUNT(*) n FROM audit_log WHERE target = ? AND action = 'policy_apply_failed'").get(stuck.id).n;
+  await runScheduler(env, new Date('2026-08-27T10:00:00Z'));
+  const after1 = countFor();
+  await runScheduler(env, new Date('2026-08-27T10:05:00Z'));
+  await runScheduler(env, new Date('2026-08-27T10:10:00Z'));
+  const after3 = countFor();
+  check('the first failure is recorded', after1 === 1, String(after1));
+  check('three identical failures still leave one row', after3 === 1, String(after3));
+}
+
+console.log('\n7d. a partial save must not rewrite what it leaves out');
+{
+  // Mapping a configuration from a terminal sends only id/name/headwind_configuration_id. The
+  // policy's model has to survive that, or the shiur policy quietly stops locking the web.
+  await adminJson('/api/admin/policies', { id: 'yeshiva_shiur', name: 'Yeshiva — Shiur (locked to essentials)', headwind_configuration_id: '41' });
+  const pol = env.DB._db.prepare("SELECT app_default, web_mode, headwind_configuration_id FROM policies WHERE id = 'yeshiva_shiur'").get();
+  check('mapping a configuration keeps web_mode none', pol.web_mode === 'none', JSON.stringify(pol));
+  check('and keeps the allowlist model', pol.app_default === 'blocked', JSON.stringify(pol));
+  check('and stores the new configuration id', String(pol.headwind_configuration_id) === '41', JSON.stringify(pol));
+  const badCfg = await admin('/api/admin/policies', { id: 'yeshiva_shiur', name: 'x', headwind_configuration_id: 'cfg 4' });
+  check('a non-numeric configuration id is refused', badCfg.status === 400, String(badCfg.status));
+
+  // Re-saving a phone with a body written before tags existed must not move it off its ladder.
+  await adminJson('/api/admin/devices', { id: bochur.id, label: 'Bochur', policy_id: 'yeshiva_rung_2', timezone: 'Asia/Jerusalem' });
+  const dev = env.DB._db.prepare('SELECT tag FROM devices WHERE id = ?').get(bochur.id);
+  check('a save that omits the tag keeps the phone on its ladder', dev.tag === 'yeshiva', JSON.stringify(dev));
+
+  // The per-phone shiur switch must refuse a value it cannot read, never default to exempt.
+  const garbage = await admin('/api/admin/devices/shiur', { id: bochur.id, on: 'maybe' });
+  check('an unreadable shiur value is refused, not treated as off', garbage.status === 400, String(garbage.status));
+  check('and the lock is left as it was',
+    Number(env.DB._db.prepare('SELECT shiur_lock FROM devices WHERE id = ?').get(bochur.id).shiur_lock) === 1);
+  const asString = await adminJson('/api/admin/devices/shiur', { id: bochur.id, on: 'true' });
+  check('the string "true" now means on', asString.shiur_lock === 1, JSON.stringify(asString));
+
+  // The migration step has to move the app baseline, not just the rung.
+  await adminJson('/api/admin/policies', { id: 'yeshiva_rung_1', name: 'Yeshiva — Rung 1 (Apps only)', app_default: 'blocked' });
+  await adminJson('/api/admin/devices/level', { id: bochur.id, tag: 'yeshiva', level: 1 });
+  const moved = env.DB._db.prepare('SELECT policy_id, level FROM devices WHERE id = ?').get(bochur.id);
+  check('changing the rung moves the app baseline with it', moved.policy_id === 'yeshiva_rung_1', JSON.stringify(moved));
+}
+
+console.log('\n7e. the YouTube option on yeshiva rung 3');
+{
+  await adminJson('/api/admin/policies', { id: 'yeshiva_rung_3', name: 'Yeshiva — Rung 3 (Blocklist, no social)', app_default: 'allowed' });
+  await adminJson('/api/admin/policies', { id: 'yeshiva_rung_3_yt', name: 'Yeshiva — Rung 3 + YouTube', app_default: 'allowed' });
+  hwDevices.push({ id: 12, number: 'yeshiva-yt', configurationId: '30', groups: [], mdmMode: true });
+  const boy = await adminJson('/api/admin/devices', { label: 'Yossi', headwind_device_id: '12', policy_id: 'yeshiva_rung_3', timezone: 'Asia/Jerusalem', tag: 'yeshiva', level: 3 });
+  const row = () => env.DB._db.prepare('SELECT allow_youtube, policy_id, level FROM devices WHERE id = ?').get(boy.id);
+
+  check('a new phone defaults to no YouTube', Number(row().allow_youtube) === 0, JSON.stringify(row()));
+
+  const on = await adminJson('/api/admin/devices/youtube', { id: boy.id, on: true });
+  check('allowing it moves the phone to the variant policy', row().policy_id === 'yeshiva_rung_3_yt', JSON.stringify(row()) + JSON.stringify(on));
+  check('and the route says the option applies here', on.applies === true, JSON.stringify(on));
+
+  // The flag is remembered off rung 3, but must not change what that rung means.
+  await adminJson('/api/admin/devices/level', { id: boy.id, tag: 'yeshiva', level: 2 });
+  check('moving off rung 3 keeps the answer but drops the variant',
+    Number(row().allow_youtube) === 1 && row().policy_id === 'yeshiva_rung_2', JSON.stringify(row()));
+  await adminJson('/api/admin/devices/level', { id: boy.id, tag: 'yeshiva', level: 3 });
+  check('coming back to rung 3 restores it', row().policy_id === 'yeshiva_rung_3_yt', JSON.stringify(row()));
+
+  const off = await adminJson('/api/admin/devices/youtube', { id: boy.id, on: false });
+  check('blocking it returns to the ordinary rung-3 policy', row().policy_id === 'yeshiva_rung_3', JSON.stringify(row()) + JSON.stringify(off));
+
+  const bad = await admin('/api/admin/devices/youtube', { id: boy.id, on: 'maybe' });
+  check('an unreadable value is refused, not taken as allow', bad.status === 400, String(bad.status));
+  hwDevices = hwDevices.filter((d) => d.id !== 12);
+}
+
 console.log('\n8. audit log records both operator and scheduler actions');
 const audit = await adminJson('/api/admin/audit');
 check('operator actions logged', audit.entries.some((e) => e.actor === 'operator' && e.action === 'policy_saved'));

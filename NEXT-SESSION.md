@@ -1,9 +1,463 @@
 # Next session — start here
 
-You are picking up a phone content-filter project mid-deployment. The **first real
-phone was set up during the previous session** and is in a user's hands. Read this
-whole file before touching anything, then read the docs it points to. Do not change
-production or the live phone without understanding the current state.
+## START HERE — audit + fixes (branch `claude/dreamy-newton-8rlo23`, 2026-09-15)
+
+This session audited the whole temp tag against the live system and fixed what it found. Nothing
+was deployed and nothing on the server or the phones was touched — **every fix below is code on
+this branch, inert until someone runs `npx wrangler deploy`.** The block under this one is still
+the design and runbook; where the two disagree, this one wins.
+
+### Two live faults found and fixed on the evening of 2026-09-15
+
+1. **The tunnel had no MTU**, so it ran at WireGuard's 1420 default with every byte of the phone's
+   traffic inside it. Big packets (a TLS handshake carrying a certificate chain) were silently
+   dropped while small ones passed: Chrome `ERR_TIMED_OUT` on some sites and not others, the same
+   site flipping, and the MDM agent showing "isn't responding" on every reboot because its sync is
+   one of the big exchanges. Fixed at 1280 on both ends plus MSS clamping — see `WIREGUARD.md`.
+   Applied live on the server and on the Vortex; **Isaac's phone still needs `MTU 1280` set in its
+   WireGuard app.**
+2. **Every Google search was refused because the phone's Chrome was version 105.** Google will not
+   serve `udm=14` to a browser older than the feature and redirects the search with `udm` stripped,
+   which the proxy then correctly refuses. Not a bug in this system — see the new section in
+   `YESHIVA.md`. **Update Chrome as part of phone setup.**
+
+### The Remove question is ANSWERED (2026-09-16)
+
+**Headwind's Remove uninstalls a Play app, permanently.** Proven on the Vortex: TikTok was marked
+Remove on rung 2, the phone synced, TikTok was gone from the device. Headwind has no APK for a Play
+app, so it cannot reinstall it.
+
+Right for a rung. Fatal for anything temporary: a Shiur configuration listing WhatsApp as Remove
+would uninstall it at 09:15 and never restore it. **The app half of the shiur lock cannot be built
+on configuration swaps**, and neither can a screen-time feature. The web half works today and is
+unaffected. Options and their trade-offs are in `YESHIVA.md`; kiosk is the only mechanism Headwind
+actually provides for this, which reopens a decision that was closed on comfort grounds.
+
+Also settled the same day: the first successful Push apps ever (config 4, 1 remove / 1 install /
+69 icon-only), after three server-side rejections that turned out to be the client writing app
+links through the wrong endpoint entirely.
+
+### NEXT SESSION — the operator's agenda, in order
+
+**1. Harden the lockdowns against being undone.** Everything we set is currently reversible by
+whoever holds the phone. Worth attacking in this order:
+
+- **Always-on VPN / lockdown (step 18b)** is the big one, and today a boy can just switch it back
+  off in Settings. The obvious guard, `no_config_vpn`, kills our own tunnel — BUT the test that
+  established that was run *without* always-on already configured. **Re-test in the other order**:
+  set always-on + lockdown first, sync, then apply `no_config_vpn`, and see whether the running
+  tunnel survives while the setting becomes unchangeable. If it does, that is the whole answer.
+  If it does not, the fallback is locking Settings access itself.
+- **The CA certificate** — `no_config_credentials` stops it being removed, and is already in the
+  restriction list. Note it also blocks *installing* the CA, so it must go on AFTER step 9 (see the
+  "Enrolling configuration" note in NEW-PHONE.md).
+- **adb** — `no_debugging_features`, already documented as the LAST restriction to add. Confirm it
+  actually prevents re-enabling USB debugging rather than only hiding the toggle.
+- Also worth checking: whether Settings itself can be restricted, and whether the Headwind agent
+  survives a Settings → Apps → force stop.
+
+**2. WhatsApp Channels and Status — read this before spending time on it.** `README.md` already
+records that no network filter can separate these from ordinary WhatsApp: in-app they are the same
+endpoints behind certificate pinning, and WhatsApp is spliced (never decrypted) precisely so the
+app keeps working. So the proxy cannot see, let alone block, a Status view. The only mechanisms
+that could are an on-device **Accessibility service** (not built, and a large piece of work) or
+dropping WhatsApp entirely. Confirm that conclusion cheaply before designing anything.
+
+**3. Turning off images in Spotify.** Same shape of problem: Spotify is a pinned, spliced app, so
+the proxy cannot strip anything inside it. The only levers are Spotify's own settings — check
+whether its data-saver mode suppresses canvas/artwork enough to be worth it — or removing the app.
+Do not expect a filter-side answer.
+
+**4. Isaac's phone: migrate, then test the browser.** Before anything else on that handset:
+set **MTU 1280** in its WireGuard app, check whether the iptables bypass
+(`-i wg0 -s 10.66.0.3 -j RETURN`) is still in place leaving it unfiltered, confirm its Chrome is
+recent enough for `udm=14`, and add always-on + lockdown. Then migrate and run the NEW-PHONE.md §F
+battery.
+
+A theme worth naming: items 2 and 3 are both requests to control behaviour *inside* a pinned app,
+which is the one thing this architecture cannot do. Saying so early is cheaper than proving it
+twice.
+
+### Where the app tier stands (2026-09-16, all deployed and live)
+
+The app half works end to end for the first time. Every yeshiva rung is mapped to a Headwind
+configuration and carries a real blocklist:
+
+| Policy | Config | Notes |
+|---|---|---|
+| `yeshiva_rung_1` | 6 | + Chrome blocked (no browser) |
+| `yeshiva_rung_2` | 4 | the Vortex is here |
+| `yeshiva_rung_3` | 5 | |
+| `yeshiva_rung_3_yt` | 8 | the per-phone YouTube option |
+| `yeshiva_rung_4` | 7 | social apps permitted |
+| `yeshiva_shiur` | none | deliberately unmapped — Remove would uninstall Play apps |
+
+Rungs 1 and 2 previously blocked nothing (0 and 1 rules) while rung 4 blocked 75 — the two
+strictest rungs enforced least. They were written as allowlists to be enforced by
+`no_install_apps`, which the operator has deliberately NOT applied, and Push apps never removes an
+app merely for being absent from an allow list. They now carry rung 3's ~99-package blocklist.
+
+Only the Vortex is enrolled, and it is on rung 2, so pushing the other rungs touches no phone.
+
+### Still open
+
+- **Chrome on the Vortex is version 105** and must be updated from the Play Store; until then every
+  Google search is refused (see `YESHIVA.md`). This is why the browser side is still unverified.
+- **VPN bypass: SOLVED, and not with `no_config_vpn`.** That restriction disables our own tunnel
+  too (verified on the S22 and the Vortex) — our tunnel is a user-configured VPN like any other, and
+  a phone whose tunnel is off has no filter at all. The answer is **always-on VPN with lockdown**
+  pointed at WireGuard, set in the phone's Settings (adb cannot do it — the keys the system reads
+  are not writable by the shell user; `always_on_vpn_lockdown` stays null). It closes three
+  bypasses at once: no other VPN app can become the active VPN, the tunnel cannot be switched off
+  to browse openly, and a tunnel that drops takes the internet with it instead of failing open.
+  Confirmed on the Vortex: tunnel off = no internet. **This is now step 18b of `NEW-PHONE.md` and
+  belongs on every phone, Isaac's included.**
+- **Isaac's phone still needs `MTU 1280`** in its WireGuard app, and may still carry the iptables
+  bypass that leaves it unfiltered.
+- The shiur app half needs a mechanism that is not Remove (see `YESHIVA.md`); the web half works.
+
+### Decisions recorded (from the operator, this session)
+
+- The Vortex stays a **test phone**, so the fleet shiur toggle stays **Off**. Do not put it on
+  Timetable until the app side is proven.
+- **Shiur will not use kiosk mode.** It is an ordinary configuration swap. `YESHIVA.md` is updated.
+- **Isaac's `apps_rung_4` mapping is deferred** until the yeshiva side is finished.
+
+### The one thing to do before anything else
+
+**The live Worker is running code that is in no git branch.** Production's `findDevice` matches a
+Headwind device by id OR number; every branch matched by id only. D1 stores the *number*
+(`4908545443`, too large to be an int32 id), so the repo version cannot find the phone and the
+scheduler reports "Headwind device 4908545443 not found" every run. Somebody fixed this live and
+never committed it — look for an uncommitted change in the Windows clone.
+
+This branch now contains that fix with a test, so deploying **this** branch is safe. Deploying
+`main`, or the yeshiva branch, is **not** — it silently regresses the live Worker.
+
+### What was fixed here (all with tests; `npm test` and `npm run test:helper` green)
+
+Filtering holes, worst first:
+
+1. **Searches went unjudged for 60 s at a time.** The search-engine "homepage" answer was
+   host-scoped; the helper checks its host cache before the URL cache, so a Google results page's
+   own same-host subresources primed that entry and every search on the engine for the next minute
+   — keyword-blocked ones included — was answered OK with no Worker call. Engine hosts now answer
+   per URL.
+2. **"Locked now" did not lock the web.** `locked` was read from a map holding only the baseline
+   policy and the policies of *joined* schedules, so the forced shiur policy (no schedule points at
+   it, and none exist at all once the windows are deleted for bein hazmanim) read as unlocked. The
+   console said locked while every phone browsed freely.
+3. **Immodest keywords did not refuse on the tag** — only NEVER did, leaving the yeshiva browser
+   looser than standard rung 4. Now rating 5 and above refuses.
+4. **Video and news searches were never screened** (`bing /videos/search` and friends were not
+   recognised as searches at all).
+5. **An operator's block on a search-engine host was ignored** for its non-search URLs.
+6. **`/api/verdict` was unauthenticated** — anyone could make the Worker fetch sites and call
+   Gemini. It is behind the operator key now.
+
+Things that quietly rewrote state the caller never mentioned (each landed on the permissive side):
+
+7. **Mapping a configuration from a terminal wiped the policy's model.** The upsert treated an
+   omitted `app_default` as "allowed" and an omitted `web_mode` as NULL — so the documented way to
+   map `yeshiva_shiur` would have turned it into a blocklist with its web lock **off**. Omitted
+   fields are now kept. `headwind_configuration_id` is validated as digits (`cfg 4` became
+   `configurationId: null` on a live phone).
+8. **Re-saving a phone without a tag took it off the ladder** (every curl example predating tags
+   omits it), out of the shiur windows, while leaving its yeshiva policy behind.
+9. **The per-phone shiur switch failed open**: any value it could not read — a missing field, the
+   string `"true"` — meant OFF, exempting the phone from everything.
+10. **The rung change did not move the app baseline**, so the scheduler kept pushing the old
+    ladder's configuration. The console hid it behind a second save; an API caller did not get one.
+11. **The console's Baseline dropdown reset to the first policy** (`Apps — Rung 1`) on every
+    re-render, so editing a phone and touching another tab saved it onto a policy nobody chose.
+
+Headwind push (it has never once succeeded — every attempt was a 401, now fixed):
+
+12. Package names were **lowercased** before the catalogue entry was created; Android package names
+    are case-sensitive and `com.google.android.GoogleCamera` is on the rung-1 allowlist.
+13. The push **spread the whole catalogue app object** into the configuration save, echoing back a
+    `configurations` array carrying every other configuration's admin password hash.
+14. A **200 response carrying `status: "ERROR"`** was treated as success, so a rejected update was
+    logged as applied.
+15. A created app whose response omitted its id was **silently dropped**; it is looked up now.
+
+Noise: the scheduler wrote an identical `policy_apply_failed` row every five minutes (~9,950 of
+them for Isaac). It now logs a repeat only when the message changes or the device recovers.
+
+### Deploy checklist (from the Windows PC, where wrangler is logged in)
+
+```
+git fetch origin && git checkout claude/dreamy-newton-8rlo23 && git pull
+git status                  # if findDevice is uncommitted here, this branch already has it
+npm test && npm run test:helper
+npx wrangler deploy
+```
+No migration is needed — nothing here changes the schema.
+
+### Still to do — needs the panel, the server or a phone
+
+- **Rotate Isaac's proxy password.** `bec-339-wwx` was typed in chat and is still in D1. It is
+  cosmetic in the WireGuard model (identity is the tunnel IP, `proxy_user`; `proxy_password` is
+  never read by the verdict path) but it should not sit there. Generate and apply without the value
+  passing through a chat window:
+  ```
+  npx wrangler d1 execute phone-url-filter-db --remote --command \
+    "UPDATE devices SET proxy_password = '$(openssl rand -hex 4 | fold -w3 | head -3 | paste -sd-)' WHERE id = 'dev_b73af724'"
+  ```
+- **Push apps for `Yeshiva — Rung 2` (config 4) and reboot the Vortex.** TikTok is installed there:
+  this is the Remove test, and its answer decides what the Shiur configuration may list (see
+  YESHIVA.md). Nothing else should list a Play app as Remove until it is answered.
+- **Create and map the Shiur configuration** (not kiosk), then rungs 1, 3, 4.
+- **Verify on the phone**: `chrome://policy` shows the search URL ending `udm=14&safe=active`; a
+  grey-image check on Wikipedia; then two searches within a minute — "volcano" then "porn" — which
+  is the regression test for fix 1 above and would have failed before this branch.
+- **Server housekeeping**: `scripts/check-drift.sh`, remove Isaac's nat bypass, unscope the
+  ssl_bump block, `access_log none`, reinstall the helper from the repo.
+- **Merge**: `main` is far behind production. PR #2 is still open; this branch contains it.
+
+### Known and NOT fixed (deliberate — read before trusting the filter)
+
+- **Image blanking is defeated by a document navigation.** Blanking keys off `Sec-Fetch-Dest:
+  image` or a file extension, so opening a grey box in a new tab, a `fetch()`-loaded image, or any
+  image on an `http://` page (Chrome sends no fetch metadata there) renders. The real fix is on the
+  server, filtering by *response* type, which the Worker cannot see:
+  `acl image_reply rep_mime_type ^image/` + `http_reply_access deny image_reply browser_port`.
+- A **spliced host is completely unfiltered**, as ever.
+- DuckDuckGo and Yahoo **image search** are judged as text searches (their results still blank).
+- The stored fleet-toggle words are `schedule` / `off` / `on`, not the UI's Timetable / Off /
+  Locked now. A hand-written `'timetable'` or `'locked'` in D1 does **not** do what it looks like.
+- `POST /api/admin/settings` does not itself run the scheduler; only the console's button does, so
+  a curl toggle leaves the app side waiting for the next cron tick.
+- A device-specific exemption window saved at the form's **default priority 0** loses to the
+  tag-wide lock at 100 and silently does nothing; and one saved with the phone field blank applies
+  to the whole tag.
+
+### About the audit
+
+Eight subsystem readers were planned; a usage limit stopped it after three (browser path, scheduler
+and policy, console), and the adversarial verification pass never ran. Every finding acted on above
+was re-checked by hand against the code before it was touched. **The Headwind client was separately
+reconciled against the live Swagger spec** (121 endpoints) — that is where fixes 12–15 come from.
+Not yet audited at all: the migrations, the block page, the squid config and helper, and the docs.
+
+---
+
+## Finishing the yeshiva temp tag (branch `claude/yeshiva-temp-tag-shiur-0kgp2f`, 2026-09-10)
+
+Read this block first. The two older blocks below it are still true where this one is silent
+(the Vortex tunnel notes, Isaac's bypass, the wiring history); where they disagree, this wins.
+
+### What the tag is (one paragraph)
+
+`devices.tag` ('standard' | 'yeshiva') picks the ladder. The yeshiva ladder is four rungs that
+differ in their APP model (1 allowlist without Chrome, 2 allowlist with Chrome, 3 blocklist incl.
+social apps, 4 blocklist) and share ONE browser: explicit + social blocklists only, no AI, every
+image replaced by a grey placeholder, search keyword-screened, Google only in its text-only
+"Web" mode. A `yeshiva_shiur` policy (essentials allowlist, web off) is swapped in by four
+tag-wide windows Sun–Thu (07:30–08:35, 09:15–13:45, 15:35–19:15, 20:15–22:00, Asia/Jerusalem),
+with a fleet toggle (Timetable / Off / Locked now) and a per-phone on/off. Full design and runbook:
+`YESHIVA.md`. Console: https://phone-url-filter.daniel08-madar.workers.dev/admin → **Yeshiva** tab.
+
+### What is DEPLOYED and PROVEN on the Vortex (10.66.0.4, tag yeshiva, rung 2)
+
+- D1 migrations 0016, 0017, 0018 applied through the ledger. Worker deployed up to commit
+  "Yeshiva tag: Google results only in text-only Web mode" — **verify** with `git log -1` on the
+  Windows clone vs `npx wrangler deployments list`; if the deploy of that commit was not done,
+  do it (`git pull && npx wrangler deploy`). It carries the udm=14 rule (below).
+- Live `/etc/squid/squid.conf` patched IN PLACE, keeping its hand edits: helper format with
+  `%>ha{Sec-Fetch-Dest}`, `deny_info …&why=%o`, `http_port 3128 name=browser`,
+  `acl browser_port` right before `acl google_system_hosts`, `http_access allow
+  google_system_hosts web_ports !browser_port`, `ssl_bump bump browser_port` as the second
+  ssl_bump line (right after the peek). Backups beside it: `squid.conf.pre-yeshiva.*`,
+  `squid.conf.bak-*`. `scripts/apply-yeshiva-squid.sh` reproduces all of it idempotently.
+- Helper installed from this branch (incl. the "keep the reason on cache hits" fix).
+- Headwind: configuration **"Background agent Yeshiva Temp"** (id **4**), a copy of Background
+  mode, with Chrome application settings `ProxyMode=fixed_servers`,
+  `ProxyServer=10.66.0.1:3128`, `DefaultSearchProviderEnabled=true`,
+  `DefaultSearchProviderName=Google`, `DefaultSearchProviderKeyword=google.com`,
+  `DefaultSearchProviderSearchURL=https://www.google.com/search?q={searchTerms}&hl=en&gl=il`
+  — the URL must gain `&udm=14&safe=active` (step 1 below). The Vortex is on this configuration.
+- Seen working on the phone: tunnel (on a borrowed hotspot; it dropped once for ~5 min and came
+  back by itself), Chrome on the browser port (`chrome://policy` shows the settings), searches,
+  social + explicit lists, pictures grey on Wikipedia, the Google logo grey after the
+  google_system_hosts fix, the shiur lock firing on the timetable with the locked page, the fleet
+  toggle Off releasing it, WhatsApp untested (never set up on this phone).
+- Known and accepted: Google embeds result thumbnails in the results page itself (no image
+  requests — confirmed in access.log), so image stripping cannot remove them; the udm=14 Web
+  mode is the answer. Squid exits from Germany, so Google without `hl=en` answers in German with
+  an EU consent page; incognito shows the consent page every time.
+
+### What is NOT done — the finishing list, in order (updated 2026-09-10 evening)
+
+Done today: DefaultSearchProviderEnabled row fixed in config 4 (it was mis-entered as attribute
+`com.android.chrome`, so Chrome ignored the whole search-provider policy → every address-bar
+search went out WITHOUT udm=14 → refused as "text-only"; the offline reproduction of the Worker's
+decisions is in this session's notes and matches); social blocklist expanded 30 → 89 hosts (the
+apps' API/CDN names — TikTok's feed stopped loading once synced); yeshiva app lists refreshed to
+331 rules (migration **0019** — run `npm run db:migrate`); **Push apps** button on the Policies
+tab writes a policy's rules into its Headwind configuration (see YESHIVA.md "Getting the app
+lists onto the phones"); fleet toggle was set to **Off** for testing — put it back to Timetable.
+
+0. **Direct access — do it from the operator's Windows PC, not the cloud.** Anthropic-hosted
+   cloud sessions egress only through an HTTP/HTTPS proxy (docs: "Security proxy"), so SSH to the
+   server can never work from one, whatever the environment's network level. The working setup:
+   `npm install -g @anthropic-ai/claude-code` on the PC, then from `C:\Users\danie\Phonetagging`
+   run `claude --teleport <session-id>` to pull the cloud session into the PC's terminal, where
+   Claude has ssh (to 2.28.63.95, key in `%USERPROFILE%\.ssh\id_ed25519`, public key appended to
+   the server's `/root/.ssh/authorized_keys`), adb (the phone), wrangler (already logged in) and
+   the repo. Everything below was written for copy-paste; from the PC, just do it.
+0b. **Deploy**: `git pull && npm run db:migrate && npx wrangler deploy` (0019, the push button
+   and the Headwind login fix are not live until this runs).
+0c. **Headwind login**: the first Push apps failed 401 because the Worker sent a plain password;
+   Headwind wants md5(password).toUpperCase() (its login page does exactly that). Fixed in the
+   Worker (`src/md5.js`, `headwindPasswordHash`). If it still 401s: `sudo -u postgres psql hmdm
+   -c "select id, login, password from users;"` shows the real login and the stored hash; set
+   HEADWIND_USER to that login and HEADWIND_PASSWORD to the hash itself (accepted as-is).
+1. **Verify the search on the Vortex** after a reboot: `chrome://policy` must show
+   `DefaultSearchProviderEnabled` true and the URL ending `udm=14&safe=active`; an address-bar
+   search then returns text results. An `ERR_TIMED_OUT` was reported once at the end of the
+   session, untraced: put the helper trace back (the python patch in the older block below),
+   reproduce, and read access.log + `shmira-decision` lines.
+2. **Push apps** for `Yeshiva — Rung 2` (config 4), reboot the Vortex: TikTok (installed there)
+   should be uninstalled — this IS the Remove test. Then add `no_install_apps` to config 4's
+   restrictions and try installing something from Play: it should refuse. Record both results.
+3. **Shiur without kiosk** (operator's decision): copy config 4 → `Yeshiva Shiur`, map it in the
+   Shiur row, Push apps. Read YESHIVA.md's warning first: if Remove UNINSTALLS Play apps (step 2
+   tells you), the shiur policy must not Remove Play apps or they never come back.
+4. Rungs 1, 3, 4: create their configurations (copies of config 4 with the restrictions the rung
+   needs), map them in the Yeshiva tab, Push apps.
+5. **Fleet toggle → Timetable**; watch a window boundary on the Vortex.
+6. **Server housekeeping** (only once 1–5 hold): remove Isaac's nat bypass, unscope the ssl_bump
+   block to the repo's, `access_log none`, reinstall the helper from the repo (drops the trace),
+   `scripts/check-drift.sh` clean. Then decide when Isaac moves to the tag.
+7. **Migration later**: a boy leaves the tag via Yeshiva tab → "standard 4".
+
+### Useful commands (server)
+
+    wg show wg0 latest-handshakes                       # 10.66.0.4's peer must move when the tunnel toggles
+    tail -f /var/log/squid/access.log | grep 10.66.0.4  # HIER_DIRECT = browser port, ORIGINAL_DST = intercept (apps)
+    grep -E ' (GET|POST) ' /var/log/squid/access.log | tail -30
+    grep -n 'browser_port\|Sec-Fetch-Dest\|why=%o' /etc/squid/squid.conf
+    scripts/apply-yeshiva-squid.sh --dry-run            # what the repo would still change
+
+Ask the Worker what Squid asks (from the server, `source /etc/squid/filter.env` first):
+
+    curl -sS -X POST "$SHMIRA_WORKER_URL/api/proxy/check" -H "Authorization: Bearer $SHMIRA_PROXY_KEY" \
+      -H 'Content-Type: application/json' -H 'User-Agent: shmira-filter-proxy/1.0' \
+      -d '{"user":"10.66.0.4","url":"https://en.wikipedia.org/","dest":"document","features":["strip_images"]}'
+
+Tests: `npm test` (adds `test/yeshiva.test.mjs`), `npm run test:helper` (Python, the helper's
+line protocol). Both green at this commit. PR #2 (`claude/gifted-ramanujan-nld0wy` → main) is
+still the one to merge first; this branch contains it and merges cleanly after.
+
+---
+
+## START HERE — handoff from the 2026-09-01 → 09-06 session (branch `claude/gifted-ramanujan-nld0wy`)
+
+Read this block before anything else. The rest of this file (from "What this project is" on)
+is older layers of history; where they disagree with this block, this block wins.
+
+### The one bug that explains almost everything
+
+`external_acl_type shmira_filter` used `%LOGIN`. In Squid that token means *the authenticated
+login* and makes Squid **require proxy authentication before it will call the helper**.
+Intercepted (WireGuard) requests can never authenticate, so Squid denied every tunnel lookup
+itself, in 0 ms, without running the helper. cache.log, with `debug_options ALL,1 82,4`:
+
+```
+aclMatchExternal: shmira_filter check user authenticated.
+NOTICE: Authentication not applicable on intercepted requests.
+aclMatchExternal: shmira_filter user not authenticated (DENIED)
+```
+
+Consequences, all observed: every decrypted request (searches) hit the block page; every
+spliced site loaded unfiltered (Instagram, TikTok); the helper answered OK whenever run by hand;
+no helper decision was ever logged. This was the Tuesday complaint ("searches blocked, sites
+load"), and it is why `ssl_bump splice filter_allows` looked like it "blocked everything".
+
+**Fix: `%un %SRC %URI`** (`%un` = a user name from any source, forces nothing, is `-` for a
+tunnel phone; the helper already falls back to `%SRC`). Committed in `scripts/squid.conf` and
+applied on the live server by sed (09-04 ~09:45 UTC). **NOT YET TESTED on a phone** — the Vortex
+test stalled on the tunnel (below). See PROXY.md "The bug that blocked every search".
+
+### Live server state RIGHT NOW (mdm.getshmira.com) — verify, don't assume
+
+- **Isaac's phone (10.66.0.3) BYPASSES squid entirely**: `iptables -t nat -I PREROUTING -i wg0
+  -s 10.66.0.3 -j RETURN`. Unfiltered. Remove with the same command and `-D` when the Vortex
+  passes. The rule does not survive a reboot.
+- `/etc/squid/squid.conf` differs from the repo in one intended way: the ssl_bump block is
+  SCOPED — `acl test_phones src 10.66.0.4` (the Vortex); `splice test_phones filter_allows` /
+  `bump test_phones` for it; `splice wg_phones` (old splice-by-default) for everyone else. When
+  the Vortex passes, replace with the repo's unscoped block (`splice filter_allows` for all).
+  Also has `%un %SRC %URI`, `concurrency=64 … queue-size=1024`, `acl worker_sni` + splice.
+- **`access_log` is ON** (`/var/log/squid/access.log`) for debugging. Turn it OFF when done:
+  `sed -i 's|^access_log /var/log/squid/access.log|access_log none|' /etc/squid/squid.conf && squid -k reconfigure`
+- `debug_options` line was added and removed again (verify: `grep debug_options /etc/squid/squid.conf` → nothing).
+- The live helper is the repo helper PLUS a one-line debug patch that writes
+  `shmira-decision user=… url=… -> OK/ERR` to cache.log on every decision. Useful; remove by
+  reinstalling from the repo when done. `scripts/check-drift.sh` will flag it.
+- Two clones: `/opt/Phonetagging` (used by the previous session; `new-wg-phone.sh` lives there)
+  and `/root/Phonetagging`. Both were pointed at this branch on 09-03. `git pull` before use.
+  NEVER run `install-squid.sh` from a stale clone — it overwrites the live config.
+
+### The Vortex test phone (Vortex V23, Android 12 Go, Headwind number 4908545443)
+
+Done: factory reset; Device Owner set by adb (`dpm set-device-owner`) after installing
+`/var/cache/tomcat9/files/hmdm-6.38-os.apk`; enrolled in the panel (device id typed into the
+agent), configuration Background (Agent) Mode; CA cert installed (needed
+`no_config_credentials` temporarily REMOVED from the config's restrictions — put it back, and see
+"Enrolling config" below); WireGuard peer `vortex-b` = **10.66.0.4** (QR was scanned into the
+app); D1 row `dev_3458aa4e` Vortex, rung 4, proxy_user `10.66.0.4`.
+
+**Where it stalled:** the tunnel handshaked ONCE (09-04 09:39:14 UTC) and never again. The app
+shows the tunnel on; `wg show wg0 latest-handshakes` shows the vortex-b key stuck at that time;
+`tcpdump -ni eth0 udp port 443` (excluding Isaac's IP) saw NOTHING arriving. The phone was on a
+hotspot the whole time (the building wifi's DNS is broken for this phone — old known issue). The
+operator had edited the tunnel's Endpoint in the app to `2.28.63.95:443` around then.
+Unresolved hypotheses, in order: (1) the hotspot is Isaac's phone, so the Vortex's packets travel
+inside Isaac's tunnel and arrive from 10.66.0.3 — the tcpdump filter hid that; run
+`timeout 30 tcpdump -ni any udp port 443 | head` while toggling; (2) the Endpoint edit was
+mistyped / not saved; (3) phone-side key no longer matches the peer (QR from an earlier run) —
+tcpdump would show packets arriving but no handshake; fix = delete tunnel in app, rescan.
+First thing: ask which phone is the hotspot; get a screenshot of the tunnel screen.
+
+**Then the actual test** (never yet run with `%un` in place): Chrome → `https://en.wikipedia.org`
+(loads), search "volcano" (results), `https://www.instagram.com` (block page with a
+"Rated … / Not allowed on any phone" line), Play Store / a pinned app works with no splice entry.
+Then `grep shmira-decision /var/log/squid/cache.log | tail -30` shows the real decisions.
+Then the full battery in `NEW-PHONE.md` §F, the Headwind lockdown (§E — this phone is where to
+test `no_config_vpn`), and only then un-bypass Isaac and unscope the rule.
+
+### Other things learned / decided this session
+
+- Isaac's rung 1 (09-01) was the deliberate overnight hold (below), never restored. Restored to 4.
+- The console (`/admin`) now edits/deletes phones and no longer offers "Never" as a phone rung;
+  the API refuses an invalid device level instead of clamping to 1.
+- Block page is static: "This site is blocked", host, "Rated N of 5 — note" / "Not allowed on any
+  phone — note". No request button (sites are judged automatically on first visit).
+- Worker: device + verdict lookups concurrent, one query for both hashes, `cache_scope` hint;
+  helper caches per host + dedups a page-load burst (pool 128). Inline classification: 3 s
+  fetch, 64 KB, judges by domain name if the homepage won't load. Deployed.
+- Android apps do not trust a user CA → "bump all + splice exceptions" breaks every app forever.
+  The intended model is `ssl_bump splice filter_allows` (ask the filter per hostname at the
+  handshake: approved → splice, denied → bump so Chrome gets the block page; search engines
+  and the explicit list always bumped). PROXY.md "Decrypt or pass through". UNPROVEN on a phone.
+- The "Host header forgery" alerts are noise (phone DNS = 10.66.0.1 = the server's resolver).
+- The "Location can be accessed" notice on managed phones = Headwind agent's location permission.
+  Decide once in the configuration's location setting.
+- A second Claude session was working on branch `claude/phone-filter-deployment-review-b9witi`
+  (WireGuard work, NEW-PHONE.md). MERGED into this branch on 09-03. After PR #2 merges, that
+  session must pull `main`; any further commits on its branch need merging by hand.
+- **PR #2** (this branch → main) is open: https://github.com/Daniel3752/Phonetagging/pull/2.
+  Merge when the Vortex passes. Then `cd /opt/Phonetagging && git checkout main && git pull`.
+- Ideas not yet done: an "Enrolling" Headwind configuration without restrictions for phones
+  mid-setup (the cert can't be installed under `no_config_credentials`); `new-wg-phone.sh`
+  emitting the server IP as Endpoint (a phone whose wifi DNS is broken can't resolve the name
+  before the tunnel exists); `scripts/check-drift.sh` installed via cron (not yet installed).
+- Rules to stop drift: `main` is the truth; one session drives the server at a time; run
+  `check-drift.sh` before and after touching the server and commit what it flags.
+
+---
 
 ## What this project is
 

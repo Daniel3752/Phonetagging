@@ -4,17 +4,63 @@
 // which is what makes the awkward parts — midnight-crossing windows, per-device time zones,
 // overlapping schedules — testable without standing up any infrastructure. See test/policy.test.mjs.
 
-import { normalizeDeviceLevel } from './levels.js';
+import { normalizeDeviceLevel, normalizeTag, TAGS } from './levels.js';
 
-// The app policy that pairs with a web rung. There are five app policies, one per rung, with the
-// deterministic ids the migration seeds (apps_rung_1 .. apps_rung_5), so a rung resolves to its
-// policy with no lookup. The rung is the single control: it picks the web tier AND the app policy.
+// The app policy that pairs with a rung. Each ladder has one app policy per rung with a
+// deterministic id the migrations seed (apps_rung_1 .. apps_rung_5 on the standard ladder,
+// yeshiva_rung_1 .. yeshiva_rung_4 on the yeshiva tag), so a rung resolves to its policy with no
+// lookup. The rung is the single control: it picks the web tier AND the app policy.
 //
 // This is only the id convention. HOW that policy is fed to the scheduler/Headwind (baseline vs a
 // time-window override, and what apps each policy actually lists) is the app-control work that is
 // intentionally deferred — the policies ship EMPTY and are populated during that discussion.
-export function appPolicyIdForLevel(level) {
-  return `apps_rung_${normalizeDeviceLevel(level)}`;
+// The one rung with an option attached. App enforcement is per Headwind configuration and a
+// configuration belongs to a policy, so "this boy may have YouTube" cannot live on the phone row
+// alone — it picks between two rung-3 policies that differ only in that one app.
+export const YOUTUBE_TAG = 'yeshiva';
+export const YOUTUBE_RUNG = 3;
+export const YOUTUBE_POLICY_SUFFIX = '_yt';
+
+export function appPolicyIdForLevel(level, tag = 'standard', { allowYoutube = false } = {}) {
+  const t = normalizeTag(tag);
+  const rung = normalizeDeviceLevel(level, t);
+  const base = `${TAGS[t].policyPrefix}_${rung}`;
+  // Off every other rung the flag is inert — remembered on the row, applied again if the phone
+  // comes back to rung 3.
+  if (allowYoutube && t === YOUTUBE_TAG && rung === YOUTUBE_RUNG) return base + YOUTUBE_POLICY_SUFFIX;
+  return base;
+}
+
+// A schedule's base_policy_id normally names the baseline policy of the phones it applies to. It may
+// instead name a whole TAG — `tag:yeshiva` — meaning every phone on that ladder whatever its rung.
+// That is what lets one set of shiur windows cover all four yeshiva rungs as four rows rather than
+// sixteen, and be edited in one place.
+export const TAG_BASE_PREFIX = 'tag:';
+
+export function tagBaseId(tag) {
+  return `${TAG_BASE_PREFIX}${normalizeTag(tag)}`;
+}
+
+// Does this schedule's base cover this device — its baseline policy, or its whole tag?
+export function scheduleCoversDevice(schedule, device) {
+  if (schedule.base_policy_id === device.policy_id) return true;
+  if (typeof schedule.base_policy_id === 'string' && schedule.base_policy_id.startsWith(TAG_BASE_PREFIX)) {
+    return schedule.base_policy_id === tagBaseId(device.tag);
+  }
+  return false;
+}
+
+// The shiur lock toggle (/admin → Yeshiva). Stored in the settings table as shiur_lock_mode:
+//   'schedule' — the timetable decides (default)
+//   'off'      — the shiur windows are ignored; phones stay on their rung's policy
+//   'on'       — every yeshiva phone is locked now, whatever the clock says
+// Applied identically by the scheduler (apps) and the proxy (web), via resolveEffectivePolicy.
+export const SHIUR_POLICY_ID = 'yeshiva_shiur';
+export const SHIUR_MODES = ['schedule', 'off', 'on'];
+
+export function normalizeShiurMode(value) {
+  const v = String(value || '').trim().toLowerCase();
+  return SHIUR_MODES.includes(v) ? v : 'schedule';
 }
 
 // A schedule's day_mask is a 7-bit field, bit 0 = Sunday. Matched against the day the window
@@ -70,17 +116,31 @@ export function windowContains(schedule, day, minute) {
 
 // The policy a device should be running right now.
 //
-// Schedules whose device_id is null apply to every device sharing that baseline policy; a schedule
-// naming the device wins over a fleet-wide one at equal priority. Highest priority wins overall,
+// Schedules whose device_id is null apply to every device sharing that baseline policy (or, for a
+// `tag:` base, every device on that tag); a schedule naming the device wins over a fleet-wide one
+// at equal priority. Highest priority wins overall,
 // with the most recently created schedule breaking a remaining tie — so the newest instruction the
 // operator gave is the one that takes effect.
 //
 // With no matching window, the device's baseline policy stands.
-export function resolveEffectivePolicy(device, schedules, instant) {
+//
+// options.shiurMode is the operator's fleet toggle (see SHIUR_MODES): 'on' forces the shiur policy
+// on every yeshiva-tag phone, 'off' drops the shiur windows before resolving. A phone whose own
+// shiur_lock is 0 is exempt from both: for it the mode is always 'off'.
+export function resolveEffectivePolicy(device, schedules, instant, options = {}) {
+  const exempt = device.shiur_lock === 0 || device.shiur_lock === false || device.shiur_lock === '0';
+  const shiurMode = exempt ? 'off' : normalizeShiurMode(options.shiurMode);
+  if (shiurMode === 'on' && normalizeTag(device.tag) === 'yeshiva') {
+    return { policyId: SHIUR_POLICY_ID, scheduleId: null, forced: true };
+  }
+  if (shiurMode === 'off') {
+    schedules = schedules.filter((s) => s.active_policy_id !== SHIUR_POLICY_ID);
+  }
+
   const { day, minute } = localTime(instant, device.timezone || 'UTC');
 
   const matches = schedules.filter((s) =>
-    s.base_policy_id === device.policy_id &&
+    scheduleCoversDevice(s, device) &&
     (s.device_id === null || s.device_id === undefined || s.device_id === device.id) &&
     windowContains(s, day, minute)
   );
