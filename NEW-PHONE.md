@@ -71,6 +71,19 @@ enrollment QR (STOCK `com.hmdm.launcher` only — Google's DPC allowlist blocks 
     exemption): `adb shell pm disable-user --user 0 com.google.android.googlequicksearchbox`
 18. ☐ Rungs 4–5: set the **Play Store maturity-rating PIN** on-device (the only
     rating-based Play filter that exists).
+18b. ☐ **ALWAYS-ON VPN WITH LOCKDOWN — do not skip this one.** On the phone (not adb):
+    Settings → Network & internet → VPN → gear next to WireGuard → enable **Always-on VPN**
+    AND **Block connections without VPN**.
+    This is the single most valuable lockdown on the device, because it closes three bypasses
+    at once: another VPN app cannot become the active VPN (Android allows exactly one), the
+    boy cannot turn the filter off and browse openly, and a tunnel that drops by itself takes
+    the internet with it instead of failing open. Without it, one toggle in the WireGuard app
+    leaves the phone completely unfiltered, and no app blocklist can help — there are hundreds
+    of VPN apps and the blocklist names about twenty.
+    **adb cannot set this** (tried 2026-09-16: `settings put global always_on_vpn_app` reads
+    back but is inert, and `always_on_vpn_lockdown` stays null — the keys the system actually
+    consults are not writable by the shell user). It is a manual UI step per phone.
+    Verify by behaviour, not by the setting: item 28 below. Confirmed working on the Vortex.
 
 ## E. Headwind lockdown
 
@@ -78,9 +91,14 @@ enrollment QR (STOCK `com.hmdm.launcher` only — Google's DPC allowlist blocks 
     (allowlist rungs — standard 1–3, yeshiva 1–2 — add `no_install_apps` too: nothing can be
     installed from Play or sideloaded; the agent can still install what the configuration says):
     `no_install_unknown_sources,no_safe_boot,no_config_credentials,no_config_private_dns,no_add_user`
-    - `no_config_vpn`: add ONLY after verifying on this model that it doesn't kill an
-      always-on tunnel (on the S22 it forced the tunnel off — with the proxy unset that
-      means UNFILTERED internet; per-model test before trusting it).
+    - `no_config_vpn`: **do not use it.** Verified on both the S22 and the Vortex: it disables
+      the WireGuard tunnel as well, because our own tunnel is a user-configured VPN and sits on
+      the same side of that restriction as the ones we want to stop. A phone whose tunnel is off
+      is a phone with no filter at all, so this restriction makes things worse, not better.
+      Step 18b (always-on + lockdown) is what blocks other VPN apps, and it does it better:
+      Android runs exactly one VPN, so nothing else can take over whether or not it is on the
+      blocklist. Headwind has no always-on VPN setting of its own — checked against the live
+      API spec, there are no VPN fields or endpoints anywhere in it.
     - `no_debugging_features`: add LAST, only when all adb work on this phone is done.
     - `no_config_mobile_networks`: deliberately NOT used (locks the SIM manager; APN edits
       can't bypass the global tunnel anyway).

@@ -62,11 +62,15 @@ Only the Vortex is enrolled, and it is on rung 2, so pushing the other rungs tou
 
 - **Chrome on the Vortex is version 105** and must be updated from the Play Store; until then every
   Google search is refused (see `YESHIVA.md`). This is why the browser side is still unverified.
-- **`no_config_vpn` is NOT set**, and it is the one restriction that stops a boy routing around the
-  whole filter through Android's own VPN settings. It may also lock the operator out of toggling
-  the WireGuard tunnel, which is itself a user-configured VPN — Headwind exposes no always-on VPN
-  setting, so there is no safer alternative. **Test it on the Vortex first**: apply it, then toggle
-  WireGuard off and on. If the tunnel cannot be re-enabled, do not use it.
+- **VPN bypass: SOLVED, and not with `no_config_vpn`.** That restriction disables our own tunnel
+  too (verified on the S22 and the Vortex) — our tunnel is a user-configured VPN like any other, and
+  a phone whose tunnel is off has no filter at all. The answer is **always-on VPN with lockdown**
+  pointed at WireGuard, set in the phone's Settings (adb cannot do it — the keys the system reads
+  are not writable by the shell user; `always_on_vpn_lockdown` stays null). It closes three
+  bypasses at once: no other VPN app can become the active VPN, the tunnel cannot be switched off
+  to browse openly, and a tunnel that drops takes the internet with it instead of failing open.
+  Confirmed on the Vortex: tunnel off = no internet. **This is now step 18b of `NEW-PHONE.md` and
+  belongs on every phone, Isaac's included.**
 - **Isaac's phone still needs `MTU 1280`** in its WireGuard app, and may still carry the iptables
   bypass that leaves it unfiltered.
 - The shiur app half needs a mechanism that is not Remove (see `YESHIVA.md`); the web half works.

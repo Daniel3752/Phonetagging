@@ -83,4 +83,11 @@ echo
 echo "======================================================================="
 echo "REQUIRED: set proxy_user = '$PHONE_IP' on the '$NAME' device row in D1 (/admin -> Devices)."
 echo "Then on the phone: enable the tunnel, then Settings -> VPN -> gear -> Always-on + Block"
-echo "connections without VPN, and only after that apply the no_config_vpn restriction."
+echo "connections without VPN. This must be done in the phone UI; adb cannot set it."
+echo
+echo "Do NOT add the no_config_vpn restriction: it disables the WireGuard tunnel too (tested on"
+echo "the S22 and the Vortex), and a phone whose tunnel is off is a phone with no filter at all."
+echo "Always-on + lockdown is what blocks other VPN apps, and it does it better -- Android runs"
+echo "only one VPN, so no other app can take over whether or not it is on the blocklist."
+echo
+echo "Verify by behaviour: toggle the tunnel OFF and confirm the phone has NO internet."
