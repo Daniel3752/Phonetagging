@@ -1,6 +1,12 @@
 # Next session — start here
 
-## START HERE — audit + fixes (branch `claude/dreamy-newton-8rlo23`, 2026-09-15)
+## Branch state (2026-09-16): `main` is the truth
+
+Everything below was merged into `main` on 2026-09-16 (PR #3, which also carried PR #2). `main`
+now matches what is deployed and there is no other branch to look for. Start every session from
+`main`; `claude/dreamy-newton-8rlo23` and the older `claude/*` branches are history only.
+
+## START HERE — audit + fixes (merged to `main`, 2026-09-15)
 
 This session audited the whole temp tag against the live system and fixed what it found. Nothing
 was deployed and nothing on the server or the phones was touched — **every fix below is code on
@@ -131,8 +137,8 @@ Headwind device by id OR number; every branch matched by id only. D1 stores the 
 scheduler reports "Headwind device 4908545443 not found" every run. Somebody fixed this live and
 never committed it — look for an uncommitted change in the Windows clone.
 
-This branch now contains that fix with a test, so deploying **this** branch is safe. Deploying
-`main`, or the yeshiva branch, is **not** — it silently regresses the live Worker.
+`main` now contains that fix with a test, so deploying `main` is safe. (Before the 2026-09-16
+merge, `main` lacked it and deploying `main` would have regressed the live Worker.)
 
 ### What was fixed here (all with tests; `npm test` and `npm run test:helper` green)
 
@@ -187,8 +193,8 @@ them for Isaac). It now logs a repeat only when the message changes or the devic
 ### Deploy checklist (from the Windows PC, where wrangler is logged in)
 
 ```
-git fetch origin && git checkout claude/dreamy-newton-8rlo23 && git pull
-git status                  # if findDevice is uncommitted here, this branch already has it
+git fetch origin && git checkout main && git pull
+git status                  # if findDevice is uncommitted here, main already has it
 npm test && npm run test:helper
 npx wrangler deploy
 ```
