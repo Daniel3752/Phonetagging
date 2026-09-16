@@ -37,6 +37,40 @@ Also settled the same day: the first successful Push apps ever (config 4, 1 remo
 69 icon-only), after three server-side rejections that turned out to be the client writing app
 links through the wrong endpoint entirely.
 
+### Where the app tier stands (2026-09-16, all deployed and live)
+
+The app half works end to end for the first time. Every yeshiva rung is mapped to a Headwind
+configuration and carries a real blocklist:
+
+| Policy | Config | Notes |
+|---|---|---|
+| `yeshiva_rung_1` | 6 | + Chrome blocked (no browser) |
+| `yeshiva_rung_2` | 4 | the Vortex is here |
+| `yeshiva_rung_3` | 5 | |
+| `yeshiva_rung_3_yt` | 8 | the per-phone YouTube option |
+| `yeshiva_rung_4` | 7 | social apps permitted |
+| `yeshiva_shiur` | none | deliberately unmapped — Remove would uninstall Play apps |
+
+Rungs 1 and 2 previously blocked nothing (0 and 1 rules) while rung 4 blocked 75 — the two
+strictest rungs enforced least. They were written as allowlists to be enforced by
+`no_install_apps`, which the operator has deliberately NOT applied, and Push apps never removes an
+app merely for being absent from an allow list. They now carry rung 3's ~99-package blocklist.
+
+Only the Vortex is enrolled, and it is on rung 2, so pushing the other rungs touches no phone.
+
+### Still open
+
+- **Chrome on the Vortex is version 105** and must be updated from the Play Store; until then every
+  Google search is refused (see `YESHIVA.md`). This is why the browser side is still unverified.
+- **`no_config_vpn` is NOT set**, and it is the one restriction that stops a boy routing around the
+  whole filter through Android's own VPN settings. It may also lock the operator out of toggling
+  the WireGuard tunnel, which is itself a user-configured VPN — Headwind exposes no always-on VPN
+  setting, so there is no safer alternative. **Test it on the Vortex first**: apply it, then toggle
+  WireGuard off and on. If the tunnel cannot be re-enabled, do not use it.
+- **Isaac's phone still needs `MTU 1280`** in its WireGuard app, and may still carry the iptables
+  bypass that leaves it unfiltered.
+- The shiur app half needs a mechanism that is not Remove (see `YESHIVA.md`); the web half works.
+
 ### Decisions recorded (from the operator, this session)
 
 - The Vortex stays a **test phone**, so the fleet shiur toggle stays **Off**. Do not put it on

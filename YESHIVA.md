@@ -90,6 +90,41 @@ request header.
 > the dump contains the phone's **Google session cookies**, which are account credentials. Redact
 > the `Cookie:` line before pasting it anywhere, and truncate `cache.log` afterwards.
 
+### The Headwind configurations (live, 2026-09-16)
+
+Every rung is mapped. App enforcement is per configuration, which is why the YouTube option needs
+one of its own rather than being a flag the phone carries alone.
+
+| Policy | Headwind configuration | allowed | blocked |
+|---|---|---|---|
+| `yeshiva_rung_1` | 6 — Rung 1 | 69 | 100 (adds Chrome: no browser on this rung) |
+| `yeshiva_rung_2` | 4 — Rung 2 | 70 | 99 |
+| `yeshiva_rung_3` | 5 — Rung 3 | — | 99 |
+| `yeshiva_rung_3_yt` | 8 — Rung 3 WYT | — | 98 (YouTube not removed) |
+| `yeshiva_rung_4` | 7 — Rung 4 | — | 75 (social apps permitted) |
+| `yeshiva_shiur` | **deliberately unmapped** | 17 | — |
+
+The shiur policy stays unmapped on purpose: Remove uninstalls Play apps, so a mapped Shiur
+configuration would strip a boy's WhatsApp at the start of a window and never restore it.
+
+All five configurations are copies of Background (Agent) Mode and carry the Chrome proxy and search
+settings. Rung 1 does not need them, since Chrome is removed there, but they do no harm.
+
+To find a configuration's id: `GET /rest/private/configurations/list`, or the number at the end of
+its URL in the panel.
+
+### Rungs 1 and 2 are not really allowlists any more
+
+They were designed as allowlists enforced by `no_install_apps` on a clean phone. That restriction
+was deliberately NOT applied — a phone that refuses every install is painful to live with — and
+**Push apps never removes an app merely for being absent from an allowlist**; it only acts on rules
+that exist. So the enforcement comes entirely from the blocked rules, which is why rungs 1 and 2
+carry the same ~99-package blocklist as rung 3 (browsers, VPNs, DNS changers, social, dating,
+YouTube) rather than relying on their allow list.
+
+Before 2026-09-16 they carried none of it, which left the two strictest rungs removing nothing while
+the loosest removed 75 apps.
+
 ## The shiur lock
 
 "The entire phone besides essential items doesn't work during shiur." Two halves:
