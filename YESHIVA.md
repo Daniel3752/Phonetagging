@@ -157,13 +157,32 @@ The Shiur configuration is the same idea with the `yeshiva_shiur` policy: copy t
 configuration, map it in the Yeshiva tab's Shiur row, Push apps. The essentials keep their icons
 and everything else on the list is Remove.
 
-**Kiosk is ruled out** (operator's decision, 2026-09-15): shiur uses an ordinary configuration
-swap, not kiosk mode. That leaves one question live, and it must be answered before the Shiur
-configuration lists a single Play app as Remove: **does Remove uninstall a Play app, and does it
-come back when the timetable swaps the configuration out again?** Headwind cannot reinstall a Play
-app it has no APK for, so if Remove uninstalls, a boy loses WhatsApp permanently the first time a
-window ends. Step 2 of the finishing list is exactly this test, on the Vortex, with TikTok. Until
-it has been run, keep the Shiur configuration's Remove entries to system apps only.
+### ANSWERED, 2026-09-16: Remove UNINSTALLS a Play app, permanently
+
+Tested on the Vortex. TikTok was marked Remove on rung 2, the phone synced, and TikTok was **gone
+from the device** — not hidden, uninstalled. Headwind holds no APK for a Play app, so it cannot put
+it back. The only way it returns is the boy reinstalling it from the Play Store himself.
+
+That is correct and wanted for a RUNG: "this phone does not have TikTok" should mean the app is
+off the phone. It makes the configuration swap **unusable for anything temporary**:
+
+- **The Shiur configuration must never list a Play app as Remove.** The timetable swaps
+  configurations at the start of every window, so a Shiur configuration listing WhatsApp as Remove
+  uninstalls WhatsApp at 09:15 and never brings it back. Repeat four times a day, for every boy.
+- **The same rules out a screen-time feature** built on configuration swaps. Temporarily taking an
+  app away is not something this mechanism can express.
+
+So the app half of the shiur lock cannot be built from Remove. The options are:
+
+| Approach | Apps come back? | Cost |
+|---|---|---|
+| **Kiosk mode** for the Shiur configuration | Yes — apps stay installed, kiosk just confines the phone to its list | The mechanism Headwind actually provides for this; rejected once on comfort grounds, but it is the only supported way |
+| **Managed Launcher** for the Shiur configuration | Yes — the launcher shows only the configured apps | Weaker than kiosk (other entry points remain), and the phone's home app changes at every window boundary |
+| **Web-only shiur** (what runs today) | N/A — apps are never touched | Free, already working: the browser is locked for the window, apps stay available |
+| App suspension (`setPackagesSuspended`) | Yes | Not exposed by Headwind's API; would need an agent-side change |
+
+Until one is chosen, the shiur lock is **web-only** — which does work, and is what the proxy has
+been enforcing all along. Do not map a Shiur configuration containing Play-app Remove entries.
 
 ## Deploying it
 

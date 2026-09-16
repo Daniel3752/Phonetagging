@@ -21,6 +21,22 @@ the design and runbook; where the two disagree, this one wins.
    which the proxy then correctly refuses. Not a bug in this system — see the new section in
    `YESHIVA.md`. **Update Chrome as part of phone setup.**
 
+### The Remove question is ANSWERED (2026-09-16)
+
+**Headwind's Remove uninstalls a Play app, permanently.** Proven on the Vortex: TikTok was marked
+Remove on rung 2, the phone synced, TikTok was gone from the device. Headwind has no APK for a Play
+app, so it cannot reinstall it.
+
+Right for a rung. Fatal for anything temporary: a Shiur configuration listing WhatsApp as Remove
+would uninstall it at 09:15 and never restore it. **The app half of the shiur lock cannot be built
+on configuration swaps**, and neither can a screen-time feature. The web half works today and is
+unaffected. Options and their trade-offs are in `YESHIVA.md`; kiosk is the only mechanism Headwind
+actually provides for this, which reopens a decision that was closed on comfort grounds.
+
+Also settled the same day: the first successful Push apps ever (config 4, 1 remove / 1 install /
+69 icon-only), after three server-side rejections that turned out to be the client writing app
+links through the wrong endpoint entirely.
+
 ### Decisions recorded (from the operator, this session)
 
 - The Vortex stays a **test phone**, so the fleet shiur toggle stays **Off**. Do not put it on
