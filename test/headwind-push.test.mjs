@@ -16,10 +16,11 @@ async function check(name, fn) {
 // --- a fake Headwind -----------------------------------------------------------------------------
 let catalogue, configuration, calls;
 function reset() {
+  // latestVersion is the applicationversions(id) the configuration link must point at.
   catalogue = [
-    { id: 11, pkg: 'com.android.chrome', name: 'Chrome', url: 'https://mdm/chrome.apk' },
-    { id: 12, pkg: 'com.zhiliaoapp.musically', name: 'TikTok' },          // Play app, no APK
-    { id: 13, pkg: 'com.whatsapp', name: 'WhatsApp' },                    // Play app, no APK
+    { id: 11, pkg: 'com.android.chrome', name: 'Chrome', url: 'https://mdm/chrome.apk', latestVersion: 10010 },
+    { id: 12, pkg: 'com.zhiliaoapp.musically', name: 'TikTok', latestVersion: 10011 },  // Play app, no APK
+    { id: 13, pkg: 'com.whatsapp', name: 'WhatsApp', latestVersion: 10012 },            // Play app, no APK
   ];
   configuration = {
     id: 4, name: 'Background agent Yeshiva Temp', kioskMode: false, restrictions: 'no_safe_boot',
@@ -42,7 +43,9 @@ globalThis.fetch = async (url, opts = {}) => {
   if (path === '/rest/private/applications/search') return ok(catalogue);
   if (path === '/rest/private/applications/android' && method === 'PUT') {
     const body = JSON.parse(opts.body);
-    const app = { id: nextId++, pkg: body.pkg, name: body.name };
+    // Creating an app also creates its first version row; the id of that row is latestVersion.
+    const id = nextId++;
+    const app = { id, pkg: body.pkg, name: body.name, latestVersion: 20000 + id };
     catalogue.push(app);
     return ok(app);
   }
@@ -90,6 +93,16 @@ await check('the summary counts what happened', async () => {
 });
 await check('the configuration was read before it was written', async () => {
   assert.ok(calls.indexOf('GET /rest/private/configurations/4') < calls.indexOf('PUT /rest/private/configurations'));
+});
+await check('every entry carries the app version id Headwind links against', async () => {
+  // configurationapplications.applicationversionid is an integer FK; without it the real server
+  // rejects the whole save with a type error and nothing is written.
+  assert.equal(byPkg['com.zhiliaoapp.musically'].applicationVersionId, 10011);
+  assert.equal(byPkg['com.whatsapp'].applicationVersionId, 10012);
+  assert.equal(byPkg['com.android.chrome'].applicationVersionId, 10010);
+  for (const pkg of ['com.zhiliaoapp.musically', 'com.whatsapp', 'com.android.chrome', 'com.instagram.android']) {
+    assert.equal(typeof byPkg[pkg].applicationVersionId, 'number', `${pkg} needs a numeric version id`);
+  }
 });
 
 console.log('\n2. a second push is idempotent');
@@ -155,7 +168,9 @@ const baseFetch = async (url, opts = {}) => {
   if (path === '/rest/private/applications/search') return ok(catalogue);
   if (path === '/rest/private/applications/android' && method === 'PUT') {
     const body = JSON.parse(opts.body);
-    const app = { id: nextId++, pkg: body.pkg, name: body.name };
+    // Creating an app also creates its first version row; the id of that row is latestVersion.
+    const id = nextId++;
+    const app = { id, pkg: body.pkg, name: body.name, latestVersion: 20000 + id };
     catalogue.push(app);
     return ok(app);
   }

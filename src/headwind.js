@@ -278,6 +278,17 @@ export async function pushPolicyApps(env, configurationId, rules) {
         continue;
       }
     }
+    // A freshly created app's response may omit latestVersion, and without it the link below has
+    // no version to point at. Read the app back once so the id is there.
+    if (app.latestVersion == null) {
+      try {
+        const refreshed = await findApplicationByPkg(env, app.pkg || pkg);
+        if (refreshed && refreshed.latestVersion != null) {
+          app = refreshed;
+          catalogue.set(key, app);
+        }
+      } catch { /* fall through: the entry below simply carries no version id */ }
+    }
     const remove = rule.state === 'blocked' || rule.state === 'hidden';
     const hasApk = Boolean(app.url || app.urlArm64 || app.urlArmeabi);
     const action = remove ? HW_ACTION.REMOVE : (hasApk ? HW_ACTION.INSTALL : HW_ACTION.NONE);
@@ -287,7 +298,20 @@ export async function pushPolicyApps(env, configurationId, rules) {
     // Application here: it carries a `configurations` array (every other configuration using the
     // app, each with its own admin password hash), which would be echoed back into this PUT.
     const existing = byId.get(app.id) || { id: app.id, pkg: app.pkg, name: app.name };
-    byId.set(app.id, { ...existing, action, showIcon: !remove, remove });
+    const entry = { ...existing, action, showIcon: !remove, remove };
+
+    // Headwind links a configuration to a specific VERSION of an app, not just to the app:
+    // configurationapplications.applicationversionid is an integer FK to applicationversions(id),
+    // and every row the panel writes has one. Application.latestVersion IS that id ("An ID of a
+    // most recent version for application"). Omitting it made the save fail server-side with
+    //   column "applicationversionid" is of type integer but expression is of type text
+    // and the whole push was rejected. An entry the operator already pinned to some version keeps
+    // the version it has; only a new link takes the latest.
+    if (entry.applicationVersionId == null) {
+      const versionId = Number(app.latestVersion);
+      if (Number.isInteger(versionId) && versionId > 0) entry.applicationVersionId = versionId;
+    }
+    byId.set(app.id, entry);
   }
 
   config.applications = [...byId.values()];
