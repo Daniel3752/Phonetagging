@@ -304,7 +304,7 @@ export async function handleAdmin(request, env, path) {
     // one call that cannot accidentally blank another field.
     case 'POST /api/admin/devices/level': {
       if (!body.id) return json({ error: 'id is required' }, 400);
-      const current = await env.DB.prepare('SELECT tag FROM devices WHERE id = ?').bind(body.id).first();
+      const current = await env.DB.prepare('SELECT tag, allow_youtube FROM devices WHERE id = ?').bind(body.id).first();
       if (!current) return json({ error: 'no such device' }, 404);
       if (body.tag !== undefined && body.tag !== null && body.tag !== '' && normalizeTag(body.tag) !== String(body.tag).trim().toLowerCase()) {
         return json({ error: `tag must be one of ${Object.keys(TAGS).join(', ')}` }, 400);
@@ -320,7 +320,10 @@ export async function handleAdmin(request, env, path) {
       // APP baseline too. Changing only rung and tag left the scheduler pushing the old ladder's
       // configuration forever — the console papered over it with a second full save, so an API
       // caller, or a page whose second call failed, was left half-migrated with no error.
-      const policyId = appPolicyIdForLevel(level, tag);
+      // The phone keeps its YouTube answer across a rung move: the flag is remembered on the row
+      // and only decides anything on yeshiva rung 3.
+      const allowYoutube = Number(current.allow_youtube) === 1;
+      const policyId = appPolicyIdForLevel(level, tag, { allowYoutube });
       const policyExists = policyId
         ? await env.DB.prepare('SELECT id FROM policies WHERE id = ?').bind(policyId).first()
         : null;
@@ -355,6 +358,44 @@ export async function handleAdmin(request, env, path) {
       if (!res.meta?.changes) return json({ error: 'no such device' }, 404);
       await audit(env, 'operator', 'device_shiur_lock_set', body.id, on ? 'on' : 'off');
       return json({ ok: true, shiur_lock: on ? 1 : 0 });
+    }
+
+    // May this phone have the YouTube app? Only yeshiva rung 3 has the option; the flag is stored
+    // on every phone so it survives a rung move, and picks between the two rung-3 policies. Its own
+    // route so the Yeshiva tab can flip it without re-sending the whole device.
+    case 'POST /api/admin/devices/youtube': {
+      if (!body.id) return json({ error: 'id is required' }, 400);
+      // Same discipline as the shiur switch: a value we cannot read is refused, never taken as the
+      // permissive answer.
+      const TRUTHY = [true, 1, '1', 'on', 'true', 'yes'];
+      const FALSY = [false, 0, '0', 'off', 'false', 'no'];
+      const given = typeof body.on === 'string' ? body.on.trim().toLowerCase() : body.on;
+      const on = TRUTHY.includes(given) ? true : FALSY.includes(given) ? false : null;
+      if (on === null) return json({ error: 'on must be true or false' }, 400);
+
+      const device = await env.DB.prepare('SELECT tag, level FROM devices WHERE id = ?').bind(body.id).first();
+      if (!device) return json({ error: 'no such device' }, 404);
+
+      const tag = normalizeTag(device.tag);
+      const level = normalizeDeviceLevel(device.level, tag);
+      const policyId = appPolicyIdForLevel(level, tag, { allowYoutube: on });
+      const policyExists = await env.DB.prepare('SELECT id FROM policies WHERE id = ?').bind(policyId).first();
+
+      // Move the app baseline with the flag, so the scheduler pushes the right configuration
+      // without a second call — the same trap the rung route used to fall into.
+      const res = policyExists
+        ? await env.DB.prepare('UPDATE devices SET allow_youtube = ?, policy_id = ? WHERE id = ?')
+            .bind(on ? 1 : 0, policyId, body.id).run()
+        : await env.DB.prepare('UPDATE devices SET allow_youtube = ? WHERE id = ?')
+            .bind(on ? 1 : 0, body.id).run();
+      if (!res.meta?.changes) return json({ error: 'no such device' }, 404);
+
+      await audit(env, 'operator', 'device_youtube_set', body.id,
+        `${on ? 'allowed' : 'blocked'}${policyExists ? `, policy ${policyId}` : ''}`);
+      return json({
+        ok: true, allow_youtube: on ? 1 : 0, policy_id: policyExists ? policyId : null,
+        applies: tag === 'yeshiva' && level === 3,
+      });
     }
 
     // --- overriding the classifier ----------------------------------------------------------------

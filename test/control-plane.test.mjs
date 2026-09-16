@@ -211,6 +211,35 @@ console.log('\n7d. a partial save must not rewrite what it leaves out');
   check('changing the rung moves the app baseline with it', moved.policy_id === 'yeshiva_rung_1', JSON.stringify(moved));
 }
 
+console.log('\n7e. the YouTube option on yeshiva rung 3');
+{
+  await adminJson('/api/admin/policies', { id: 'yeshiva_rung_3', name: 'Yeshiva — Rung 3 (Blocklist, no social)', app_default: 'allowed' });
+  await adminJson('/api/admin/policies', { id: 'yeshiva_rung_3_yt', name: 'Yeshiva — Rung 3 + YouTube', app_default: 'allowed' });
+  hwDevices.push({ id: 12, number: 'yeshiva-yt', configurationId: '30', groups: [], mdmMode: true });
+  const boy = await adminJson('/api/admin/devices', { label: 'Yossi', headwind_device_id: '12', policy_id: 'yeshiva_rung_3', timezone: 'Asia/Jerusalem', tag: 'yeshiva', level: 3 });
+  const row = () => env.DB._db.prepare('SELECT allow_youtube, policy_id, level FROM devices WHERE id = ?').get(boy.id);
+
+  check('a new phone defaults to no YouTube', Number(row().allow_youtube) === 0, JSON.stringify(row()));
+
+  const on = await adminJson('/api/admin/devices/youtube', { id: boy.id, on: true });
+  check('allowing it moves the phone to the variant policy', row().policy_id === 'yeshiva_rung_3_yt', JSON.stringify(row()) + JSON.stringify(on));
+  check('and the route says the option applies here', on.applies === true, JSON.stringify(on));
+
+  // The flag is remembered off rung 3, but must not change what that rung means.
+  await adminJson('/api/admin/devices/level', { id: boy.id, tag: 'yeshiva', level: 2 });
+  check('moving off rung 3 keeps the answer but drops the variant',
+    Number(row().allow_youtube) === 1 && row().policy_id === 'yeshiva_rung_2', JSON.stringify(row()));
+  await adminJson('/api/admin/devices/level', { id: boy.id, tag: 'yeshiva', level: 3 });
+  check('coming back to rung 3 restores it', row().policy_id === 'yeshiva_rung_3_yt', JSON.stringify(row()));
+
+  const off = await adminJson('/api/admin/devices/youtube', { id: boy.id, on: false });
+  check('blocking it returns to the ordinary rung-3 policy', row().policy_id === 'yeshiva_rung_3', JSON.stringify(row()) + JSON.stringify(off));
+
+  const bad = await admin('/api/admin/devices/youtube', { id: boy.id, on: 'maybe' });
+  check('an unreadable value is refused, not taken as allow', bad.status === 400, String(bad.status));
+  hwDevices = hwDevices.filter((d) => d.id !== 12);
+}
+
 console.log('\n8. audit log records both operator and scheduler actions');
 const audit = await adminJson('/api/admin/audit');
 check('operator actions logged', audit.entries.some((e) => e.actor === 'operator' && e.action === 'policy_saved'));

@@ -95,6 +95,12 @@ CREATE TABLE IF NOT EXISTS devices (
   -- govern it; 0 = exempt — it stays on its rung's policy through every window and through
   -- "Locked now". Per-phone off beats everything (policy.js resolveEffectivePolicy).
   shiur_lock INTEGER NOT NULL DEFAULT 1,
+  -- Rung 3 only, yeshiva tag: may this phone have the YouTube app? 0 (default) = no, the rung's
+  -- ordinary policy applies; 1 = the phone is put on `yeshiva_rung_3_yt`, identical to rung 3
+  -- except that the official YouTube app is not removed. The modded forks (Vanced, ReVanced) stay
+  -- blocked either way — they exist to strip the controls YouTube does have. Inert on every other
+  -- rung: the flag is remembered, and takes effect again if the phone returns to rung 3.
+  allow_youtube INTEGER NOT NULL DEFAULT 0,
   -- The phone's own Cloudflare Gateway DNS location and the DoT hostname it was issued. DNS-over-
   -- TLS carries no identity, so a fleet sharing one resolver hostname can only share one policy;
   -- a location per phone makes the hostname itself the identity, and a level change becomes an API
@@ -201,6 +207,10 @@ INSERT OR IGNORE INTO policies (id, name, headwind_configuration_id, app_default
   ('yeshiva_rung_1', 'Yeshiva — Rung 1 (Apps only)',            NULL, 'blocked', NULL,   0),
   ('yeshiva_rung_2', 'Yeshiva — Rung 2 (Apps + browser)',       NULL, 'blocked', NULL,   0),
   ('yeshiva_rung_3', 'Yeshiva — Rung 3 (Blocklist, no social)', NULL, 'allowed', NULL,   0),
+  -- Rung 3 with the YouTube option on (devices.allow_youtube). Same rung, same web tier; the only
+  -- difference is that the official YouTube app is not removed. It needs its own Headwind
+  -- configuration, because app enforcement is per configuration, not per phone.
+  ('yeshiva_rung_3_yt', 'Yeshiva — Rung 3 + YouTube',           NULL, 'allowed', NULL,   0),
   ('yeshiva_rung_4', 'Yeshiva — Rung 4 (Blocklist)',            NULL, 'allowed', NULL,   0),
   ('yeshiva_shiur',  'Yeshiva — Shiur (locked to essentials)',  NULL, 'blocked', 'none', 0);
 

@@ -14,9 +14,21 @@ import { normalizeDeviceLevel, normalizeTag, TAGS } from './levels.js';
 // This is only the id convention. HOW that policy is fed to the scheduler/Headwind (baseline vs a
 // time-window override, and what apps each policy actually lists) is the app-control work that is
 // intentionally deferred — the policies ship EMPTY and are populated during that discussion.
-export function appPolicyIdForLevel(level, tag = 'standard') {
+// The one rung with an option attached. App enforcement is per Headwind configuration and a
+// configuration belongs to a policy, so "this boy may have YouTube" cannot live on the phone row
+// alone — it picks between two rung-3 policies that differ only in that one app.
+export const YOUTUBE_TAG = 'yeshiva';
+export const YOUTUBE_RUNG = 3;
+export const YOUTUBE_POLICY_SUFFIX = '_yt';
+
+export function appPolicyIdForLevel(level, tag = 'standard', { allowYoutube = false } = {}) {
   const t = normalizeTag(tag);
-  return `${TAGS[t].policyPrefix}_${normalizeDeviceLevel(level, t)}`;
+  const rung = normalizeDeviceLevel(level, t);
+  const base = `${TAGS[t].policyPrefix}_${rung}`;
+  // Off every other rung the flag is inert — remembered on the row, applied again if the phone
+  // comes back to rung 3.
+  if (allowYoutube && t === YOUTUBE_TAG && rung === YOUTUBE_RUNG) return base + YOUTUBE_POLICY_SUFFIX;
+  return base;
 }
 
 // A schedule's base_policy_id normally names the baseline policy of the phones it applies to. It may

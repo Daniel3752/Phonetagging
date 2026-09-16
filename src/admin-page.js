@@ -549,16 +549,24 @@ export function renderAdminPage() {
     });
 
     var phones = state.devices.filter(function (d) { return d.tag === 'yeshiva'; });
-    id('yeshivaDevices').innerHTML = table(['Phone', 'Rung', 'Shiur lock', 'Now running', 'Zone', 'Move to'], phones, function (d) {
+    id('yeshivaDevices').innerHTML = table(['Phone', 'Rung', 'Shiur lock', 'YouTube', 'Now running', 'Zone', 'Move to'], phones, function (d) {
       var moves = y.levels.map(function (l) {
         return l.level === d.level ? '' :
           '<button class="ghost" style="margin:0 6px 0 0;padding:4px 10px" data-y-move="' + esc(d.id) + '" data-y-level="' + l.level + '">' + l.level + '</button>';
       }).join('');
       var lockOn = Number(d.shiur_lock) !== 0;
+      // The YouTube option exists only on rung 3; on any other rung the stored answer is shown
+      // greyed, because it is remembered and applies again if the phone returns to rung 3.
+      var ytOn = Number(d.allow_youtube) === 1;
+      var ytApplies = Number(d.level) === 3;
+      var ytCell = '<span class="pill ' + (ytOn ? 'allowed' : 'blocked') + '">' + (ytOn ? 'yes' : 'no') + '</span> ' +
+        '<button class="ghost" style="margin:0 0 0 6px;padding:4px 10px" data-y-yt="' + esc(d.id) + '" data-y-on="' + (ytOn ? '0' : '1') + '">' +
+        (ytOn ? 'block' : 'allow') + '</button>' +
+        (ytApplies ? '' : ' <span class="empty">(rung 3 only)</span>');
       return '<tr><td>' + esc(d.label) + '</td><td>' + esc(levelName(d.level, 'yeshiva')) + '</td><td>' +
         '<span class="pill ' + (lockOn ? 'allowed' : 'blocked') + '">' + (lockOn ? 'on' : 'off') + '</span> ' +
         '<button class="ghost" style="margin:0 0 0 6px;padding:4px 10px" data-y-lock="' + esc(d.id) + '" data-y-on="' + (lockOn ? '0' : '1') + '">' +
-        (lockOn ? 'turn off' : 'turn on') + '</button></td><td>' +
+        (lockOn ? 'turn off' : 'turn on') + '</button></td><td>' + ytCell + '</td><td>' +
         (d.last_applied_policy_id ? esc(policyName(d.last_applied_policy_id)) : '<span class="empty">not applied</span>') +
         '</td><td>' + esc(d.timezone) + (d.timezone !== 'Asia/Jerusalem' ? ' <span class="empty">(shiur times are local — is this right?)</span>' : '') +
         '</td><td style="white-space:nowrap">' + moves +
@@ -729,6 +737,14 @@ export function renderAdminPage() {
           return api('/api/admin/apply', {});
         });
       }, 'Shiur lock ' + (ds.yOn === '1' ? 'on' : 'off') + ' for that phone. Web follows within a minute; apps were re-applied.');
+      return;
+    }
+    if (ds.yYt) {
+      submit('saveShiur', 'yeshivaMsg', function () {
+        return api('/api/admin/devices/youtube', { id: ds.yYt, on: ds.yOn === '1' }).then(function (r) {
+          return api('/api/admin/apply', {}).then(function () { return r; });
+        });
+      }, 'YouTube ' + (ds.yOn === '1' ? 'allowed' : 'blocked') + ' for that phone. Push the rung\u2019s policy for it to reach the handset.');
       return;
     }
     if (ds.ySave) {

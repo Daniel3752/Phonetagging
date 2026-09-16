@@ -106,6 +106,14 @@ check('a corrupt level clamps to the strictest rung, never a missing policy',
   appPolicyIdForLevel(99) === 'apps_rung_1' && appPolicyIdForLevel('x') === 'apps_rung_1');
 
 check('the yeshiva tag has its own policy ids', appPolicyIdForLevel(2, 'yeshiva') === 'yeshiva_rung_2' && appPolicyIdForLevel(9, 'yeshiva') === 'yeshiva_rung_1');
+// The YouTube option is rung 3 of the yeshiva tag only. Everywhere else the flag is inert, so a
+// phone keeps its answer across a rung move without it changing what that other rung means.
+check('rung 3 + YouTube picks the variant policy', appPolicyIdForLevel(3, 'yeshiva', { allowYoutube: true }) === 'yeshiva_rung_3_yt');
+check('rung 3 without it is the ordinary policy', appPolicyIdForLevel(3, 'yeshiva') === 'yeshiva_rung_3'
+  && appPolicyIdForLevel(3, 'yeshiva', { allowYoutube: false }) === 'yeshiva_rung_3');
+check('the flag does nothing on another yeshiva rung', appPolicyIdForLevel(2, 'yeshiva', { allowYoutube: true }) === 'yeshiva_rung_2'
+  && appPolicyIdForLevel(4, 'yeshiva', { allowYoutube: true }) === 'yeshiva_rung_4');
+check('and nothing on the standard ladder', appPolicyIdForLevel(3, 'standard', { allowYoutube: true }) === 'apps_rung_3');
 
 console.log('\nA window whose base is a whole tag');
 const yDevice = { id: 'd2', policy_id: 'yeshiva_rung_3', timezone: 'UTC', tag: 'yeshiva' };
