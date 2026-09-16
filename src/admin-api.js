@@ -41,6 +41,16 @@ function isRung(level, tag) {
   return level !== undefined && level !== null && level !== ''
     && normalizeDeviceLevel(level, tag) === Number(level);
 }
+// An on/off field in a request body. Only plain yes/no spellings count; anything else — a missing
+// field, the string "maybe" — is null, and every caller refuses it rather than picking a side.
+// This used to be repeated per route, and one copy treated every unrecognised value as OFF.
+const SWITCH_ON = [true, 1, '1', 'on', 'true', 'yes'];
+const SWITCH_OFF = [false, 0, '0', 'off', 'false', 'no'];
+function readSwitch(value) {
+  const given = typeof value === 'string' ? value.trim().toLowerCase() : value;
+  return SWITCH_ON.includes(given) ? true : SWITCH_OFF.includes(given) ? false : null;
+}
+
 function rungError(level, tag) {
   return `level must be a rung between ${MIN_LEVEL} and ${maxLevelFor(tag)} on the ${normalizeTag(tag)} ladder; ` +
     `${JSON.stringify(level)} is not one (6/"Never" is a site rating, not a phone rung)`;
@@ -162,13 +172,12 @@ export async function handleAdmin(request, env, path) {
     case 'POST /api/admin/devices': {
       const label = String(body.label || '').trim();
       if (!label) return json({ error: 'label is required' }, 400);
-      if (!body.policy_id) return json({ error: 'policy_id is required' }, 400);
 
       const id = body.id || newId('dev');
       // One read of the row this save may be updating. Everything the caller omits is taken from
       // here rather than from a default, so a partial save never silently rewrites the phone.
       const existing = body.id
-        ? await env.DB.prepare('SELECT tag, shiur_lock, proxy_password FROM devices WHERE id = ?').bind(id).first()
+        ? await env.DB.prepare('SELECT tag, level, shiur_lock, allow_youtube, proxy_password FROM devices WHERE id = ?').bind(id).first()
         : null;
 
       // The tag picks the ladder the rung is read on. Anything but a known tag is refused rather
@@ -182,18 +191,49 @@ export async function handleAdmin(request, env, path) {
       const tagGiven = body.tag !== undefined && body.tag !== null && body.tag !== '';
       const tag = tagGiven ? normalizeTag(body.tag) : normalizeTag(existing ? existing.tag : undefined);
 
-      // A MISSING level clamps to the strictest rung, never the loosest: getting that backwards
-      // would mean a typo in a form silently opening a phone up.
+      // A MISSING level keeps the rung the row already has; on a NEW phone it clamps to the
+      // strictest useful rung, never the loosest: getting that backwards would mean a typo in a form
+      // silently opening a phone up. (It used to reset an existing phone to rung 2 as well — and now
+      // that the app baseline follows the rung, that would have moved the apps too.)
       //
       // A level that was SUPPLIED but is not a rung is refused instead of clamped. Clamping is the
       // right answer for a corrupt row the scheduler stumbles over at 3am; it is the wrong answer
       // for an operator standing at the form, because the clamp lands on rung 1 — no web at all —
       // and the console then reads as though they had chosen the strictest filtering. A live phone
       // spent days unable to load anything or run a single search that way. Say no instead.
-      if (body.level !== undefined && body.level !== null && body.level !== '' && !isRung(body.level, tag)) {
+      const levelGiven = body.level !== undefined && body.level !== null && body.level !== '';
+      if (levelGiven && !isRung(body.level, tag)) {
         return json({ error: rungError(body.level, tag) }, 400);
       }
-      const level = normalizeDeviceLevel(body.level ?? 2, tag);
+      const level = normalizeDeviceLevel(levelGiven ? body.level : (existing ? existing.level : 2), tag);
+
+      // May the phone have the YouTube app (yeshiva rung 3 only; remembered on every rung)? Omitted
+      // keeps the row's answer, no for a new phone; a value that cannot be read is refused.
+      let allowYoutube = existing ? Number(existing.allow_youtube) === 1 : false;
+      if (body.allow_youtube !== undefined && body.allow_youtube !== null && body.allow_youtube !== '') {
+        const on = readSwitch(body.allow_youtube);
+        if (on === null) return json({ error: 'allow_youtube must be true or false' }, 400);
+        allowYoutube = on;
+      }
+
+      // The app baseline is NOT an input. Tag + rung + the YouTube answer name exactly one app
+      // policy (policy.js appPolicyIdForLevel), and that policy is what the scheduler pushes to
+      // Headwind. The console used to offer it as a dropdown beside the rung, which only ever gave
+      // the operator a way to save a contradiction — rung 2 for the web with rung 3's apps — and
+      // the two could drift apart with no error. A caller that still sends policy_id (every curl
+      // example older than this) is fine while it agrees; one that disagrees is refused rather
+      // than silently corrected, so a stale script fails loudly instead of appearing to work.
+      const policyId = appPolicyIdForLevel(level, tag, { allowYoutube });
+      const policyExists = await env.DB.prepare('SELECT id FROM policies WHERE id = ?').bind(policyId).first();
+      if (!policyExists) {
+        return json({ error: `no app policy ${policyId} exists for ${tag} rung ${level}; the seed is incomplete` }, 500);
+      }
+      if (body.policy_id !== undefined && body.policy_id !== null && body.policy_id !== '' && String(body.policy_id) !== policyId) {
+        return json({
+          error: `policy_id is not set directly: ${tag} rung ${level} pairs with ${policyId}. ` +
+            'Change the rung (or the YouTube option) instead, or omit policy_id.',
+        }, 400);
+      }
 
       // The proxy login is how the filter tells one phone from another. It must match an account in
       // /etc/squid/passwd; without it the device falls back to the strictest rung on every request.
@@ -217,15 +257,16 @@ export async function handleAdmin(request, env, path) {
         || generateProxyPassword();
       try {
         await env.DB.prepare(`
-          INSERT INTO devices (id, headwind_device_id, label, policy_id, timezone, enrolled_at, level, tag, shiur_lock, proxy_user, proxy_password)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          INSERT INTO devices (id, headwind_device_id, label, policy_id, timezone, enrolled_at, level, tag, shiur_lock, allow_youtube, proxy_user, proxy_password)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(id) DO UPDATE SET
             headwind_device_id = excluded.headwind_device_id, label = excluded.label,
             policy_id = excluded.policy_id, timezone = excluded.timezone,
             level = excluded.level, tag = excluded.tag, shiur_lock = excluded.shiur_lock,
+            allow_youtube = excluded.allow_youtube,
             proxy_user = excluded.proxy_user, proxy_password = excluded.proxy_password
-        `).bind(id, body.headwind_device_id || null, label, body.policy_id,
-                body.timezone || 'UTC', Date.now(), level, tag, shiurLock, proxyUser, proxyPassword).run();
+        `).bind(id, body.headwind_device_id || null, label, policyId,
+                body.timezone || 'UTC', Date.now(), level, tag, shiurLock, allowYoutube ? 1 : 0, proxyUser, proxyPassword).run();
       } catch (err) {
         // proxy_user is uniquely indexed: two phones sharing a login would silently share a rung,
         // and whichever was loosest would win for both.
@@ -235,11 +276,11 @@ export async function handleAdmin(request, env, path) {
         throw err;
       }
 
-      await audit(env, 'operator', 'device_saved', id, `${label} -> ${tag} level ${level}, policy ${body.policy_id}`);
+      await audit(env, 'operator', 'device_saved', id, `${label} -> ${tag} level ${level}, policy ${policyId}`);
       // The htpasswd line is returned ready to paste: the worker cannot reach /etc/squid/passwd, so
       // creating the squid account stays a manual step and this is the part people get wrong.
       return json({
-        ok: true, id, level, tag,
+        ok: true, id, level, tag, policy_id: policyId, allow_youtube: allowYoutube ? 1 : 0,
         proxy_user: proxyUser,
         proxy_password: proxyPassword,
         htpasswd: `htpasswd -B -b /etc/squid/passwd ${proxyUser} '${proxyPassword}'`,
@@ -348,10 +389,7 @@ export async function handleAdmin(request, env, path) {
       // — including a missing field and the string "true" — as OFF, which exempts the phone from
       // every shiur window and from "Locked now". An unreadable request must never land on the
       // permissive side.
-      const TRUTHY = [true, 1, '1', 'on', 'true', 'yes'];
-      const FALSY = [false, 0, '0', 'off', 'false', 'no'];
-      const given = typeof body.on === 'string' ? body.on.trim().toLowerCase() : body.on;
-      const on = TRUTHY.includes(given) ? true : FALSY.includes(given) ? false : null;
+      const on = readSwitch(body.on);
       if (on === null) return json({ error: 'on must be true or false' }, 400);
       const res = await env.DB.prepare('UPDATE devices SET shiur_lock = ? WHERE id = ?')
         .bind(on ? 1 : 0, body.id).run();
@@ -367,10 +405,7 @@ export async function handleAdmin(request, env, path) {
       if (!body.id) return json({ error: 'id is required' }, 400);
       // Same discipline as the shiur switch: a value we cannot read is refused, never taken as the
       // permissive answer.
-      const TRUTHY = [true, 1, '1', 'on', 'true', 'yes'];
-      const FALSY = [false, 0, '0', 'off', 'false', 'no'];
-      const given = typeof body.on === 'string' ? body.on.trim().toLowerCase() : body.on;
-      const on = TRUTHY.includes(given) ? true : FALSY.includes(given) ? false : null;
+      const on = readSwitch(body.on);
       if (on === null) return json({ error: 'on must be true or false' }, 400);
 
       const device = await env.DB.prepare('SELECT tag, level FROM devices WHERE id = ?').bind(body.id).first();

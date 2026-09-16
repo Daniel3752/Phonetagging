@@ -36,7 +36,7 @@ check('a too-short label falls back rather than producing an invalid login', pro
 
 console.log('\n3. saving a phone mints credentials and the command to install them');
 await admin('/api/admin/policies', { id: 'pol1', name: 'default' });
-let body = await (await admin('/api/admin/devices', { id: 'dev1', label: 'Dovid', policy_id: 'pol1', level: 3 })).json();
+let body = await (await admin('/api/admin/devices', { id: 'dev1', label: 'Dovid', level: 3 })).json();
 const first = body.proxy_password;
 check('a password came back', typeof first === 'string' && first.length === 11, JSON.stringify(body));
 check('a login was derived from the label', body.proxy_user === 'dovid');
@@ -46,19 +46,19 @@ let row = await DB.prepare('SELECT proxy_user, proxy_password FROM devices WHERE
 check('stored so it can be read back later', row.proxy_password === first && row.proxy_user === 'dovid');
 
 console.log('\n4. re-saving to change the rung keeps the credential the phone already has');
-body = await (await admin('/api/admin/devices', { id: 'dev1', label: 'Dovid', policy_id: 'pol1', level: 5 })).json();
+body = await (await admin('/api/admin/devices', { id: 'dev1', label: 'Dovid', level: 5 })).json();
 check('same password after a level change', body.proxy_password === first, `${first} -> ${body.proxy_password}`);
 row = await DB.prepare('SELECT level, proxy_password FROM devices WHERE id = ?').bind('dev1').first();
 check('the level did change', row.level === 5);
 check('the password did not', row.proxy_password === first);
 
 console.log('\n5. a second phone never shares the first one\'s credential');
-body = await (await admin('/api/admin/devices', { id: 'dev2', label: 'Rivka', policy_id: 'pol1', level: 2 })).json();
+body = await (await admin('/api/admin/devices', { id: 'dev2', label: 'Rivka', level: 2 })).json();
 check('different password', body.proxy_password !== first, body.proxy_password);
 check('different login', body.proxy_user === 'rivka');
 
 console.log('\n6. two phones cannot be given the same login');
-const clash = await admin('/api/admin/devices', { id: 'dev3', label: 'Someone', policy_id: 'pol1', proxy_user: 'rivka' });
+const clash = await admin('/api/admin/devices', { id: 'dev3', label: 'Someone', proxy_user: 'rivka' });
 check('the duplicate is refused', clash.status === 409, String(clash.status));
 
 console.log(failures ? `\n${failures} FAILURES` : '\nAll proxy-credential checks passed.');

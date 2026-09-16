@@ -96,15 +96,16 @@ export function renderAdminPage() {
           <div><label for="dHw">Headwind device id</label><input id="dHw" placeholder="42"></div>
         </div>
         <div class="row">
-          <div><label for="dPolicy">Baseline policy</label><select id="dPolicy"></select></div>
-          <div><label for="dTz">Time zone</label><input id="dTz" placeholder="America/New_York" value="UTC"></div>
-        </div>
-        <div class="row">
           <div><label for="dTag">Tag (ladder)</label><select id="dTag"></select></div>
           <div><label for="dLevel">Rung</label><select id="dLevel"></select></div>
+        </div>
+        <div class="row">
+          <div><label for="dTz">Time zone</label><input id="dTz" placeholder="America/New_York" value="UTC"></div>
           <div><label for="dProxy">Proxy login / tunnel IP</label><input id="dProxy" placeholder="10.66.0.4"></div>
         </div>
-        <p class="empty" style="margin:0 0 12px">Leave the login blank to derive it from the label. A
+        <p id="dPaired" style="margin:0 0 8px"></p>
+        <p class="empty" style="margin:0 0 12px">The rung is the one control: it sets the web filter and picks the
+          app policy above, which is what the scheduler pushes to Headwind. Leave the login blank to derive it from the label. A
           password is generated automatically and kept on re-save. After saving, run the
           <code>htpasswd</code> line shown below on the proxy — the phone has no web until that
           account exists, and a phone with no login falls back to the strictest rung.</p>
@@ -359,9 +360,10 @@ export function renderAdminPage() {
   }
 
   // Rebuilding a select's options throws away what was selected, and render() runs after EVERY
-  // submit on any tab — so an open edit form silently fell back to the first option. On the phone
-  // form that is the Baseline policy, whose first entry by name is 'Apps — Rung 1', and saving then
-  // put the phone on a policy nobody chose. Keep the current value whenever it still exists.
+  // submit on any tab — so an open edit form silently fell back to the first option. (On the phone
+  // form that was once a Baseline policy dropdown, whose first entry by name was 'Apps — Rung 1',
+  // and saving then put the phone on a policy nobody chose; that dropdown is gone — the rung
+  // decides — but every other select still needs this.) Keep the current value whenever it exists.
   function fillSelect(el, items, valueKey, labelFn, includeBlank) {
     var keep = el.value;
     el.innerHTML = (includeBlank ? '<option value="">(all phones)</option>' : '') +
@@ -372,7 +374,7 @@ export function renderAdminPage() {
   }
 
   function render() {
-    id('deviceTable').innerHTML = table(['Phone', 'Tag · rung', 'Proxy login', 'Password', 'Baseline', 'Now running', 'Zone', ''], state.devices, function (d) {
+    id('deviceTable').innerHTML = table(['Phone', 'Tag · rung', 'Proxy login', 'Password', 'App policy', 'Now running', 'Zone', ''], state.devices, function (d) {
       return '<tr><td>' + esc(d.label) + '</td><td>' + esc(tagName(d.tag)) + ' · ' + esc(levelName(d.level, d.tag)) + '</td><td>' +
         (d.proxy_user ? esc(d.proxy_user) : '<span class="empty">none — strictest</span>') +
         '</td><td>' +
@@ -392,6 +394,7 @@ export function renderAdminPage() {
     fillTags('dTag');
     fillLevels('dLevel', id('dTag').value, false);   // a phone's rung on the chosen ladder
     fillLevels('qLevel', 'standard', true);           // a site/search rating: 2-6, Never included
+    showPairedPolicy();
 
     id('policyTable').innerHTML = table(['Policy', 'Model', 'Headwind config', 'Apps', ''], state.policies, function (p) {
       var n = state.appRules.filter(function (r) { return r.policy_id === p.id; }).length;
@@ -421,7 +424,6 @@ export function renderAdminPage() {
         '</td><td><button class="ghost" style="margin:0;padding:4px 10px" data-del="' + esc(s.id) + '">Delete</button></td></tr>';
     });
 
-    fillSelect(id('dPolicy'), state.policies, 'id', function (p) { return p.name; });
     fillSelect(id('aPolicy'), state.policies, 'id', function (p) { return p.name; });
     // A window's base may be a whole tag ("every yeshiva phone") as well as one baseline policy.
     fillSelect(id('sBase'), (state.tags || []).map(function (t) {
@@ -529,14 +531,31 @@ export function renderAdminPage() {
     el.value = 'standard';
     el.dataset.filled = '1';
   }
-  // The policy that pairs with a tag + rung, by the id convention policy.js uses.
-  function pairedPolicyId(tag, level) {
+  // The app policy that pairs with a tag + rung (+ the phone's YouTube answer, on yeshiva rung 3),
+  // by the id convention policy.js uses. Shown, never chosen: the server derives it on save, and
+  // this line tells the operator what the scheduler will push before they press the button.
+  function pairedPolicyId(tag, level, allowYoutube) {
     var t = tagDef(tag);
-    return t ? t.policyPrefix + '_' + level : null;
+    if (!t) return null;
+    var pid = t.policyPrefix + '_' + level;
+    var yt = pid + '_yt';
+    if (allowYoutube && tag === 'yeshiva' && level === 3 && state.policies.some(function (p) { return p.id === yt; })) return yt;
+    return pid;
   }
-  function syncPairedPolicy() {
-    var pid = pairedPolicyId(id('dTag').value, Number(id('dLevel').value));
-    if (pid && state.policies.some(function (p) { return p.id === pid; })) id('dPolicy').value = pid;
+  function showPairedPolicy() {
+    var el = id('dPaired');
+    if (!el) return;
+    var d = editingId ? state.devices.find(function (x) { return x.id === editingId; }) : null;
+    var pid = pairedPolicyId(id('dTag').value, Number(id('dLevel').value), !!d && Number(d.allow_youtube) === 1);
+    var p = state.policies.find(function (x) { return x.id === pid; });
+    if (!p) {
+      el.innerHTML = 'App policy: <span class="empty">none exists for this rung</span>';
+      return;
+    }
+    el.innerHTML = 'App policy: <strong>' + esc(p.name) + '</strong> ' +
+      (p.headwind_configuration_id
+        ? '<span class="empty">(Headwind configuration ' + esc(p.headwind_configuration_id) + ')</span>'
+        : '<span class="empty">(no Headwind configuration mapped yet — apps will not be pushed)</span>');
   }
 
   function renderYeshiva() {
@@ -633,12 +652,12 @@ export function renderAdminPage() {
     editingId = d.id;
     id('dLabel').value = d.label || '';
     id('dHw').value = d.headwind_device_id || '';
-    id('dPolicy').value = d.policy_id || '';
     id('dTz').value = d.timezone || 'UTC';
     id('dTag').value = d.tag || 'standard';
     fillLevels('dLevel', id('dTag').value, false);
     id('dLevel').value = String(d.level);
     id('dProxy').value = d.proxy_user || '';
+    showPairedPolicy();
     id('deviceFormTitle').textContent = 'Editing: ' + (d.label || d.id);
     id('saveDevice').textContent = 'Update phone';
     id('cancelEdit').style.display = '';
@@ -656,6 +675,7 @@ export function renderAdminPage() {
     fillLevels('dLevel', 'standard', false);
     id('dLevel').value = '2';
     id('dProxy').value = '';
+    showPairedPolicy();
     id('deviceFormTitle').textContent = 'Add a phone';
     id('saveDevice').textContent = 'Save phone';
     id('cancelEdit').style.display = 'none';
@@ -666,14 +686,14 @@ export function renderAdminPage() {
     say(id('deviceMsg'), '', true);
   });
 
-  // Changing the tag swaps the rung list to that ladder; tag + rung pick the paired app policy;
+  // Changing the tag swaps the rung list to that ladder; tag + rung name the paired app policy;
   // a yeshiva phone almost certainly lives in Israel, where the shiur windows are written.
   id('dTag').addEventListener('change', function () {
     fillLevels('dLevel', id('dTag').value, false);
     if (id('dTag').value === 'yeshiva' && (id('dTz').value === 'UTC' || !id('dTz').value)) id('dTz').value = 'Asia/Jerusalem';
-    syncPairedPolicy();
+    showPairedPolicy();
   });
-  id('dLevel').addEventListener('change', syncPairedPolicy);
+  id('dLevel').addEventListener('change', showPairedPolicy);
 
   id('yDays').innerHTML = DAYS.map(function (d, i) {
     return '<label>' + d + '<input type="checkbox" data-day="' + i + '"' + (i <= 4 ? ' checked' : '') + '></label>';
@@ -704,17 +724,9 @@ export function renderAdminPage() {
     if (!ds) return;
     if (ds.yMove) {
       submit('saveShiur', 'yeshivaMsg', function () {
+        // The level route moves the app baseline with the rung itself; nothing else to send.
         return api('/api/admin/devices/level', {
           id: ds.yMove, level: Number(ds.yLevel), tag: ds.yTag || 'yeshiva',
-        }).then(function () {
-          // The baseline policy follows the rung, or the scheduler keeps applying the old one.
-          var d = state.devices.find(function (x) { return x.id === ds.yMove; });
-          var pid = pairedPolicyId(ds.yTag || 'yeshiva', Number(ds.yLevel));
-          if (!d || !pid || !state.policies.some(function (p) { return p.id === pid; })) return;
-          return api('/api/admin/devices', {
-            id: d.id, label: d.label, headwind_device_id: d.headwind_device_id, policy_id: pid,
-            timezone: d.timezone, level: Number(ds.yLevel), tag: ds.yTag || 'yeshiva', proxy_user: d.proxy_user,
-          });
         });
       }, 'Phone moved.');
     }
@@ -805,7 +817,6 @@ export function renderAdminPage() {
         id: editingId || undefined,
         label: id('dLabel').value.trim(),
         headwind_device_id: id('dHw').value.trim() || null,
-        policy_id: id('dPolicy').value,
         timezone: id('dTz').value.trim() || 'UTC',
         level: Number(id('dLevel').value),
         tag: id('dTag').value,

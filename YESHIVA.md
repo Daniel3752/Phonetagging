@@ -237,8 +237,9 @@ server files should go together.
    the scoped `test_phones` rule and the access log included — backs the file up beside itself,
    installs the helper, parses and reconfigures. Idempotent; `--dry-run` shows the diff first.
    Do NOT run `install-squid.sh` — it would overwrite the hand edits.
-4. **The phone's row** (Devices tab, Edit): Tag = Yeshiva, Rung = 2, Baseline policy follows
-   (`Yeshiva — Rung 2`), Time zone `Asia/Jerusalem`, proxy login = its tunnel IP. Save.
+4. **The phone's row** (Devices tab, Edit): Tag = Yeshiva, Rung = 2 — the "App policy" line
+   under them should read `Yeshiva — Rung 2` — Time zone `Asia/Jerusalem`, proxy login = its
+   tunnel IP. Save.
 5. **Chrome's settings**, in Headwind: the phone's configuration → Applications Settings tab →
    Add, application `com.android.chrome`, one row each:
    ```

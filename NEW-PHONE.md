@@ -15,9 +15,10 @@ Legend: **[server]** = SSH to the MDM box · **[panel]** = https://mdm.getshmira
    `sudo bash scripts/new-wg-phone.sh <device-name>`
    Note the **tunnel IP** it prints and keep the QR on screen (the private key exists only
    in that output — closing it means deleting the peer block from `wg0.conf` and re-running).
-3. ☐ **[PC]** Register the device in D1 (`/admin` → Devices, or wrangler): label, level,
-   `policy_id` (= `apps_rung_<level>`), timezone, and **`proxy_user` = the tunnel IP** —
-   that IP *is* the phone's identity; a phone the Worker can't match browses at rung 1.
+3. ☐ **[PC]** Register the device in D1 (`/admin` → Devices, or wrangler): label, tag, level,
+   timezone, and **`proxy_user` = the tunnel IP** — that IP *is* the phone's identity; a phone
+   the Worker can't match browses at rung 1. The app policy is not chosen: it follows the tag
+   and rung (`apps_rung_<level>` / `yeshiva_rung_<level>`), and the console shows which one.
 
 ## B. Device Owner enrollment
 
