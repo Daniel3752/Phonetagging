@@ -37,6 +37,47 @@ Also settled the same day: the first successful Push apps ever (config 4, 1 remo
 69 icon-only), after three server-side rejections that turned out to be the client writing app
 links through the wrong endpoint entirely.
 
+### NEXT SESSION — the operator's agenda, in order
+
+**1. Harden the lockdowns against being undone.** Everything we set is currently reversible by
+whoever holds the phone. Worth attacking in this order:
+
+- **Always-on VPN / lockdown (step 18b)** is the big one, and today a boy can just switch it back
+  off in Settings. The obvious guard, `no_config_vpn`, kills our own tunnel — BUT the test that
+  established that was run *without* always-on already configured. **Re-test in the other order**:
+  set always-on + lockdown first, sync, then apply `no_config_vpn`, and see whether the running
+  tunnel survives while the setting becomes unchangeable. If it does, that is the whole answer.
+  If it does not, the fallback is locking Settings access itself.
+- **The CA certificate** — `no_config_credentials` stops it being removed, and is already in the
+  restriction list. Note it also blocks *installing* the CA, so it must go on AFTER step 9 (see the
+  "Enrolling configuration" note in NEW-PHONE.md).
+- **adb** — `no_debugging_features`, already documented as the LAST restriction to add. Confirm it
+  actually prevents re-enabling USB debugging rather than only hiding the toggle.
+- Also worth checking: whether Settings itself can be restricted, and whether the Headwind agent
+  survives a Settings → Apps → force stop.
+
+**2. WhatsApp Channels and Status — read this before spending time on it.** `README.md` already
+records that no network filter can separate these from ordinary WhatsApp: in-app they are the same
+endpoints behind certificate pinning, and WhatsApp is spliced (never decrypted) precisely so the
+app keeps working. So the proxy cannot see, let alone block, a Status view. The only mechanisms
+that could are an on-device **Accessibility service** (not built, and a large piece of work) or
+dropping WhatsApp entirely. Confirm that conclusion cheaply before designing anything.
+
+**3. Turning off images in Spotify.** Same shape of problem: Spotify is a pinned, spliced app, so
+the proxy cannot strip anything inside it. The only levers are Spotify's own settings — check
+whether its data-saver mode suppresses canvas/artwork enough to be worth it — or removing the app.
+Do not expect a filter-side answer.
+
+**4. Isaac's phone: migrate, then test the browser.** Before anything else on that handset:
+set **MTU 1280** in its WireGuard app, check whether the iptables bypass
+(`-i wg0 -s 10.66.0.3 -j RETURN`) is still in place leaving it unfiltered, confirm its Chrome is
+recent enough for `udm=14`, and add always-on + lockdown. Then migrate and run the NEW-PHONE.md §F
+battery.
+
+A theme worth naming: items 2 and 3 are both requests to control behaviour *inside* a pinned app,
+which is the one thing this architecture cannot do. Saying so early is cheaper than proving it
+twice.
+
 ### Where the app tier stands (2026-09-16, all deployed and live)
 
 The app half works end to end for the first time. Every yeshiva rung is mapped to a Headwind
