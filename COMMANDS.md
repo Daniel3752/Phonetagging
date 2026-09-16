@@ -288,7 +288,7 @@ somewhere other than the user trust store.
 htpasswd -B /etc/squid/passwd dovid-phone
 
 # 2. In the operator console (/admin) → Devices → Add or update a phone
-#    Set the label, baseline policy, web strictness rung and that same proxy login.
+#    Set the label, tag, rung and that same proxy login. The app policy follows the rung.
 #    Or by hand:
 npx wrangler d1 execute phone-url-filter-db --remote --command \
   "UPDATE devices SET proxy_user = 'dovid-phone', level = 2 WHERE label = 'Dovid'"

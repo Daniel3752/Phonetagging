@@ -73,9 +73,12 @@ const adminJson = async (p, b) => (await admin(p, b)).json();
 
 // --- setup ---------------------------------------------------------------------------------------
 console.log('\n1. admin API creates policies, apps, devices');
-const day = await adminJson('/api/admin/policies', { name: 'day', headwind_configuration_id: '10' });
+// A phone's baseline is the policy its tag + rung name (apps_rung_2 for a standard phone left on the
+// default rung), so the "day" configuration is mapped onto that policy rather than onto one of its
+// own. "night" is only ever a schedule's active policy, so it can be anything.
+const day = await adminJson('/api/admin/policies', { id: 'apps_rung_2', name: 'day', headwind_configuration_id: '10' });
 const night = await adminJson('/api/admin/policies', { name: 'night', headwind_configuration_id: '20' });
-check('policies created', !!day.id && !!night.id, JSON.stringify({ day, night }));
+check('policies created', day.id === 'apps_rung_2' && !!night.id, JSON.stringify({ day, night }));
 
 let r = await admin('/api/admin/apps', { policy_id: night.id, package_name: 'com.instagram.android', state: 'blocked' });
 check('valid app rule accepted', r.status === 200);
@@ -88,9 +91,18 @@ hwDevices = [
   { id: 7, number: 'phone-a', configurationId: '10', groups: [], mdmMode: true, serial: 'AAA111' },
   { id: 8, number: 'phone-b', configurationId: '10', groups: [], mdmMode: true, serial: 'BBB222' },
 ];
-const devA = await adminJson('/api/admin/devices', { label: 'Phone A', headwind_device_id: '7', policy_id: day.id, timezone: 'UTC' });
-const devB = await adminJson('/api/admin/devices', { label: 'Phone B', headwind_device_id: '8', policy_id: day.id, timezone: 'UTC' });
+const devA = await adminJson('/api/admin/devices', { label: 'Phone A', headwind_device_id: '7', timezone: 'UTC' });
+const devB = await adminJson('/api/admin/devices', { label: 'Phone B', headwind_device_id: '8', timezone: 'UTC' });
 check('devices created', !!devA.id && !!devB.id);
+check('the baseline is derived from tag + rung, not sent', devA.policy_id === 'apps_rung_2', JSON.stringify(devA));
+// The baseline is not an input. A stale script that still sends one is fine while it agrees, and
+// refused when it does not — never silently corrected, never silently obeyed.
+r = await admin('/api/admin/devices', { id: devA.id, label: 'Phone A', headwind_device_id: '7', policy_id: day.id, timezone: 'UTC' });
+check('a policy_id that agrees with the rung is accepted', r.status === 200, String(r.status));
+r = await admin('/api/admin/devices', { id: devA.id, label: 'Phone A', headwind_device_id: '7', policy_id: night.id, timezone: 'UTC' });
+check('a policy_id that contradicts the rung is refused', r.status === 400, String(r.status));
+check('and the phone stays on its rung\'s policy',
+  env.DB._db.prepare('SELECT policy_id FROM devices WHERE id = ?').get(devA.id).policy_id === 'apps_rung_2');
 
 console.log('\n2. schedule validation');
 r = await admin('/api/admin/schedules', { base_policy_id: day.id, active_policy_id: night.id, day_mask: 127, start: '25:00', end: '06:00' });
@@ -136,7 +148,7 @@ s = await runScheduler(env, new Date('2026-08-25T23:05:00Z'));
 check('retried and recovered on the next run', s.changed === 1 && s.failed === 0, JSON.stringify(s));
 
 console.log('\n7. a device with no Headwind link fails cleanly');
-await adminJson('/api/admin/devices', { label: 'Unlinked', policy_id: day.id, timezone: 'UTC' });
+await adminJson('/api/admin/devices', { label: 'Unlinked', timezone: 'UTC' });
 s = await runScheduler(env, new Date('2026-08-26T23:00:00Z'));
 check('reported as failed, not thrown', s.failed === 1, JSON.stringify(s));
 check('other devices unaffected', s.errors.length === 1 && /not linked/.test(s.errors[0]), JSON.stringify(s.errors));
@@ -166,8 +178,8 @@ console.log('\n7c. an unchanged repeating failure is logged once, not every run'
 {
   // A device stuck on a policy with no Headwind configuration fails identically every five minutes.
   // The first failure is logged; identical repeats are not, so the log does not fill with copies.
-  await adminJson('/api/admin/policies', { id: 'unmapped_pol', name: 'Unmapped' }); // no headwind_configuration_id
-  const stuck = await adminJson('/api/admin/devices', { label: 'Stuck', headwind_device_id: '77', policy_id: 'unmapped_pol', timezone: 'UTC' });
+  // (Only apps_rung_2 is mapped in this test, so a rung-5 phone is exactly that.)
+  const stuck = await adminJson('/api/admin/devices', { label: 'Stuck', headwind_device_id: '77', level: 5, timezone: 'UTC' });
   const countFor = () => env.DB._db.prepare(
     "SELECT COUNT(*) n FROM audit_log WHERE target = ? AND action = 'policy_apply_failed'").get(stuck.id).n;
   await runScheduler(env, new Date('2026-08-27T10:00:00Z'));
@@ -209,6 +221,13 @@ console.log('\n7d. a partial save must not rewrite what it leaves out');
   await adminJson('/api/admin/devices/level', { id: bochur.id, tag: 'yeshiva', level: 1 });
   const moved = env.DB._db.prepare('SELECT policy_id, level FROM devices WHERE id = ?').get(bochur.id);
   check('changing the rung moves the app baseline with it', moved.policy_id === 'yeshiva_rung_1', JSON.stringify(moved));
+
+  // A full save that omits the level keeps the rung — it used to reset the phone to rung 2, and
+  // with the baseline following the rung that would now move the apps too.
+  await adminJson('/api/admin/devices', { id: bochur.id, label: 'Bochur', timezone: 'Asia/Jerusalem' });
+  const kept = env.DB._db.prepare('SELECT policy_id, level FROM devices WHERE id = ?').get(bochur.id);
+  check('a save that omits the level keeps the rung and its policy',
+    kept.level === 1 && kept.policy_id === 'yeshiva_rung_1', JSON.stringify(kept));
 }
 
 console.log('\n7e. the YouTube option on yeshiva rung 3');
@@ -237,6 +256,14 @@ console.log('\n7e. the YouTube option on yeshiva rung 3');
 
   const bad = await admin('/api/admin/devices/youtube', { id: boy.id, on: 'maybe' });
   check('an unreadable value is refused, not taken as allow', bad.status === 400, String(bad.status));
+
+  // The full save takes the answer too, and derives the variant policy from it.
+  const saved = await adminJson('/api/admin/devices', { id: boy.id, label: 'Yossi', headwind_device_id: '12', timezone: 'Asia/Jerusalem', tag: 'yeshiva', level: 3, allow_youtube: true });
+  check('a full save with allow_youtube lands on the variant', saved.policy_id === 'yeshiva_rung_3_yt' && row().policy_id === 'yeshiva_rung_3_yt', JSON.stringify(saved));
+  await adminJson('/api/admin/devices', { id: boy.id, label: 'Yossi', headwind_device_id: '12', timezone: 'Asia/Jerusalem', tag: 'yeshiva', level: 3 });
+  check('a full save that omits it keeps the answer', row().policy_id === 'yeshiva_rung_3_yt', JSON.stringify(row()));
+  const badSave = await admin('/api/admin/devices', { id: boy.id, label: 'Yossi', tag: 'yeshiva', level: 3, allow_youtube: 'maybe' });
+  check('an unreadable allow_youtube on save is refused', badSave.status === 400, String(badSave.status));
   hwDevices = hwDevices.filter((d) => d.id !== 12);
 }
 
