@@ -14,7 +14,7 @@ async function check(name, fn) {
 }
 
 // --- a fake Headwind -----------------------------------------------------------------------------
-let catalogue, configuration, calls;
+let catalogue, configuration, configApps, calls;
 function reset() {
   // latestVersion is the applicationversions(id) the configuration link must point at.
   catalogue = [
@@ -22,14 +22,20 @@ function reset() {
     { id: 12, pkg: 'com.zhiliaoapp.musically', name: 'TikTok', latestVersion: 10011 },  // Play app, no APK
     { id: 13, pkg: 'com.whatsapp', name: 'WhatsApp', latestVersion: 10012 },            // Play app, no APK
   ];
+  // The real server returns applications EMPTY here — the links live in their own endpoint below.
   configuration = {
     id: 4, name: 'Background agent Yeshiva Temp', kioskMode: false, restrictions: 'no_safe_boot',
-    applications: [
-      { id: 11, pkg: 'com.android.chrome', name: 'Chrome', action: 1, showIcon: true },
-      { id: 99, pkg: 'com.hmdm.launcher', name: 'Headwind agent', action: 1, showIcon: false }, // untouched
-    ],
+    applications: [],
     applicationSettings: [{ id: 1, applicationId: 11, name: 'ProxyMode', value: 'fixed_servers' }],
   };
+  // GET /configurations/applications/4 — every app, `selected` saying whether this configuration
+  // links it, `usedVersionId` the applicationversions(id) the link points at.
+  configApps = [
+    { id: 11, pkg: 'com.android.chrome', name: 'Chrome', url: 'https://mdm/chrome.apk', latestVersion: 10010, usedVersionId: 10010, action: 1, showIcon: true, remove: false, selected: true },
+    { id: 99, pkg: 'com.hmdm.launcher', name: 'Headwind agent', latestVersion: 10099, usedVersionId: 10099, action: 1, showIcon: false, remove: false, selected: true }, // untouched
+    { id: 12, pkg: 'com.zhiliaoapp.musically', name: 'TikTok', latestVersion: 10011, usedVersionId: null, action: 1, showIcon: false, remove: false, selected: false },
+    { id: 13, pkg: 'com.whatsapp', name: 'WhatsApp', latestVersion: 10012, usedVersionId: null, action: 1, showIcon: false, remove: false, selected: false },
+  ];
   calls = [];
   __resetAuthCache();
 }
@@ -49,6 +55,7 @@ globalThis.fetch = async (url, opts = {}) => {
     catalogue.push(app);
     return ok(app);
   }
+  if (path === '/rest/private/configurations/applications/4' && method === 'GET') return ok(JSON.parse(JSON.stringify(configApps)));
   if (path === '/rest/private/configurations/4' && method === 'GET') return ok(JSON.parse(JSON.stringify(configuration)));
   if (path === '/rest/private/configurations' && method === 'PUT') {
     configuration = JSON.parse(opts.body);
@@ -79,7 +86,12 @@ await check('Chrome (has an APK) is Install with its icon', async () => {
   assert.equal(byPkg['com.android.chrome'].action, 1); assert.equal(byPkg['com.android.chrome'].showIcon, true);
 });
 await check('the agent entry the operator had is untouched', async () => {
-  assert.deepEqual(byPkg['com.hmdm.launcher'], { id: 99, pkg: 'com.hmdm.launcher', name: 'Headwind agent', action: 1, showIcon: false });
+  // Read from the links endpoint and written straight back — this is what stops a push from
+  // silently unlinking every app added by hand in the panel.
+  assert.deepEqual(byPkg['com.hmdm.launcher'], {
+    id: 99, pkg: 'com.hmdm.launcher', name: 'Headwind agent', latestVersion: 10099,
+    usedVersionId: 10099, action: 1, showIcon: false, remove: false, selected: true,
+  });
 });
 await check('every other configuration field survived the round trip', async () => {
   assert.equal(configuration.kioskMode, false);
@@ -94,15 +106,18 @@ await check('the summary counts what happened', async () => {
 await check('the configuration was read before it was written', async () => {
   assert.ok(calls.indexOf('GET /rest/private/configurations/4') < calls.indexOf('PUT /rest/private/configurations'));
 });
-await check('every entry carries the app version id Headwind links against', async () => {
-  // configurationapplications.applicationversionid is an integer FK; without it the real server
-  // rejects the whole save with a type error and nothing is written.
-  assert.equal(byPkg['com.zhiliaoapp.musically'].applicationVersionId, 10011);
-  assert.equal(byPkg['com.whatsapp'].applicationVersionId, 10012);
-  assert.equal(byPkg['com.android.chrome'].applicationVersionId, 10010);
+await check('every entry carries usedVersionId, the version id the link points at', async () => {
+  // configurationapplications.applicationversionid is an integer FK fed from usedVersionId.
+  // Without it the real server rejects the entire save with a type error and nothing is written.
+  assert.equal(byPkg['com.zhiliaoapp.musically'].usedVersionId, 10011);
+  assert.equal(byPkg['com.whatsapp'].usedVersionId, 10012);
+  assert.equal(byPkg['com.android.chrome'].usedVersionId, 10010, 'an existing link keeps its pinned version');
   for (const pkg of ['com.zhiliaoapp.musically', 'com.whatsapp', 'com.android.chrome', 'com.instagram.android']) {
-    assert.equal(typeof byPkg[pkg].applicationVersionId, 'number', `${pkg} needs a numeric version id`);
+    assert.equal(typeof byPkg[pkg].usedVersionId, 'number', `${pkg} needs a numeric version id`);
   }
+});
+await check('only apps this configuration uses are written back', async () => {
+  assert.ok(configuration.applications.every((a) => a.selected), 'no unselected catalogue app becomes a link');
 });
 
 console.log('\n2. a second push is idempotent');
@@ -174,6 +189,7 @@ const baseFetch = async (url, opts = {}) => {
     catalogue.push(app);
     return ok(app);
   }
+  if (path === '/rest/private/configurations/applications/4' && method === 'GET') return ok(JSON.parse(JSON.stringify(configApps)));
   if (path === '/rest/private/configurations/4' && method === 'GET') return ok(JSON.parse(JSON.stringify(configuration)));
   if (path === '/rest/private/configurations' && method === 'PUT') { configuration = JSON.parse(opts.body); return ok(null); }
   return new Response('not found', { status: 404 });
@@ -194,7 +210,7 @@ reset();
 globalThis.fetch = baseFetch;
 // The catalogue entry for a blocked Play app carries a `configurations` array in the real server;
 // the pushed configuration entry must not carry it back.
-catalogue.push({ id: 21, pkg: 'com.sideload.thing', name: 'Thing', configurations: [{ id: 4, password: 'SECRETHASH' }] });
+catalogue.push({ id: 21, pkg: 'com.sideload.thing', name: 'Thing', latestVersion: 10021, configurations: [{ id: 4, password: 'SECRETHASH' }] });
 await pushPolicyApps(env, 4, [{ package_name: 'com.sideload.thing', state: 'blocked' }]);
 await check('the linked entry has only link fields, no nested configurations', async () => {
   const e = configuration.applications.find((a) => a.pkg === 'com.sideload.thing');
@@ -217,13 +233,14 @@ reset();
     if (path === '/rest/private/applications/android' && method === 'PUT') {
       // The server accepted the create but returns an opaque envelope with no id (a real build does this).
       const body = JSON.parse(opts.body);
-      catalogue.push({ id: 555, pkg: body.pkg, name: body.name });
+      catalogue.push({ id: 555, pkg: body.pkg, name: body.name, latestVersion: 20555 });
       return Response.json({ status: 'OK', data: {} });
     }
     if (path.startsWith('/rest/private/applications/search/')) {
       const value = decodeURIComponent(path.split('/').pop());
       return Response.json({ status: 'OK', data: catalogue.filter((a) => a.pkg === value) });
     }
+    if (path === '/rest/private/configurations/applications/4' && method === 'GET') return Response.json({ status: 'OK', data: JSON.parse(JSON.stringify(configApps)) });
     if (path === '/rest/private/configurations/4' && method === 'GET') return Response.json({ status: 'OK', data: JSON.parse(JSON.stringify(configuration)) });
     if (path === '/rest/private/configurations' && method === 'PUT') { configuration = JSON.parse(opts.body); return Response.json({ status: 'OK', data: null }); }
     return new Response('not found', { status: 404 });
@@ -247,6 +264,7 @@ reset();
     const method = opts.method || 'GET';
     if (path === '/rest/public/jwt/login') return Response.json({ status: 'OK', data: { id_token: 'jwt' } });
     if (path === '/rest/private/applications/search') return Response.json({ status: 'OK', data: catalogue });
+    if (path === '/rest/private/configurations/applications/4' && method === 'GET') return Response.json({ status: 'OK', data: JSON.parse(JSON.stringify(configApps)) });
     if (path === '/rest/private/configurations/4' && method === 'GET') return Response.json({ status: 'OK', data: JSON.parse(JSON.stringify(configuration)) });
     if (path === '/rest/private/configurations' && method === 'PUT') return Response.json({ status: 'ERROR', message: 'configuration is locked' });
     return new Response('not found', { status: 404 });

@@ -29,7 +29,8 @@ const ENDPOINTS = {
   deviceSearch: '/rest/private/devices/search',       // POST DeviceSearchRequest -> DeviceListView
   deviceUpdate: '/rest/private/devices',              // PUT Device -> Response
   configurationList: '/rest/private/configurations/list', // GET -> [LookupItem]
-  configurationGet: (id) => `/rest/private/configurations/${id}`, // GET -> Configuration (with applications)
+  configurationGet: (id) => `/rest/private/configurations/${id}`, // GET -> Configuration (applications is EMPTY, see below)
+  configurationApps: (id) => `/rest/private/configurations/applications/${id}`, // GET -> every app, `selected` = linked
   configurationUpdate: '/rest/private/configurations',    // PUT Configuration -> Response
   applicationSearch: '/rest/private/applications/search', // GET -> [Application] (the whole catalogue)
   applicationSearchValue: (v) => `/rest/private/applications/search/${encodeURIComponent(v)}`, // GET -> [Application] filtered
@@ -237,6 +238,15 @@ export async function getConfiguration(env, configurationId) {
   return payload(await call(env, ENDPOINTS.configurationGet(configurationId), { method: 'GET' }));
 }
 
+// The configuration's app links. GET /private/configurations/{id} returns `applications: []` even
+// when the configuration has links — the links live here instead. Every application comes back,
+// with `selected` saying whether this configuration uses it, and `usedVersionId` holding the
+// applicationversions(id) the link points at. These objects are what the PUT wants back.
+export async function getConfigurationApplications(env, configurationId) {
+  const data = payload(await call(env, ENDPOINTS.configurationApps(configurationId), { method: 'GET' }));
+  return Array.isArray(data) ? data : [];
+}
+
 // Writes a policy's app rules into a Headwind configuration.
 //
 // rules: [{ package_name, state }] with state 'allowed' | 'blocked' | 'hidden'. Every rule becomes
@@ -252,69 +262,88 @@ export async function pushPolicyApps(env, configurationId, rules) {
   const config = await getConfiguration(env, configurationId);
   if (!config || typeof config !== 'object') throw new Error(`Headwind configuration ${configurationId} not found`);
 
+  // The app links come from their own endpoint, NOT from the configuration object — that returns
+  // `applications: []` even for a configuration with links. Reading them here is also what keeps
+  // the operator's hand-made entries: writing the configuration back with a list built from
+  // anything else would silently unlink every app they had added by hand.
+  const links = await getConfigurationApplications(env, configurationId);
+  const byId = new Map(links.map((a) => [a.id, { ...a }]));
+  const byPkg = new Map(links.map((a) => [String(a.pkg || '').toLowerCase(), a.id]));
+
   const catalogue = new Map((await listApplications(env)).map((a) => [String(a.pkg || '').toLowerCase(), a]));
   const created = [];
   const errors = [];
-
-  const byId = new Map((Array.isArray(config.applications) ? config.applications : []).map((a) => [a.id, a]));
   const summary = { remove: 0, install: 0, icon: 0 };
 
   for (const rule of rules) {
-    // Android package names are case-sensitive, so the catalogue entry must be created with the
-    // package exactly as written (`com.google.android.GoogleCamera`). The lowercased form is only
-    // a lookup key, to match case-insensitively against whatever Headwind already stored.
+    // Android package names are case-sensitive, so anything created keeps the package exactly as
+    // written (`com.google.android.GoogleCamera`). The lowercased form is only a lookup key.
     const pkg = String(rule.package_name || '').trim();
     if (!pkg) continue;
     const key = pkg.toLowerCase();
-    let app = catalogue.get(key);
-    if (!app) {
-      try {
-        app = await createApplication(env, { pkg, name: rule.label || pkg });
-        if (!app.id) throw new Error('create returned no id');
-        catalogue.set(key, app);
-        created.push(pkg);
-      } catch (err) {
-        errors.push(`${pkg}: ${err.message}`);
-        continue;
-      }
-    }
-    // A freshly created app's response may omit latestVersion, and without it the link below has
-    // no version to point at. Read the app back once so the id is there.
-    if (app.latestVersion == null) {
-      try {
-        const refreshed = await findApplicationByPkg(env, app.pkg || pkg);
-        if (refreshed && refreshed.latestVersion != null) {
-          app = refreshed;
-          catalogue.set(key, app);
-        }
-      } catch { /* fall through: the entry below simply carries no version id */ }
-    }
-    const remove = rule.state === 'blocked' || rule.state === 'hidden';
-    const hasApk = Boolean(app.url || app.urlArm64 || app.urlArmeabi);
-    const action = remove ? HW_ACTION.REMOVE : (hasApk ? HW_ACTION.INSTALL : HW_ACTION.NONE);
-    if (remove) summary.remove++; else if (action === HW_ACTION.INSTALL) summary.install++; else summary.icon++;
-    // Keep an entry that is already in the configuration exactly as it is, changing only the action
-    // and icon; for a newly linked app write a minimal entry. Never spread the whole catalogue
-    // Application here: it carries a `configurations` array (every other configuration using the
-    // app, each with its own admin password hash), which would be echoed back into this PUT.
-    const existing = byId.get(app.id) || { id: app.id, pkg: app.pkg, name: app.name };
-    const entry = { ...existing, action, showIcon: !remove, remove };
 
-    // Headwind links a configuration to a specific VERSION of an app, not just to the app:
-    // configurationapplications.applicationversionid is an integer FK to applicationversions(id),
-    // and every row the panel writes has one. Application.latestVersion IS that id ("An ID of a
-    // most recent version for application"). Omitting it made the save fail server-side with
-    //   column "applicationversionid" is of type integer but expression is of type text
-    // and the whole push was rejected. An entry the operator already pinned to some version keeps
-    // the version it has; only a new link takes the latest.
-    if (entry.applicationVersionId == null) {
-      const versionId = Number(app.latestVersion);
-      if (Number.isInteger(versionId) && versionId > 0) entry.applicationVersionId = versionId;
+    let entry = byPkg.has(key) ? byId.get(byPkg.get(key)) : null;
+    let app = catalogue.get(key);
+
+    if (!entry) {
+      if (!app) {
+        try {
+          app = await createApplication(env, { pkg, name: rule.label || pkg });
+          if (!app.id) throw new Error('create returned no id');
+          catalogue.set(key, app);
+          created.push(pkg);
+        } catch (err) {
+          errors.push(`${pkg}: ${err.message}`);
+          continue;
+        }
+      }
+      // A freshly created app's response can omit latestVersion, and a link with no version id is
+      // refused by the server, so read it back once rather than writing a broken link.
+      if (app.latestVersion == null) {
+        try {
+          const refreshed = await findApplicationByPkg(env, app.pkg || pkg);
+          if (refreshed && refreshed.latestVersion != null) { app = refreshed; catalogue.set(key, app); }
+        } catch { /* leave it: the guard below reports the app instead of writing a bad link */ }
+      }
+      // Build the new link from the catalogue record, minus `configurations`: on a catalogue
+      // Application that array lists every OTHER configuration using the app, each carrying that
+      // configuration's admin password hash. The links endpoint returns it empty; the catalogue
+      // does not, and echoing it into this PUT would copy those secrets around.
+      const { configurations: _otherConfigurations, ...appFields } = app;
+      entry = { ...appFields };
+      byId.set(app.id, entry);
+      byPkg.set(key, app.id);
     }
-    byId.set(app.id, entry);
+
+    const remove = rule.state === 'blocked' || rule.state === 'hidden';
+    const source = app || entry;
+    const hasApk = Boolean(source.url || source.urlArm64 || source.urlArmeabi);
+    const action = remove ? HW_ACTION.REMOVE : (hasApk ? HW_ACTION.INSTALL : HW_ACTION.NONE);
+
+    // usedVersionId is the applicationversions(id) this link points at — an integer column, and the
+    // one field that made every earlier push fail server-side with
+    //   column "applicationversionid" is of type integer but expression is of type text
+    // A link the operator already pinned to a version keeps it; a new one takes the latest.
+    if (entry.usedVersionId == null) {
+      const versionId = Number(entry.latestVersion ?? source.latestVersion);
+      if (Number.isInteger(versionId) && versionId > 0) entry.usedVersionId = versionId;
+    }
+    if (entry.usedVersionId == null) {
+      errors.push(`${pkg}: no application version to link against`);
+      continue;
+    }
+
+    entry.selected = true;   // `selected` is what marks the app as belonging to this configuration
+    entry.action = action;
+    entry.showIcon = !remove;
+    entry.remove = remove;
+
+    if (remove) summary.remove++; else if (action === HW_ACTION.INSTALL) summary.install++; else summary.icon++;
   }
 
-  config.applications = [...byId.values()];
+  // Only the apps this configuration actually uses go back; the rest of the catalogue is returned
+  // by the read above with selected=false and must not become links.
+  config.applications = [...byId.values()].filter((a) => a.selected);
   await call(env, ENDPOINTS.configurationUpdate, { method: 'PUT', body: JSON.stringify(config) });
 
   return { configurationId, entries: config.applications.length, created, errors, ...summary };
