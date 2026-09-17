@@ -35,6 +35,7 @@ import { parseSearchUrl, searchCacheKey, isSearchEngineHost } from './search.js'
 import { keywordRating } from './keywords.js';
 import { classifyDomain } from './classify.js';
 import { registrableDomain, normalizeHost } from './domains.js';
+import { appMediaHost } from './app-media.js';
 import { isVisibleAtLevel, levelDefinition, normalizeDeviceLevel, normalizeSiteLevel, normalizeTag, MIN_LEVEL, NEVER_LEVEL, DEFAULT_TAG } from './levels.js';
 import { resolveEffectivePolicy, SHIUR_POLICY_ID } from './policy.js';
 import { sha256Hex, timingSafeEqual } from './crypto.js';
@@ -244,6 +245,18 @@ export async function handleProxyCheck(request, env, now = new Date()) {
   // 0. Locked by the policy in force right now (a shiur window): nothing at all.
   if (locked) {
     return json({ ...base, cache_scope: 'host', allow: false, action: 'locked', hostname, reason: 'This phone is locked for shiur right now.' });
+  }
+
+  // 0b. A pinned app's media host (Spotify artwork), on a rung where in-app images are off. Ahead of
+  //     the no-web check: rung 1 has no browser but does have apps, and this is an app decision.
+  //     Host-scoped and model-free — the hostname is the whole decision, and it is made at the TLS
+  //     handshake (the helper asks with "host:443"), which is the only point the proxy ever sees of
+  //     a spliced connection. Refused there, the connection is bumped instead, the app rejects the
+  //     filter's certificate, and the picture simply never arrives.
+  const mediaApp = def && !def.appMedia ? appMediaHost(hostname) : null;
+  if (mediaApp) {
+    return json({ ...base, cache_scope: 'host', allow: false, action: 'image_blocked', hostname, app: mediaApp,
+      reason: `Images inside ${mediaApp} are turned off at this level.` });
   }
 
   // 1. Rung 1: no web at all.

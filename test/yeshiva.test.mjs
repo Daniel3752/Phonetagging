@@ -91,6 +91,10 @@ out = await (await proxyCheck('10.66.0.4', 'https://brand-new-site.example/pic.j
 check('an image by extension is blocked', out.allow === false && out.action === 'image_blocked', JSON.stringify(out));
 out = await (await proxyCheck('10.66.0.4', 'https://cdn.example/abc123', { dest: 'image' }, LUNCH)).json();
 check('an image by Sec-Fetch-Dest is blocked', out.allow === false && out.action === 'image_blocked', JSON.stringify(out));
+out = await (await proxyCheck('10.66.0.4', 'https://i.scdn.co/', {}, LUNCH)).json();
+check('Spotify artwork host refused at the handshake, host-scoped, no model', out.allow === false && out.action === 'image_blocked' && out.app === 'spotify' && out.cache_scope === 'host' && modelCalls === 0, JSON.stringify(out));
+out = await (await proxyCheck('10.66.0.4', 'https://audio-fa.scdn.co/', {}, LUNCH)).json();
+check('the audio host is not touched', out.allow === true, JSON.stringify(out));
 out = await (await proxyCheck('10.66.0.4', 'https://cdn.example/abc123', { dest: 'document' }, LUNCH)).json();
 check('the same URL as a document is allowed', out.allow === true);
 

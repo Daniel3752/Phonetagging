@@ -69,10 +69,16 @@ app keeps working. So the proxy cannot see, let alone block, a Status view. The 
 that could are an on-device **Accessibility service** (not built, and a large piece of work) or
 dropping WhatsApp entirely. Confirm that conclusion cheaply before designing anything.
 
-**3. Turning off images in Spotify.** Same shape of problem: Spotify is a pinned, spliced app, so
-the proxy cannot strip anything inside it. The only levers are Spotify's own settings — check
-whether its data-saver mode suppresses canvas/artwork enough to be worth it — or removing the app.
-Do not expect a filter-side answer.
+**3. Turning off images in Spotify — BUILT (2026-09-17), needs a phone test.** The earlier note
+said the proxy could not touch a pinned app; that was half right. It cannot see inside Spotify,
+but Spotify fetches artwork, playlist mosaics and Canvas videos from hostnames of its own
+(`i.scdn.co`, `mosaic.scdn.co`, `image-cdn-*.spotifycdn.com`, `canvaz.scdn.co` …), separate from
+the audio hosts, and a hostname is visible at the TLS handshake. The Worker now refuses those hosts
+(`src/app-media.js`) on every rung with `appMedia: false` in `levels.js` — all four yeshiva rungs,
+standard rungs 1–2 — so the app plays against blank artwork. To verify on the Vortex: deploy, clear
+Spotify's storage once (it caches artwork), play something. If playback itself breaks, the video
+hosts at the end of the list are the suspects; drop them and retest. Instagram and WhatsApp cannot
+be done this way — their pictures share hosts with everything else.
 
 **4. Isaac's phone: migrate, then test the browser.** Before anything else on that handset:
 set **MTU 1280** in its WireGuard app, check whether the iptables bypass
@@ -80,9 +86,9 @@ set **MTU 1280** in its WireGuard app, check whether the iptables bypass
 recent enough for `udm=14`, and add always-on + lockdown. Then migrate and run the NEW-PHONE.md §F
 battery.
 
-A theme worth naming: items 2 and 3 are both requests to control behaviour *inside* a pinned app,
-which is the one thing this architecture cannot do. Saying so early is cheaper than proving it
-twice.
+A theme worth naming: items 2 and 3 are both requests to control behaviour *inside* a pinned app.
+The network can do it only when the app keeps that content on hosts of its own (Spotify does;
+WhatsApp and Instagram do not). Everything else needs an on-device service.
 
 ### Where the app tier stands (2026-09-16, all deployed and live)
 
