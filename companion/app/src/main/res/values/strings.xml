@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Shmira</string>
+    <string name="channel_name">Protection status</string>
+    <string name="channel_description">Shows that Shmira is running. Nothing to act on.</string>
+    <string name="notification_text">Shmira is protecting this phone</string>
+</resources>

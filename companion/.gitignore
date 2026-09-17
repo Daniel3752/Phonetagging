@@ -1,0 +1,15 @@
+# Gradle / Android build output
+build/
+.gradle/
+local.properties
+
+# Signing material: never commit
+*.keystore
+*.jks
+keystore.properties
+signing/
+
+# IDE
+.idea/
+*.iml
+.kotlin/
