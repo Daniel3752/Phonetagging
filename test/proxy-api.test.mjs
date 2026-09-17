@@ -205,6 +205,26 @@ await check('an image request loads on a rung with images on', async () => {
   const r = await (await ask({ user: 'phone-open', url: 'https://news.example.com/pic.jpg' })).json();
   assert.equal(r.allow, true);
 });
+await check("a pinned app's artwork host is refused on a rung with in-app images off", async () => {
+  // The helper asks at the TLS handshake with the bare host, so this is what the Worker sees.
+  const callsBefore = geminiCalls;
+  const r = await (await ask({ user: 'phone-a', url: 'https://i.scdn.co/' })).json();
+  assert.equal(r.allow, false);
+  assert.equal(r.action, 'image_blocked');
+  assert.equal(r.app, 'spotify');
+  assert.equal(r.cache_scope, 'host');
+  assert.equal(geminiCalls, callsBefore, 'no model call for a listed host');
+});
+await check('a subdomain of a listed host is refused too; a sibling (the audio host) is not', async () => {
+  const sub = await (await ask({ user: 'phone-a', url: 'https://x.i.scdn.co/' })).json();
+  assert.equal(sub.action, 'image_blocked');
+  const audio = await (await ask({ user: 'phone-a', url: 'https://audio-fa.scdn.co/' })).json();
+  assert.notEqual(audio.action, 'image_blocked');
+});
+await check('the artwork host loads on a rung with in-app images on', async () => {
+  const r = await (await ask({ user: 'phone-open', url: 'https://i.scdn.co/' })).json();
+  assert.notEqual(r.action, 'image_blocked');
+});
 await check('image search is refused where the rung does not permit it', async () => {
   const r = await (await ask({ user: 'phone-a', url: 'https://www.google.com/search?q=cats&udm=2' })).json();
   assert.equal(r.allow, false);
