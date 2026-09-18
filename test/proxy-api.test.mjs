@@ -221,6 +221,13 @@ await check('a subdomain of a listed host is refused too; a sibling (the audio h
   const audio = await (await ask({ user: 'phone-a', url: 'https://audio-fa.scdn.co/' })).json();
   assert.notEqual(audio.action, 'image_blocked');
 });
+await check("the Play Store's picture host is refused too, and the account-media host next to it is not", async () => {
+  const store = await (await ask({ user: 'phone-a', url: 'https://play-lh.googleusercontent.com/' })).json();
+  assert.equal(store.action, 'image_blocked');
+  assert.equal(store.app, 'play');
+  const photos = await (await ask({ user: 'phone-a', url: 'https://lh3.googleusercontent.com/' })).json();
+  assert.notEqual(photos.action, 'image_blocked');
+});
 await check('the artwork host loads on a rung with in-app images on', async () => {
   const r = await (await ask({ user: 'phone-open', url: 'https://i.scdn.co/' })).json();
   assert.notEqual(r.action, 'image_blocked');

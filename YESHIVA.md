@@ -34,10 +34,13 @@ rung 4 in `YESHIVA_LEVELS` (`src/levels.js`) — one word.
   flat light-grey SVG that stretches to whatever box the page gave the picture. Layout survives;
   the picture is a grey rectangle. This works for images with no file extension too, because the
   helper forwards `Sec-Fetch-Dest` (squid.conf now passes `%>ha{Sec-Fetch-Dest}`).
-- **Images off inside Spotify too.** The app is spliced and cannot be read, but its artwork and
-  Canvas videos come from hosts of their own (`src/app-media.js`), and those are refused at the TLS
-  handshake on every yeshiva rung. Music plays; the pictures never arrive. Standard rungs 1–2 the
-  same; standard 3–5 leave Spotify alone (`appMedia` in `levels.js`).
+- **Images off inside Spotify and the Play Store too.** Both apps are spliced and cannot be read,
+  but Spotify's artwork and Canvas videos, and the Play Store's icons and screenshots, come from
+  hosts of their own (`src/app-media.js`), and those are refused at the TLS handshake on every
+  yeshiva rung. Music plays and the store still installs and updates; the pictures never arrive.
+  Standard rungs 1–2 the same; standard 3–5 leave both alone (`appMedia` in `levels.js`). The Play
+  host is inside the googleusercontent splice, so squid needs the `app_media_hosts` rule
+  (`scripts/apply-yeshiva-squid.sh` step 6) to put it to the filter before splicing.
 - **Search:** allowed, screened by the keyword list (`keyword_rules`) and by anything already on
   file as NEVER from the standard phones; image search off; result thumbnails are images and get
   blanked like everything else. Not model-judged.

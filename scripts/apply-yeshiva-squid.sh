@@ -5,13 +5,15 @@
 # test_phones rule, the access log) — install-squid.sh would overwrite those. Idempotent: run it
 # twice and the second run changes nothing.
 #
-# The four edits (see scripts/squid.conf for the reasoning next to each):
+# The edits (see scripts/squid.conf for the reasoning next to each):
 #   1. external_acl_type format gains %>ha{Sec-Fetch-Dest}   (images with no file extension)
 #   2. deny_info URL gains &why=%o                             (the block page learns "locked")
 #   3. http_port 3128 gains name=browser                       (the browser's own door)
 #   4. acl browser_port myportname browser + ssl_bump bump browser_port (decrypt only that door)
 #   5. the google_system_hosts pre-filter allow excludes the browser port (else Chrome's requests
 #      to www.gstatic.com / lh3.googleusercontent.com skip the filter and images leak)
+#   6. acl app_media_hosts + `ssl_bump bump app_media_hosts !filter_allows` before the splice, so the
+#      Play Store's picture host is put to the filter instead of being spliced with googleusercontent
 #
 # Usage:  sudo scripts/apply-yeshiva-squid.sh            (from a clone on the deployed branch)
 #         SQUID_CONF=/tmp/x.conf scripts/apply-yeshiva-squid.sh --dry-run
@@ -67,6 +69,22 @@ if grep -q '^ssl_bump peek step1' "$work"; then
     note "4b. placed ssl_bump bump browser_port right after the peek"
   else note "4b. ssl_bump bump browser_port already in place"; fi
 else echo "!! 4b. no 'ssl_bump peek step1' line to anchor on. Not touching it." >&2; fi
+
+# 6. in-app pictures on Google hosts (Play Store icons/screenshots): ask the filter before the splice.
+#    The acl goes before `acl google_system_hosts` like browser_port; the rule goes right before
+#    `ssl_bump splice splice_hosts`, which would otherwise swallow the host. Both idempotent.
+if grep -q '^acl google_system_hosts dstdomain' "$work"; then
+  if ! grep -q '^acl app_media_hosts ssl::server_name play-lh.googleusercontent.com$' "$work"; then
+    sed -i '/^acl app_media_hosts ssl::server_name/d; /^acl google_system_hosts dstdomain/i acl app_media_hosts ssl::server_name play-lh.googleusercontent.com' "$work"; changed=1
+    note "6a. added acl app_media_hosts"
+  else note "6a. acl app_media_hosts already present"; fi
+else echo "!! 6a. no 'acl google_system_hosts' line to anchor on. Not touching it." >&2; fi
+if grep -q '^ssl_bump splice splice_hosts$' "$work"; then
+  if ! grep -B1 '^ssl_bump splice splice_hosts$' "$work" | grep -q '^ssl_bump bump app_media_hosts !filter_allows$'; then
+    sed -i '/^ssl_bump bump app_media_hosts !filter_allows$/d; /^ssl_bump splice splice_hosts$/i ssl_bump bump app_media_hosts !filter_allows' "$work"; changed=1
+    note "6b. placed ssl_bump bump app_media_hosts !filter_allows before the splice"
+  else note "6b. app_media_hosts bump rule already in place"; fi
+else echo "!! 6b. no 'ssl_bump splice splice_hosts' line to anchor on. Not touching it." >&2; fi
 
 # 5. keep the Google exemption off the browser port
 if grep -q '^http_access allow google_system_hosts web_ports$' "$work"; then
