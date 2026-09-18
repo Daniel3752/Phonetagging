@@ -324,23 +324,38 @@ final class AgentClient {
     // Network gate.
 
     private boolean hasValidatedNetwork() {
-        ConnectivityManager cm = context.getSystemService(ConnectivityManager.class);
-        if (cm == null) {
-            return true; // cannot tell; do not hold the nudge forever
+        // Every failure here answers "yes". This gate is an optimisation, not a guard: being wrong
+        // costs one wasted nudge, while throwing would kill the watcher the whole app exists for.
+        // (It did: the ACCESS_NETWORK_STATE permission was missing and the SecurityException took
+        // the process down on the first nudge, silently, two minutes after every start.)
+        try {
+            ConnectivityManager cm = context.getSystemService(ConnectivityManager.class);
+            if (cm == null) {
+                return true;
+            }
+            Network network = cm.getActiveNetwork();
+            NetworkCapabilities caps = network == null ? null : cm.getNetworkCapabilities(network);
+            return caps != null
+                    && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                    && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED);
+        } catch (RuntimeException e) {
+            Log.w(TAG, "cannot read the network state (" + e + "); nudging anyway");
+            return true;
         }
-        Network network = cm.getActiveNetwork();
-        NetworkCapabilities caps = network == null ? null : cm.getNetworkCapabilities(network);
-        return caps != null
-                && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-                && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED);
     }
 
     private void waitForNetwork() {
         if (networkCallback != null) {
             return;
         }
-        ConnectivityManager cm = context.getSystemService(ConnectivityManager.class);
+        ConnectivityManager cm;
+        try {
+            cm = context.getSystemService(ConnectivityManager.class);
+        } catch (RuntimeException e) {
+            cm = null;
+        }
         if (cm == null) {
+            main.postDelayed(this::begin, 60_000L);
             return;
         }
         networkCallback = new ConnectivityManager.NetworkCallback() {
@@ -373,13 +388,13 @@ final class AgentClient {
         if (networkCallback == null) {
             return;
         }
-        ConnectivityManager cm = context.getSystemService(ConnectivityManager.class);
-        if (cm != null) {
-            try {
+        try {
+            ConnectivityManager cm = context.getSystemService(ConnectivityManager.class);
+            if (cm != null) {
                 cm.unregisterNetworkCallback(networkCallback);
-            } catch (RuntimeException ignored) {
-                // already gone
             }
+        } catch (RuntimeException ignored) {
+            // never registered, already gone, or no permission
         }
         networkCallback = null;
     }
