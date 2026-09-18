@@ -19,48 +19,74 @@
 // effect once squid asks about this host before splicing it — see the app_media_hosts ACL in
 // scripts/squid.conf.
 //
-// Sources for the Spotify list: techlockdown.com "block images and videos on Spotify" and
-// cameronpak.com "block image and video CDN domains for Spotify", cross-checked. Deliberately NOT
-// a wildcard on scdn.co or spotifycdn.com: audio-fa.scdn.co and friends carry the music itself.
+// WHY THIS IS NOT A FIXED HOST LIST. It was, and Spotify walked straight around it: the published
+// lists name image-cdn-ak (Akamai) and image-cdn-fa (Fastly), and a live phone fetched its Canvas
+// videos from video-cf.spotifycdn.com — the same CDN role behind Cloudflare, a suffix nobody had
+// written down. Spotify names these hosts by ROLE and then by provider, so the role is the stable
+// part and the provider is not. Matching the role survives the next provider; matching the exact
+// host does not. The rule below is deliberately an allowlist of roles rather than a denylist, so a
+// host whose role is unknown keeps working rather than silently breaking the app.
 
 import { normalizeHost } from './domains.js';
 
-export const APP_MEDIA_HOSTS = {
-  spotify: [
-    // Artwork, avatars, playlist covers, generated playlist art.
-    'i.scdn.co', 'mosaic.scdn.co', 'o.scdn.co', 't.scdn.co', 'p.scdn.co', 'pl.scdn.co', 'misc.scdn.co',
-    'charts-images.scdn.co', 'daily-mix.scdn.co', 'dailymix-images.scdn.co', 'lineup-images.scdn.co',
-    'merch-img.scdn.co', 'newjams-images.scdn.co', 'profile-images.scdn.co', 'seeded-session-images.scdn.co',
-    'image-cdn-ak.spotifycdn.com', 'image-cdn-fa.spotifycdn.com', 'seed-mix-image.spotifycdn.com',
-    'thisis-images.spotifycdn.com', 'pickasso.spotifycdn.com', 'mixed-media-images.spotifycdn.com',
-    'wrapped-images.spotifycdn.com', 'daylist.spotifycdn.com', 'lexicon-assets.spotifycdn.com',
-    'concerts.spotifycdn.com', 'misc.spotifycdn.com', 'fex.spotifycdn.com', 'heads-fa-tls13.spotifycdn.com',
-    // Canvas (the looping video behind a track) and video podcasts. If music playback ever breaks
-    // after this list is applied, these are the ones to suspect first.
-    'canvaz.scdn.co', 'video-fa.scdn.co', 'video-akpcw.spotifycdn.com', 'video-akpcw-cdn-spotify-com.akamaized.net',
-    'video-fa.cdn.spotify.com', 'video-fa-b.cdn.spotify.com', 'video4-ak.spotify.com', 'podz-content.spotifycdn.com',
-  ],
-  play: [
-    // Icons, screenshots and promo images in the Play Store app. Nothing else lives here.
-    'play-lh.googleusercontent.com',
-  ],
-};
+// Domains whose subdomains are split by role this way. A host outside these is never matched here.
+const SPOTIFY_DOMAINS = ['scdn.co', 'spotifycdn.com', 'cdn.spotify.com', 'spotify.com'];
 
-// One flat lookup: host -> app. Built once at module load.
-const HOST_TO_APP = new Map();
-for (const [app, hosts] of Object.entries(APP_MEDIA_HOSTS)) {
-  for (const h of hosts) HOST_TO_APP.set(normalizeHost(h), app);
+// Role labels that carry pictures or video. Matched against the host's FIRST label, exactly.
+const SPOTIFY_MEDIA_LABELS = new Set([
+  // Artwork, avatars, playlist covers, generated playlist art.
+  'i', 'o', 't', 'p', 'pl', 'misc', 'mosaic', 'fex', 'daylist', 'concerts', 'pickasso',
+  'charts-images', 'daily-mix', 'dailymix-images', 'lineup-images', 'merch-img', 'newjams-images',
+  'profile-images', 'seeded-session-images', 'seed-mix-image', 'thisis-images', 'wrapped-images',
+  'lexicon-assets', 'mixed-media-images', 'heads-fa-tls13',
+  // Canvas (the looping video behind a track) and video podcasts.
+  'canvaz', 'podz-content',
+]);
+
+// Role PREFIXES, matched against the first label. This is what catches a provider suffix nobody has
+// seen yet: image-cdn-ak, image-cdn-fa, image-cdn-cf, video-fa, video-cf, video-akpcw, video4-ak …
+const SPOTIFY_MEDIA_PREFIXES = ['image-cdn', 'image-', 'video-', 'video4', 'mosaic-'];
+
+// Roles that must NEVER be refused whatever else matches: the music itself, the API, DJ audio.
+// Checked first, so a future 'audio-video-…' oddity cannot cost the user their music.
+const SPOTIFY_KEEP_PREFIXES = ['audio', 'spclient', 'apresolve', 'dealer', 'gew', 'guc', 'dj-'];
+
+function endsWithDomain(host, domain) {
+  return host === domain || host.endsWith(`.${domain}`);
 }
 
-// The app whose media host this is, or null. A listed host matches itself and any subdomain of
-// itself (x.i.scdn.co), never a sibling (audio-fa.scdn.co is not under i.scdn.co).
+function isSpotifyMedia(host) {
+  if (!SPOTIFY_DOMAINS.some((d) => endsWithDomain(host, d))) return false;
+  const first = host.split('.')[0];
+  if (SPOTIFY_KEEP_PREFIXES.some((p) => first.startsWith(p))) return false;
+  if (SPOTIFY_MEDIA_LABELS.has(first)) return true;
+  return SPOTIFY_MEDIA_PREFIXES.some((p) => first.startsWith(p));
+}
+
+// The Play Store's pictures, all of them, on one host. Exact: the rest of googleusercontent carries
+// the account's own photos and mail attachments and must keep working.
+function isPlayMedia(host) {
+  return host === 'play-lh.googleusercontent.com';
+}
+
+const MATCHERS = [
+  ['spotify', isSpotifyMedia],
+  ['play', isPlayMedia],
+];
+
+// The app whose media host this is, or null.
 export function appMediaHost(hostname) {
   const h = normalizeHost(hostname);
   if (!h) return null;
-  const labels = h.split('.');
-  for (let i = 0; i < labels.length - 1; i++) {
-    const app = HOST_TO_APP.get(labels.slice(i).join('.'));
-    if (app) return app;
+  for (const [app, matches] of MATCHERS) {
+    if (matches(h)) return app;
   }
   return null;
 }
+
+// Every host shape this module refuses, for the docs and for a human check. Not used at runtime.
+export const APP_MEDIA_EXAMPLES = {
+  spotify: ['i.scdn.co', 'mosaic.scdn.co', 'image-cdn-ak.spotifycdn.com', 'image-cdn-cf.spotifycdn.com',
+    'video-fa.scdn.co', 'video-cf.spotifycdn.com', 'canvaz.scdn.co', 'pickasso.spotifycdn.com'],
+  play: ['play-lh.googleusercontent.com'],
+};
