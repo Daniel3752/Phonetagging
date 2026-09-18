@@ -1,6 +1,7 @@
 package com.getshmira.companion;
 
 import android.annotation.SuppressLint;
+import android.app.ActivityManager;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -15,6 +16,7 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
+import android.os.PowerManager;
 import android.util.Log;
 
 import java.util.ArrayList;
@@ -45,8 +47,13 @@ public class WatchService extends Service {
     /** Coalesce a burst of package events into one nudge this long after the last event. */
     static final long DEBOUNCE_MS = 3_000L;
 
-    /** Safety net: nudge regardless, so a missed broadcast costs at most this much. */
-    static final long PERIODIC_MS = 30L * 60L * 1000L;
+    /**
+     * Safety net: nudge regardless, so a missed broadcast costs at most this much. Kept long
+     * on purpose: a forced update runs with the agent's "user interaction" flag, which
+     * bypasses the configuration's app-update window and Wi-Fi-only download rule, so this
+     * must not become a schedule of its own. Package events are the primary path.
+     */
+    static final long PERIODIC_MS = 6L * 60L * 60L * 1000L;
 
     /**
      * First safety-net nudge after the service comes up. Catches installs that happened
@@ -95,8 +102,33 @@ public class WatchService extends Service {
             return;
         }
         agent = new AgentClient(this);
+        reportRestrictions();
         registerPackageReceiver();
         handler.postDelayed(periodicNudge, FIRST_PERIODIC_MS);
+    }
+
+    /**
+     * A background-restricted app (Settings > Battery > Restricted, Samsung's "Deep sleeping
+     * apps") is silently denied foreground status: startForeground does not throw, the
+     * service just gets stopped once the uid goes idle. Nothing here can fix that, so say
+     * so loudly, in logcat and once in the Headwind device log, so the operator sees the
+     * phone is unprotected.
+     */
+    private void reportRestrictions() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
+            return;
+        }
+        ActivityManager am = getSystemService(ActivityManager.class);
+        if (am != null && am.isBackgroundRestricted()) {
+            String note = "companion is background-restricted on this phone (Settings > Battery); "
+                    + "the install watcher will be stopped by the system";
+            Log.e(TAG, note);
+            agent.setStatusNote(note);
+        }
+        PowerManager pm = getSystemService(PowerManager.class);
+        if (pm != null && !pm.isIgnoringBatteryOptimizations(getPackageName())) {
+            Log.i(TAG, "not exempt from battery optimisation (normal; the foreground service keeps us up)");
+        }
     }
 
     @Override

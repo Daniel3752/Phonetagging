@@ -31,13 +31,18 @@
         android:supportsRtl="true">
 
         <!-- Invisible launcher entry: Headwind's "run after install" / "run at boot" start
-             this, and so can a person by tapping the icon. It starts the service and finishes. -->
+             this, and so can a person by tapping the icon. It starts the service and finishes.
+             showWhenLocked: Headwind launches it during a background sync, i.e. usually while
+             the phone is locked in a pocket. Android 12+ only lets a TOP app start a foreground
+             service, and an activity behind the keyguard is "top-sleeping", not top; shown over
+             the keyguard it counts as top. With the screen off it waits (see MainActivity), so
+             it must not be noHistory, which would finish it the moment it is no longer visible. -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:theme="@android:style/Theme.Translucent.NoTitleBar"
             android:excludeFromRecents="true"
-            android:noHistory="true">
+            android:showWhenLocked="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

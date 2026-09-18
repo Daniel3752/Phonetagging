@@ -13,44 +13,44 @@ if (hasKeystore) {
 }
 
 android {
-    namespace 'com.getshmira.companion'
-    compileSdk 34
+    namespace = 'com.getshmira.companion'
+    compileSdk = 34
 
     defaultConfig {
-        applicationId 'com.getshmira.companion'
-        minSdk 26
-        targetSdk 34
-        versionCode 1
-        versionName '0.1.0'
+        applicationId = 'com.getshmira.companion'
+        minSdk = 26
+        targetSdk = 34
+        versionCode = 1
+        versionName = '0.1.0'
     }
 
     // The Headwind plugin API is an AIDL interface (app/src/main/aidl/com/hmdm).
     buildFeatures {
-        aidl true
+        aidl = true
     }
 
     compileOptions {
-        sourceCompatibility JavaVersion.VERSION_17
-        targetCompatibility JavaVersion.VERSION_17
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
 
     signingConfigs {
         if (hasKeystore) {
             release {
-                storeFile rootProject.file(keystoreProperties['storeFile'])
-                storePassword keystoreProperties['storePassword']
-                keyAlias keystoreProperties['keyAlias']
-                keyPassword keystoreProperties['keyPassword']
+                storeFile = rootProject.file(keystoreProperties['storeFile'])
+                storePassword = keystoreProperties['storePassword']
+                keyAlias = keystoreProperties['keyAlias']
+                keyPassword = keystoreProperties['keyPassword']
             }
         }
     }
 
     buildTypes {
         release {
-            minifyEnabled false
-            shrinkResources false
+            minifyEnabled = false
+            shrinkResources = false
             if (hasKeystore) {
-                signingConfig signingConfigs.release
+                signingConfig = signingConfigs.release
             }
         }
     }
@@ -58,7 +58,7 @@ android {
     lint {
         // lintVitalRelease runs inside assembleRelease. Keep its report, but never let a
         // lint finding block the build of an app the MDM has to ship.
-        abortOnError false
+        abortOnError = false
     }
 }
 

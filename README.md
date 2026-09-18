@@ -96,6 +96,7 @@ Worth knowing before promising anything to families:
 | `src/admin-api.js` | Operator API behind `/api/admin/*` |
 | `src/admin-page.js` | Operator console (`/admin`) |
 | `src/block-page.js` | Block page (`/blocked`); also the blank placeholder served for a stripped image |
+| `companion/` | The Shmira companion Android app: on-phone install watcher that makes the Headwind agent re-apply its app rules the moment an app is installed (`companion/README.md`) |
 | `schema.sql`, `migrations/` | D1 schema |
 | `scripts/setup-gateway.sh` | One-time Gateway config |
 | `test/` | Offline test suite |

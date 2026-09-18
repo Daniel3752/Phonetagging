@@ -1,5 +1,6 @@
 package com.getshmira.companion;
 
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.util.Log;
@@ -18,11 +19,12 @@ final class Companion {
     /**
      * Starts {@link WatchService} as a foreground service.
      * <p>
-     * Valid on API 26 through 35 from the places this app calls it: a visible activity
+     * Valid on API 26 through 35 from the places this app calls it: a resumed activity
      * (the app is in the foreground) and the BOOT_COMPLETED / MY_PACKAGE_REPLACED
      * receivers, which Android 12+ exempts from the background foreground-service-start
-     * restriction. Never throws: an OEM or a future Android that refuses the start is
-     * logged, not crashed, and the next boot or MDM launch tries again.
+     * restriction. Never throws: a refusal (the activity path while the phone is locked or
+     * the screen is off, a background-restricted app, an OEM oddity) is logged and reported
+     * as false so the caller can try again later.
      *
      * @return true if the start was accepted by the system
      */
@@ -30,8 +32,15 @@ final class Companion {
         Intent intent = new Intent(context, WatchService.class)
                 .putExtra(WatchService.EXTRA_REASON, reason);
         try {
-            context.startForegroundService(intent);
-            Log.i(TAG, "startForegroundService requested (" + reason + ")");
+            // API 26-30 refuse silently by returning null (or a "?"/"!!" package) instead of
+            // throwing; API 31+ throw. Treat both as "not started".
+            ComponentName started = context.startForegroundService(intent);
+            String pkg = started == null ? null : started.getPackageName();
+            if (pkg == null || pkg.startsWith("?") || pkg.startsWith("!")) {
+                Log.e(TAG, "startForegroundService refused (" + reason + "): " + started);
+                return false;
+            }
+            Log.i(TAG, "startForegroundService accepted (" + reason + ")");
             return true;
         } catch (SecurityException | IllegalStateException e) {
             // ForegroundServiceStartNotAllowedException (API 31+) is an IllegalStateException.
