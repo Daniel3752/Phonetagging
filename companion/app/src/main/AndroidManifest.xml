@@ -43,9 +43,14 @@
             android:theme="@android:style/Theme.Translucent.NoTitleBar"
             android:excludeFromRecents="true"
             android:showWhenLocked="true">
+            <!-- INFO, not LAUNCHER: PackageManager.getLaunchIntentForPackage (what Headwind's
+                 Run after install / Run at boot use) looks for a MAIN activity in category INFO
+                 first, LAUNCHER second, so the agent can still start this app while no launcher
+                 shows an icon for it. To start it by hand: adb shell am start -n
+                 com.getshmira.companion/.MainActivity -->
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
+                <category android:name="android.intent.category.INFO" />
             </intent-filter>
         </activity>
 

@@ -68,8 +68,11 @@ AgentClient marks the run complete; the binding to the agent stays up for the se
     its app phase, which precedes `onConfigUpdateComplete`.
   - Agent API 115-118 (`forceConfigUpdate`): fire and consider the run over 5 seconds later.
   - Older: logged as unsupported.
-- **`MainActivity`** is an invisible launcher activity: it starts the service and finishes. It exists
-  so Headwind's *Run after install* / *Run at boot* can start the app, and so a person can tap it.
+- **`MainActivity`** is an invisible entry activity: it starts the service and finishes. It exists
+  so Headwind's *Run after install* / *Run at boot* can start the app. It is in category `INFO`,
+  not `LAUNCHER`, so no app drawer shows an icon for it, yet `getLaunchIntentForPackage` (which
+  the agent uses) still finds it. To start it by hand:
+  `adb shell am start -n com.getshmira.companion/.MainActivity`.
   Android 12+ only lets a TOP app start a foreground service from an activity, and Headwind launches
   this one during a background sync, usually with the phone locked in a pocket. So it is shown over
   the lock screen (`showWhenLocked`), which makes a locked-but-lit phone count as top, and when the
