@@ -98,9 +98,12 @@ dropping WhatsApp entirely. Confirm that conclusion cheaply before designing any
 
 **3. Turning off images in Spotify — BUILT (2026-09-17), needs a phone test.** The earlier note
 said the proxy could not touch a pinned app; that was half right. It cannot see inside Spotify,
-but Spotify fetches artwork, playlist mosaics and Canvas videos from hostnames of its own
-(`i.scdn.co`, `mosaic.scdn.co`, `image-cdn-*.spotifycdn.com`, `canvaz.scdn.co` …), separate from
-the audio hosts, and a hostname is visible at the TLS handshake. The Worker now refuses those hosts
+but Spotify fetches artwork, playlist mosaics and Canvas videos from hostnames of its own,
+separate from the audio hosts, and a hostname is visible at the TLS handshake. **Matched by ROLE,
+not by exact host** (`src/app-media.js`): the published lists name `image-cdn-ak` (Akamai) and
+`image-cdn-fa` (Fastly), and Isaac's phone was seen pulling Canvas video from
+`video-cf.spotifycdn.com` — the same role behind Cloudflare, a suffix nobody had written down. The
+first label is what decides, with `audio*`, `spclient*`, `dj-*` and friends never refused. The Worker now refuses those hosts
 (`src/app-media.js`) on every rung with `appMedia: false` in `levels.js` — all four yeshiva rungs,
 standard rungs 1–2 — so the app plays against blank artwork. To verify on the Vortex: deploy, clear
 Spotify's storage once (it caches artwork), play something. If playback itself breaks, the video

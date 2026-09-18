@@ -215,11 +215,18 @@ await check("a pinned app's artwork host is refused on a rung with in-app images
   assert.equal(r.cache_scope, 'host');
   assert.equal(geminiCalls, callsBefore, 'no model call for a listed host');
 });
-await check('a subdomain of a listed host is refused too; a sibling (the audio host) is not', async () => {
-  const sub = await (await ask({ user: 'phone-a', url: 'https://x.i.scdn.co/' })).json();
-  assert.equal(sub.action, 'image_blocked');
-  const audio = await (await ask({ user: 'phone-a', url: 'https://audio-fa.scdn.co/' })).json();
-  assert.notEqual(audio.action, 'image_blocked');
+await check('a provider suffix nobody listed is still refused; audio and the API are not', async () => {
+  // A live phone fetched Canvas video from video-cf.spotifycdn.com — the Cloudflare twin of the
+  // documented video-fa/-ak hosts. The role, not the provider, is what the rule matches.
+  for (const h of ['video-cf.spotifycdn.com', 'image-cdn-cf.spotifycdn.com', 'mosaic.scdn.co', 'canvaz.scdn.co']) {
+    const r = await (await ask({ user: 'phone-a', url: `https://${h}/` })).json();
+    assert.equal(r.action, 'image_blocked', `${h} should be refused`);
+    assert.equal(r.app, 'spotify');
+  }
+  for (const h of ['audio-fa.scdn.co', 'audio-ak.spotifycdn.com', 'dj-earcons.spotifycdn.com', 'gew1-spclient.spotify.com']) {
+    const r = await (await ask({ user: 'phone-a', url: `https://${h}/` })).json();
+    assert.notEqual(r.action, 'image_blocked', `${h} must keep working`);
+  }
 });
 await check("the Play Store's picture host is refused too, and the account-media host next to it is not", async () => {
   const store = await (await ask({ user: 'phone-a', url: 'https://play-lh.googleusercontent.com/' })).json();
