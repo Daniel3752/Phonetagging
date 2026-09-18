@@ -9,7 +9,7 @@ a blocklisted app installed from Play stayed usable until the next sync. The com
 foreground service, sees `PACKAGE_ADDED` the moment an install completes, and calls the agent's own
 plugin API (`com.hmdm.action.Connect`, `forceConfigUpdate`) to re-apply now. Blocklisted app gone in
 seconds. No agent fork, no Knox. `companion/README.md` has the design, the build, the Headwind steps
-and the known limits; the signed APK is `companion/releases/shmira-companion-0.1.0.apk`.
+and the known limits; the signed APK is `companion/releases/shmira-companion-0.1.1.apk`.
 
 Reviewed by four lenses (Android platform rules, the agent API, robustness, build) and the real
 findings applied: the binding to the agent is persistent (unbinding mid-update would strand the
