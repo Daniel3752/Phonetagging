@@ -68,13 +68,19 @@ public class WatchService extends Service {
     private BroadcastReceiver packageReceiver;
     private boolean foreground;
 
+    // Nothing posted to the main thread may throw: an uncaught exception in a Handler callback
+    // kills the process, and this service exists precisely to be the thing that is still alive.
     private final Runnable debouncedNudge = new Runnable() {
         @Override
         public void run() {
             List<String> packages = new ArrayList<>(pendingPackages);
             pendingPackages.clear();
             Log.i(TAG, "nudging agent for " + packages);
-            agent.nudge(packages, "install detected");
+            try {
+                agent.nudge(packages, "install detected");
+            } catch (RuntimeException e) {
+                Log.e(TAG, "nudge failed: " + e, e);
+            }
         }
     };
 
@@ -82,7 +88,11 @@ public class WatchService extends Service {
         @Override
         public void run() {
             Log.i(TAG, "periodic safety-net nudge");
-            agent.nudge(Collections.<String>emptyList(), "periodic safety-net check");
+            try {
+                agent.nudge(Collections.<String>emptyList(), "periodic safety-net check");
+            } catch (RuntimeException e) {
+                Log.e(TAG, "periodic nudge failed: " + e, e);
+            }
             handler.postDelayed(this, PERIODIC_MS);
         }
     };
@@ -213,7 +223,12 @@ public class WatchService extends Service {
         packageReceiver = new BroadcastReceiver() {
             @Override
             public void onReceive(Context context, Intent intent) {
-                onPackageEvent(intent);
+                try {
+                    onPackageEvent(intent);
+                } catch (RuntimeException e) {
+                    // A broadcast receiver that throws takes the process with it.
+                    Log.e(TAG, "package event failed: " + e, e);
+                }
             }
         };
         IntentFilter filter = new IntentFilter();

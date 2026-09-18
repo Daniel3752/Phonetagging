@@ -199,6 +199,15 @@ hidden while the service still runs; *Settings → Apps → Shmira* shows it as 
   which greys out Force stop without touching other apps, but the stock Headwind agent does not
   expose that; it would need the agent fork. With *Install* set in the configuration the agent
   reinstalls a removed companion at its next sync and relaunches it.
+- **It does not start itself on a locked phone.** Headwind launches the app right after installing
+  it, and Android 12+ refuses a foreground-service start from an activity that is behind the
+  keyguard with the screen off. The activity waits and retries for ten minutes (see `MainActivity`),
+  and a reboot starts it regardless (`BOOT_COMPLETED` carries an exemption), but on a phone that is
+  installed-to while locked and not rebooted within ten minutes, the service simply is not running.
+  Verified on the S22: `adb shell dumpsys activity services com.getshmira.companion` printed
+  nothing until `adb shell am start -n com.getshmira.companion/.MainActivity` was run with the
+  screen on. **Reboot the phone after the companion is installed**, and check the service with that
+  dumpsys line before trusting it.
 - **The 6-hour timer slips in deep sleep.** It is a `Handler` timer, not an alarm, so it runs late
   under Doze. It is a safety net, not the primary path.
 - **Agent version.** The plugin API needs at least version 115 (`forceConfigUpdate`, library 1.1.5);

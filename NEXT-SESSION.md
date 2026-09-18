@@ -18,6 +18,14 @@ restrictions before fetching), the launcher activity waits over the lock screen 
 refuses a foreground-service start on a locked phone, and a force-stopped app does NOT come back at
 boot (Android's stopped state), so `no_control_apps` is the restriction that protects it.
 
+Live findings from the first phone (Isaac, S22, Android 16), all fixed in 0.1.2: the app needs
+`ACCESS_NETWORK_STATE` for the offline-nudge guard, and without it the first nudge threw
+SecurityException and killed the process two minutes after every start, silently; nothing posted to
+the main thread may throw now. And it does NOT start itself when Headwind installs it while the
+phone is locked — Android refuses the foreground-service start — so **reboot a phone after the
+companion is installed** and confirm with
+`adb shell dumpsys activity services com.getshmira.companion`.
+
 To put it on a phone: `npm run db:migrate` (0021 allows the package on every policy), upload the APK
 in Headwind (Applications → Add; tick Run after install and Run at boot), add it to the phone's
 configuration as Install with the icon hidden (or Push apps from the console, which marks it Install
