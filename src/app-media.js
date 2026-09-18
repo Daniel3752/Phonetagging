@@ -11,6 +11,14 @@
 // Instagram and WhatsApp serve pictures and everything else from the same CDNs and cannot be handled
 // this way; that needs an on-device service (see NEXT-SESSION.md).
 //
+// The Play Store is the other clean case: every icon, screenshot and promo picture in the store comes
+// from play-lh.googleusercontent.com, while installs, updates and sign-in use other hosts entirely
+// (android.clients.google.com, play.googleapis.com, the gvt1 download CDN). With that one host refused
+// the store still searches, installs and updates; it just shows blank tiles. NOTE: the proxy splices
+// all of googleusercontent.com for Google account media, so the Worker's answer here only takes
+// effect once squid asks about this host before splicing it — see the app_media_hosts ACL in
+// scripts/squid.conf.
+//
 // Sources for the Spotify list: techlockdown.com "block images and videos on Spotify" and
 // cameronpak.com "block image and video CDN domains for Spotify", cross-checked. Deliberately NOT
 // a wildcard on scdn.co or spotifycdn.com: audio-fa.scdn.co and friends carry the music itself.
@@ -31,6 +39,10 @@ export const APP_MEDIA_HOSTS = {
     // after this list is applied, these are the ones to suspect first.
     'canvaz.scdn.co', 'video-fa.scdn.co', 'video-akpcw.spotifycdn.com', 'video-akpcw-cdn-spotify-com.akamaized.net',
     'video-fa.cdn.spotify.com', 'video-fa-b.cdn.spotify.com', 'video4-ak.spotify.com', 'podz-content.spotifycdn.com',
+  ],
+  play: [
+    // Icons, screenshots and promo images in the Play Store app. Nothing else lives here.
+    'play-lh.googleusercontent.com',
   ],
 };
 
