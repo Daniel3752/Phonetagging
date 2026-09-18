@@ -1,0 +1,5 @@
+// Root project. The Android Gradle Plugin version is pinned in settings.gradle
+// (pluginManagement.plugins); this only declares it so the :app module can apply it.
+plugins {
+    id 'com.android.application' apply false
+}

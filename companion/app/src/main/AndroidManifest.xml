@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- The watch service lives as a foreground service so Android 8+ keeps it alive. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!-- Android 14+ requires a per-type permission; ours is the "special use" type. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <!-- Come back after a reboot. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Android 13+: lets the persistent notification show. Never requested at runtime
+         (this app has no UI); without it the service still runs, the notification just hides. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Android 11+ package-visibility filtering would otherwise hide PACKAGE_ADDED
+         broadcasts for packages this app cannot "see", which is every app a child installs.
+         This app is distributed by the MDM, not Google Play, so the Play policy on this
+         permission does not apply. -->
+    <uses-permission
+        android:name="android.permission.QUERY_ALL_PACKAGES"
+        tools:ignore="QueryAllPackagesPermission" />
+
+    <!-- Redundant next to QUERY_ALL_PACKAGES, kept for clarity: the one package we bind to. -->
+    <queries>
+        <package android:name="com.hmdm.launcher" />
+    </queries>
+
+    <application
+        android:label="@string/app_name"
+        android:icon="@mipmap/ic_launcher"
+        android:allowBackup="false"
+        android:supportsRtl="true">
+
+        <!-- Invisible launcher entry: Headwind's "run after install" / "run at boot" start
+             this, and so can a person by tapping the icon. It starts the service and finishes.
+             showWhenLocked: Headwind launches it during a background sync, i.e. usually while
+             the phone is locked in a pocket. Android 12+ only lets a TOP app start a foreground
+             service, and an activity behind the keyguard is "top-sleeping", not top; shown over
+             the keyguard it counts as top. With the screen off it waits (see MainActivity), so
+             it must not be noHistory, which would finish it the moment it is no longer visible. -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:excludeFromRecents="true"
+            android:showWhenLocked="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <service
+            android:name=".WatchService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Keeps the MDM agent's app policy applied the moment an app is installed" />
+        </service>
+
+        <!-- BOOT_COMPLETED and MY_PACKAGE_REPLACED are protected broadcasts (only the system
+             can send them) and both are exempt from the Android 12+ restriction on starting
+             foreground services from the background. -->
+        <receiver
+            android:name=".BootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>

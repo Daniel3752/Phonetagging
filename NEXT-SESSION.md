@@ -1,5 +1,32 @@
 # Next session — start here
 
+## The companion app (2026-09-18) — built, not yet on a phone
+
+`companion/` is a small Android app, the **Shmira companion** (`com.getshmira.companion`), that
+closes the gap between an app being installed and the Headwind agent noticing. The stock agent only
+re-applies its app rules when it fetches its configuration (boot, MQTT push, or a forced update), so
+a blocklisted app installed from Play stayed usable until the next sync. The companion runs as a
+foreground service, sees `PACKAGE_ADDED` the moment an install completes, and calls the agent's own
+plugin API (`com.hmdm.action.Connect`, `forceConfigUpdate`) to re-apply now. Blocklisted app gone in
+seconds. No agent fork, no Knox. `companion/README.md` has the design, the build, the Headwind steps
+and the known limits; the signed APK is `companion/releases/shmira-companion-0.1.0.apk`.
+
+Reviewed by four lenses (Android platform rules, the agent API, robustness, build) and the real
+findings applied: the binding to the agent is persistent (unbinding mid-update would strand the
+agent's install chain), no nudge is sent without a validated network (the agent releases its user
+restrictions before fetching), the launcher activity waits over the lock screen when Android
+refuses a foreground-service start on a locked phone, and a force-stopped app does NOT come back at
+boot (Android's stopped state), so `no_control_apps` is the restriction that protects it.
+
+To put it on a phone: `npm run db:migrate` (0021 allows the package on every policy), upload the APK
+in Headwind (Applications → Add; tick Run after install and Run at boot), add it to the phone's
+configuration as Install with the icon hidden (or Push apps from the console, which marks it Install
+because Headwind now holds its APK), sync, then `adb logcat -s ShmiraCompanion` and install a
+blocklisted app to watch it vanish. Signing key: `companion/signing/` is git-ignored on purpose;
+the operator holds the keystore. Every future build must be signed with it or phones refuse the
+update.
+
+
 ## Branch state (2026-09-16): `main` is the truth
 
 Everything below was merged into `main` on 2026-09-16 (PR #3, which also carried PR #2). `main`

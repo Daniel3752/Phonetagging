@@ -1,0 +1,66 @@
+plugins {
+    id 'com.android.application'
+}
+
+// Release signing comes from companion/keystore.properties when that file exists
+// (keys: storeFile, storePassword, keyAlias, keyPassword; see keystore.properties.example).
+// Without it, assembleRelease produces app-release-unsigned.apk.
+def keystorePropertiesFile = rootProject.file('keystore.properties')
+def keystoreProperties = new Properties()
+def hasKeystore = keystorePropertiesFile.exists()
+if (hasKeystore) {
+    keystorePropertiesFile.withInputStream { keystoreProperties.load(it) }
+}
+
+android {
+    namespace = 'com.getshmira.companion'
+    compileSdk = 34
+
+    defaultConfig {
+        applicationId = 'com.getshmira.companion'
+        minSdk = 26
+        targetSdk = 34
+        versionCode = 1
+        versionName = '0.1.0'
+    }
+
+    // The Headwind plugin API is an AIDL interface (app/src/main/aidl/com/hmdm).
+    buildFeatures {
+        aidl = true
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    signingConfigs {
+        if (hasKeystore) {
+            release {
+                storeFile = rootProject.file(keystoreProperties['storeFile'])
+                storePassword = keystoreProperties['storePassword']
+                keyAlias = keystoreProperties['keyAlias']
+                keyPassword = keystoreProperties['keyPassword']
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled = false
+            shrinkResources = false
+            if (hasKeystore) {
+                signingConfig = signingConfigs.release
+            }
+        }
+    }
+
+    lint {
+        // lintVitalRelease runs inside assembleRelease. Keep its report, but never let a
+        // lint finding block the build of an app the MDM has to ship.
+        abortOnError = false
+    }
+}
+
+// Deliberately no dependencies block: pure android.* framework APIs, so the build
+// needs nothing beyond the platform (no AndroidX, no third-party libraries).

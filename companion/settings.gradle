@@ -1,0 +1,25 @@
+// Shmira companion: a tiny Android app that makes the Headwind MDM agent
+// re-apply its app policy the moment an app is installed. See README.md.
+//
+// No Gradle wrapper on purpose: the build machine has Gradle 8.14.3 on PATH and JDK 21.
+
+pluginManagement {
+    repositories {
+        google()
+        mavenCentral()
+    }
+    plugins {
+        id 'com.android.application' version '8.7.3'
+    }
+}
+
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+rootProject.name = 'shmira-companion'
+include ':app'

@@ -1,0 +1,19 @@
+Shmira companion
+================
+
+This app talks to the Headwind MDM agent through its plugin API. The two files
+
+    app/src/main/aidl/com/hmdm/IMdmApi.aidl
+    app/src/main/aidl/com/hmdm/IMdmApiCallback.aidl
+
+are copied verbatim from the Headwind MDM Android agent (hmdm-android) and are
+used under the Apache License, Version 2.0:
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Headwind MDM: Open Source Android Mobile Device Management Software
+Project website: https://h-mdm.com
+(c) 2019 Headwind Solutions LLC (http://www.h-sms.com)
+
+Everything else under companion/ is part of the Shmira phone parental-control
+system in this repository.
