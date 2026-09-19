@@ -27,6 +27,12 @@
 // host does not. The rule below is deliberately an allowlist of roles rather than a denylist, so a
 // host whose role is unknown keeps working rather than silently breaking the app.
 
+// NOTE ON ENFORCEMENT. Squid no longer asks this module at the TLS handshake: it matches the same
+// roles itself (`app_media_hosts` in scripts/squid.conf) and terminates the connection, because an
+// external-ACL answer proved unreliable at that moment — see the comment there. This module still
+// answers for Chrome's decrypted requests and is the readable statement of what counts as in-app
+// media, so the two must be kept in step.
+
 import { normalizeHost } from './domains.js';
 
 // Domains whose subdomains are split by role this way. A host outside these is never matched here.

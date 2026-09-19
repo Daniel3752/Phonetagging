@@ -38,9 +38,15 @@ rung 4 in `YESHIVA_LEVELS` (`src/levels.js`) — one word.
   but Spotify's artwork and Canvas videos, and the Play Store's icons and screenshots, come from
   hosts of their own (`src/app-media.js`), and those are refused at the TLS handshake on every
   yeshiva rung. Music plays and the store still installs and updates; the pictures never arrive.
-  Standard rungs 1–2 the same; standard 3–5 leave both alone (`appMedia` in `levels.js`). The Play
-  host is inside the googleusercontent splice, so squid needs the `app_media_hosts` rule
-  (`scripts/apply-yeshiva-squid.sh` step 6) to put it to the filter before splicing.
+  **Enforced in squid, not by the filter helper** (`app_media_hosts` in `scripts/squid.conf`, step 6
+  of `apply-yeshiva-squid.sh`): squid matches the host by role with a regex and terminates the
+  connection. Asking the Worker per phone was tried first and is unsound at the TLS handshake —
+  with the helper answering ERR for `image-cdn-fa.spotifycdn.com`, verified by hand with the same
+  arguments and the same client address, squid spliced six connections and 182 KB of cover art
+  arrived. An external ACL is an asynchronous lookup that squid may not have in hand when it must
+  choose splice or bump, so a decision that must not fail open cannot rest on it. The cost is that
+  it is no longer per-rung: every phone on the tunnel loses in-app pictures. Every rung in use has
+  them off anyway; a phone that must see them goes in `app_media_exempt`.
 - **Search:** allowed, screened by the keyword list (`keyword_rules`) and by anything already on
   file as NEVER from the standard phones; image search off; result thumbnails are images and get
   blanked like everything else. Not model-judged.
