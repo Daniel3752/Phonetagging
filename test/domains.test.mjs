@@ -1,6 +1,6 @@
 // Offline tests for registrable-domain extraction. Pure, no deps. Run with: npm test
 import assert from 'node:assert';
-import { registrableDomain, isSameSite, normalizeHost } from '../src/domains.js';
+import { registrableDomain, isSameSite, normalizeHost, isIpAddress } from '../src/domains.js';
 
 let passed = 0;
 function check(name, fn) { fn(); passed++; console.log(`  PASS  ${name}`); }
@@ -9,6 +9,11 @@ console.log('\n1. plain domains and subdomains collapse to the registrable domai
 check('apex is itself', () => assert.equal(registrableDomain('foo.com'), 'foo.com'));
 check('www collapses', () => assert.equal(registrableDomain('www.foo.com'), 'foo.com'));
 check('deep subdomain collapses', () => assert.equal(registrableDomain('static.api.foo.com'), 'foo.com'));
+// An address is not a name. Splitting it made 216.239.32.36 into "32.36", and one NEVER verdict on
+// that fake domain refused every address ending in .32.36 on every rung.
+check('an IPv4 address is never split', () => assert.equal(registrableDomain('216.239.32.36'), '216.239.32.36'));
+check('an IPv4 address is recognised', () => assert.equal(isIpAddress('216.239.32.36'), true));
+check('a name is not an address', () => assert.equal(isIpAddress('32.36.example.com'), false));
 check('subdomains share one key', () => {
   assert.equal(registrableDomain('en.wikipedia.org'), registrableDomain('upload.wikimedia.org') === 'wikimedia.org' ? 'wikipedia.org' : 'wikipedia.org');
   assert.equal(registrableDomain('en.wikipedia.org'), 'wikipedia.org');

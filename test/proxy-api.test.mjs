@@ -205,6 +205,18 @@ await check('an image request loads on a rung with images on', async () => {
   const r = await (await ask({ user: 'phone-open', url: 'https://news.example.com/pic.jpg' })).json();
   assert.equal(r.allow, true);
 });
+await check('a bare address is never sent to the model, and a verdict on its tail cannot refuse it', async () => {
+  // Squid asks about a bare address when an app's handshake carries no readable hostname. This
+  // used to be split like a name ("32.36"), judged NEVER by the model, and then refused for every
+  // address ending in .32.36 — on every rung. Such a stale row is planted here to prove it is inert.
+  siteVerdicts.set(await sha('32.36'), { level: 6, is_doorway: 0, reason: 'Unidentified raw IP.', site_mode: 'filtered' });
+  const callsBefore = geminiCalls;
+  const open = await (await ask({ user: 'phone-open', url: 'https://216.239.32.36/' })).json();
+  assert.equal(open.allow, false, 'unrated on the rated ladder stays refused');
+  assert.match(open.reason, /bare address/);
+  assert.equal(geminiCalls, callsBefore, 'no model call for an address');
+  assert.equal(siteVerdicts.has(await sha('216.239.32.36')), false, 'nothing written down');
+});
 await check("a pinned app's artwork host is refused on a rung with in-app images off", async () => {
   // The helper asks at the TLS handshake with the bare host, so this is what the Worker sees.
   const callsBefore = geminiCalls;

@@ -34,7 +34,7 @@ import { classifySearchQuery } from './gemini.js';
 import { parseSearchUrl, searchCacheKey, isSearchEngineHost } from './search.js';
 import { keywordRating } from './keywords.js';
 import { classifyDomain } from './classify.js';
-import { registrableDomain, normalizeHost } from './domains.js';
+import { registrableDomain, normalizeHost, isIpAddress } from './domains.js';
 import { appMediaHost } from './app-media.js';
 import { isVisibleAtLevel, levelDefinition, normalizeDeviceLevel, normalizeSiteLevel, normalizeTag, MIN_LEVEL, NEVER_LEVEL, DEFAULT_TAG } from './levels.js';
 import { resolveEffectivePolicy, SHIUR_POLICY_ID } from './policy.js';
@@ -365,6 +365,14 @@ export async function handleProxyCheck(request, env, now = new Date()) {
     action = 'blocked';
   } else if (blocklistMode) {
     return json({ ...base, allow: true, action: 'allow', hostname, reason: 'Not on any list.' });
+  } else if (isIpAddress(hostname)) {
+    // A bare address is never sent to the model: there is no site to read, the verdict was always
+    // NEVER, and (before registrableDomain stopped splitting addresses) it was stored under a
+    // two-octet "domain" that then refused unrelated addresses. On the rated ladder an address
+    // nobody has judged stays refused, as an unrated site would be, but with an honest reason and
+    // without writing anything down.
+    return json({ ...base, allow: false, action: 'blocked', hostname, level: NEVER_LEVEL,
+      reason: 'A bare address, not a site name; it cannot be rated.' });
   } else {
     verdict = await classifyDomain(env, hostname);
     // A transient classification failure is retryable, not a real block — tell the proxy so.

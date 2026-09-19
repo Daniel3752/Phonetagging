@@ -19,11 +19,24 @@ export function normalizeHost(host) {
   return String(host || '').trim().toLowerCase().replace(/:\d+$/, '').replace(/\.$/, '');
 }
 
+// A bare IPv4 address (or a bracketed/unbracketed IPv6 one). An address is not a name: it has no
+// registrable domain, and nothing can be learned about it by fetching it.
+export function isIpAddress(host) {
+  const h = normalizeHost(host).replace(/^\[|\]$/g, '');
+  return /^\d{1,3}(\.\d{1,3}){3}$/.test(h) || (h.includes(':') && /^[0-9a-f:.]+$/.test(h));
+}
+
 // The registrable domain for a hostname. www.bbc.co.uk -> bbc.co.uk; a.b.foo.com -> foo.com;
 // localhost or a bare TLD -> the input unchanged (nothing sensible to group).
+//
+// An IP address is returned unchanged. It used to be split like a name, so 216.239.32.36 became
+// "32.36": one model verdict on that fake domain (always NEVER — there is nothing to fetch) then
+// refused EVERY address ending in .32.36, on every rung, for good. Squid asks about a bare address
+// whenever an app's TLS handshake carries no readable hostname, so this silently broke pinned
+// apps (Spotify, Google Play services) on any phone judged at the handshake.
 export function registrableDomain(host) {
   const h = normalizeHost(host);
-  if (!h || !h.includes('.')) return h;
+  if (!h || !h.includes('.') || isIpAddress(h)) return h;
 
   const labels = h.split('.');
   if (labels.length <= 2) return h;
