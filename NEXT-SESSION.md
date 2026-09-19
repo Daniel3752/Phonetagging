@@ -1,5 +1,59 @@
 # Next session — start here
 
+## OPEN BUG (2026-09-19): Spotify's catalogue went empty on Isaac's phone
+
+**Symptom, on 10.66.0.3 (Isaac's S22, yeshiva rung 3), right after the proxy was brought up to date
+and Spotify's storage was cleared:** the top ~6 tiles on the home page still show pictures, the
+shelves below them (Audiobooks, "Listen before you watch") do not — and **every playlist and podcast
+is empty of songs**. Empty libraries are far worse than pictures, so this is the first thing to fix.
+
+**What had just changed.** That box was three PRs behind: its squid.conf still had the original
+`acl app_media_hosts ssl::server_name play-lh.googleusercontent.com` and
+`ssl_bump bump app_media_hosts !filter_allows`. Running `scripts/apply-yeshiva-squid.sh` from `main`
+applied steps 1-6 in one go — the role regex, `app_media_on`, the terminate rule, AND (for the first
+time on this server) the `Sec-Fetch-Dest` helper format, `deny_info &why=%o`, the named browser port,
+`ssl_bump bump browser_port`, the google_system_hosts exemption change, and a reinstall of
+`squid-acl-helper.py`. So the terminate rule is the obvious suspect but NOT the only change in
+flight; do not assume.
+
+**Evidence so far, and why it is thin.** A census of the access log over the reproduction found
+**zero** lines matching `scdn|spotifycdn|play-lh`, while the same log held 773 lines from
+10.66.0.3. Terminated connections may not log the SNI (they can appear as `NONE_NONE/409` against a
+bare IP), so the host filter probably hid exactly the lines that matter. Capture without a host
+filter next time:
+
+```bash
+: > /var/log/squid/access.log
+# phone: force stop Spotify, clear its storage, open it, wait for the home page
+grep -a 10.66.0.3 /var/log/squid/access.log | awk '{print $4, $7}' | sort | uniq -c | sort -rn | head -40
+tail -40 /var/log/squid/cache.log
+```
+
+**The one-step isolation.** Comment the rule out, reconfigure, clear Spotify's storage again:
+
+```bash
+sed -i 's/^ssl_bump terminate app_media_hosts/#&/' /etc/squid/squid.conf
+squid -k parse && squid -k reconfigure
+```
+
+Songs come back → the terminate rule is the cause, and the regex is refusing something Spotify needs
+(a role label doing double duty, or a shelf whose data rides an image host). Songs still missing →
+it is one of the other step 1-5 changes or the reinstalled helper, and the log capture above says
+which. Re-enable by deleting the `#`.
+
+**Hypotheses worth testing in that order:** (1) the regex's short labels (`i`, `o`, `t`, `p`, `pl`)
+are broader than intended and catch something structural; (2) the app fails a whole shelf when its
+image prefetch is refused rather than rendering it blank, which would mean host-level refusal can
+never be safe inside Spotify and the setting must become Spotify-artwork-off = accept-empty-shelves
+or nothing; (3) the newly installed helper answers differently for `spclient`/`apresolve` and the
+catalogue never syncs. Note that the top few tiles DO have pictures, so at least one media host is
+not matched by the regex — that host is worth finding either way.
+
+**Rollback for a phone that must work today:** move it to yeshiva rung 4 in `/admin` and run
+`/usr/local/bin/sync-media-on.sh`; its address lands in `/etc/squid/app-media-on.txt` and the
+terminate rule stops applying to it within seconds.
+
+
 ## The companion app (2026-09-18) — built, not yet on a phone
 
 `companion/` is a small Android app, the **Shmira companion** (`com.getshmira.companion`), that
