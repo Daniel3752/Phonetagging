@@ -69,6 +69,18 @@ proxy setting.
 | `/etc/squid/splice.txt` | Hosts passed through **unfiltered** so apps don't break |
 | `/etc/squid/filter.env` | `SHMIRA_PROXY_KEY` — must match the Worker's `PROXY_KEY` |
 | `/etc/squid/ssl/filter-ca.der` | The certificate to install on phones |
+| `/etc/squid/app-media-on.txt` | Phones whose rung may see **in-app pictures** (Spotify artwork, Play Store icons). Written by `sync-media-on.sh` from cron every 5 min; everyone not listed has them blocked |
+
+### Who is allowed in-app pictures right now?
+
+```bash
+cat /etc/squid/app-media-on.txt          # 10.66.0.255 is a placeholder, not a phone
+tail -5 /var/log/shmira-media-on.log     # last sync
+/usr/local/bin/sync-media-on.sh          # sync now, don't wait for cron
+```
+
+An address missing here means Spotify artwork and Play Store icons are refused for that phone.
+Check the rung in `/admin`: yeshiva 1–3 have them off, yeshiva 4 on; standard 1–2 off, 3–5 on.
 
 ### Is it listening?
 

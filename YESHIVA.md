@@ -34,19 +34,26 @@ rung 4 in `YESHIVA_LEVELS` (`src/levels.js`) — one word.
   flat light-grey SVG that stretches to whatever box the page gave the picture. Layout survives;
   the picture is a grey rectangle. This works for images with no file extension too, because the
   helper forwards `Sec-Fetch-Dest` (squid.conf now passes `%>ha{Sec-Fetch-Dest}`).
-- **Images off inside Spotify and the Play Store too.** Both apps are spliced and cannot be read,
-  but Spotify's artwork and Canvas videos, and the Play Store's icons and screenshots, come from
-  hosts of their own (`src/app-media.js`), and those are refused at the TLS handshake on every
-  yeshiva rung. Music plays and the store still installs and updates; the pictures never arrive.
+- **Images off inside Spotify and the Play Store on rungs 1-3.** Both apps are spliced and cannot
+  be read, but Spotify's artwork and Canvas videos, and the Play Store's icons and screenshots,
+  come from hosts of their own (`src/app-media.js`), and those are refused at the TLS handshake.
+  Music plays and the store still installs and updates; the pictures never arrive.
+  **Rung 4 is the exception and keeps them**: the browser still blanks every picture there, but a
+  music app with no artwork is a worse trade than the pictures are worth at the most open rung.
+  `appMedia` in `src/levels.js` is where that lives.
   **Enforced in squid, not by the filter helper** (`app_media_hosts` in `scripts/squid.conf`, step 6
   of `apply-yeshiva-squid.sh`): squid matches the host by role with a regex and terminates the
-  connection. Asking the Worker per phone was tried first and is unsound at the TLS handshake —
+  connection. Asking the Worker per request was tried first and is unsound at the TLS handshake —
   with the helper answering ERR for `image-cdn-fa.spotifycdn.com`, verified by hand with the same
   arguments and the same client address, squid spliced six connections and 182 KB of cover art
   arrived. An external ACL is an asynchronous lookup that squid may not have in hand when it must
-  choose splice or bump, so a decision that must not fail open cannot rest on it. The cost is that
-  it is no longer per-rung: every phone on the tunnel loses in-app pictures. Every rung in use has
-  them off anyway; a phone that must see them goes in `app_media_exempt`.
+  choose splice or bump, so a decision that must not fail open cannot rest on it.
+  It stays per-rung all the same, without the helper: `app_media_on` is a `src` ACL read from
+  `/etc/squid/app-media-on.txt`, which `scripts/sync-media-on.sh` regenerates every five minutes
+  from `GET /api/proxy/media-on` — the tunnel addresses whose rung has `appMedia` on. A file ACL is
+  evaluated synchronously, so there is nothing to race. The list is an **allowlist**: a phone
+  missing from it, or a sync that did not run, means pictures blocked rather than open. The cost is
+  that a rung change reaches the proxy on the next sync, not instantly.
 - **Search:** allowed, screened by the keyword list (`keyword_rules`) and by anything already on
   file as NEVER from the standard phones; image search off; result thumbnails are images and get
   blanked like everything else. Not model-judged.

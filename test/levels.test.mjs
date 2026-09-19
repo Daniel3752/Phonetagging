@@ -95,9 +95,10 @@ check('images are off below rung 3', () => {
 check('social is blocked everywhere except the most open rung', () => {
   assert.deepEqual(LEVELS.filter((l) => l.blockSocial).map((l) => l.level), [1, 2, 3, 4]);
 });
-check('in-app images (Spotify artwork) are off exactly where browser images are off', () => {
+check('in-app pictures are off on the strict rungs and on at the most open one', () => {
   assert.deepEqual(LEVELS.filter((l) => !l.appMedia).map((l) => l.level), [1, 2]);
-  assert.deepEqual(YESHIVA_LEVELS.filter((l) => !l.appMedia).map((l) => l.level), [1, 2, 3, 4]);
+  // Yeshiva rung 4 keeps Spotify's artwork even though its browser still blanks pictures.
+  assert.deepEqual(YESHIVA_LEVELS.filter((l) => !l.appMedia).map((l) => l.level), [1, 2, 3]);
 });
 check('an unknown rung has no definition', () => {
   assert.equal(levelDefinition(9), null);

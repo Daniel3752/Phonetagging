@@ -111,9 +111,13 @@ separate from the audio hosts, and a hostname is visible at the TLS handshake. *
 not by exact host** (`src/app-media.js`): the published lists name `image-cdn-ak` (Akamai) and
 `image-cdn-fa` (Fastly), and Isaac's phone was seen pulling Canvas video from
 `video-cf.spotifycdn.com` — the same role behind Cloudflare, a suffix nobody had written down. The
-first label is what decides, with `audio*`, `spclient*`, `dj-*` and friends never refused. The Worker now refuses those hosts
-(`src/app-media.js`) on every rung with `appMedia: false` in `levels.js` — all four yeshiva rungs,
-standard rungs 1–2 — so the app plays against blank artwork. To verify on the Vortex: deploy, clear
+first label is what decides, with `audio*`, `spclient*`, `dj-*` and friends never refused. Those
+hosts are refused on every rung with `appMedia: false` in `levels.js` — yeshiva rungs 1–3 (rung 4
+keeps Spotify's artwork on purpose) and standard rungs 1–2 — so the app plays against blank
+artwork. The refusal happens in squid (`app_media_hosts` in `scripts/squid.conf`), not in the
+filter helper, and stays per-rung through the `app_media_on` src ACL that `scripts/sync-media-on.sh`
+rewrites from `/api/proxy/media-on` every five minutes; `src/app-media.js` still answers for
+Chrome's decrypted requests and the two must be kept in step. To verify on the Vortex: deploy, clear
 Spotify's storage once (it caches artwork), play something. If playback itself breaks, the video
 hosts at the end of the list are the suspects; drop them and retest. Instagram and WhatsApp cannot
 be done this way — their pictures share hosts with everything else.
