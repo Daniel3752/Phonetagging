@@ -200,7 +200,7 @@ async function lookupVerdict(env, hostname) {
 // GET /api/proxy/media-on  ->  { addresses: [...] }
 //
 // The tunnel addresses of phones whose rung MAY see a pinned app's own pictures (appMedia). squid
-// reads this as a src ACL file and terminates the media hosts for everyone NOT in it, so the list
+// reads this as a src ACL file and bumps the media hosts for everyone NOT in it, so the list
 // is an ALLOWLIST and the failure direction is pictures-off: a phone this endpoint has never heard
 // of, or a sync that did not run, means blocked, not open.
 //

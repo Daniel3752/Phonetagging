@@ -28,8 +28,10 @@
 // host whose role is unknown keeps working rather than silently breaking the app.
 
 // NOTE ON ENFORCEMENT. Squid no longer asks this module at the TLS handshake: it matches the same
-// roles itself (`app_media_hosts` in scripts/squid.conf) and terminates the connection, because an
-// external-ACL answer proved unreliable at that moment — see the comment there. Which PHONES that
+// roles itself (`app_media_hosts` in scripts/squid.conf) and BUMPS the connection, because an
+// external-ACL answer proved unreliable at that moment — see the comment there. The bumped
+// request then reaches this module through the helper, and the image_blocked answer below is the
+// refusal (a pinned client never gets that far: it rejects the certificate first). Which PHONES that
 // applies to is still per-rung, and still the Worker's answer: squid reads the allowed tunnel
 // addresses from a file that scripts/sync-media-on.sh rewrites from /api/proxy/media-on. This
 // module still answers for Chrome's decrypted requests and is the readable statement of what
@@ -41,9 +43,11 @@ import { normalizeHost } from './domains.js';
 const SPOTIFY_DOMAINS = ['scdn.co', 'spotifycdn.com', 'cdn.spotify.com', 'spotify.com'];
 
 // Role labels that carry pictures or video. Matched against the host's FIRST label, exactly.
+// 'p' is deliberately absent: p.scdn.co serves the 30-second MP3 previews (p.scdn.co/mp3-preview/…),
+// and a preview is music, not a picture.
 const SPOTIFY_MEDIA_LABELS = new Set([
   // Artwork, avatars, playlist covers, generated playlist art.
-  'i', 'o', 't', 'p', 'pl', 'misc', 'mosaic', 'fex', 'daylist', 'concerts', 'pickasso',
+  'i', 'o', 't', 'pl', 'misc', 'mosaic', 'fex', 'daylist', 'concerts', 'pickasso',
   'charts-images', 'daily-mix', 'dailymix-images', 'lineup-images', 'merch-img', 'newjams-images',
   'profile-images', 'seeded-session-images', 'seed-mix-image', 'thisis-images', 'wrapped-images',
   'lexicon-assets', 'mixed-media-images', 'heads-fa-tls13',

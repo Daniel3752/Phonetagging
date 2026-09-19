@@ -223,7 +223,8 @@ await check('a provider suffix nobody listed is still refused; audio and the API
     assert.equal(r.action, 'image_blocked', `${h} should be refused`);
     assert.equal(r.app, 'spotify');
   }
-  for (const h of ['audio-fa.scdn.co', 'audio-ak.spotifycdn.com', 'dj-earcons.spotifycdn.com', 'gew1-spclient.spotify.com']) {
+  // p.scdn.co is the MP3 previews, not a picture host, and pl.scdn.co next to it is.
+  for (const h of ['audio-fa.scdn.co', 'audio-ak.spotifycdn.com', 'dj-earcons.spotifycdn.com', 'gew1-spclient.spotify.com', 'p.scdn.co']) {
     const r = await (await ask({ user: 'phone-a', url: `https://${h}/` })).json();
     assert.notEqual(r.action, 'image_blocked', `${h} must keep working`);
   }
