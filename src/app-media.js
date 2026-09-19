@@ -33,7 +33,8 @@
 // applies to is still per-rung, and still the Worker's answer: squid reads the allowed tunnel
 // addresses from a file that scripts/sync-media-on.sh rewrites from /api/proxy/media-on. This
 // module still answers for Chrome's decrypted requests and is the readable statement of what
-// counts as in-app media, so the two must be kept in step.
+// counts as in-app media, so the two must be kept in step — test/app-media.test.mjs reads the regex
+// out of scripts/squid.conf and fails when this module and it disagree on any host.
 
 import { normalizeHost } from './domains.js';
 
@@ -46,18 +47,25 @@ const SPOTIFY_MEDIA_LABELS = new Set([
   'i', 'o', 't', 'p', 'pl', 'misc', 'mosaic', 'fex', 'daylist', 'concerts', 'pickasso',
   'charts-images', 'daily-mix', 'dailymix-images', 'lineup-images', 'merch-img', 'newjams-images',
   'profile-images', 'seeded-session-images', 'seed-mix-image', 'thisis-images', 'wrapped-images',
-  'lexicon-assets', 'mixed-media-images', 'heads-fa-tls13',
+  'lexicon-assets', 'mixed-media-images',
   // Canvas (the looping video behind a track) and video podcasts.
   'canvaz', 'podz-content',
 ]);
 
 // Role PREFIXES, matched against the first label. This is what catches a provider suffix nobody has
 // seen yet: image-cdn-ak, image-cdn-fa, image-cdn-cf, video-fa, video-cf, video-akpcw, video4-ak …
-const SPOTIFY_MEDIA_PREFIXES = ['image-cdn', 'image-', 'video-', 'video4', 'mosaic-'];
+// The same two prefixes squid's regex uses (`image[a-z0-9-]*`, `video[a-z0-9-]*`), no more: a
+// wider JS list than the regex would only make the docs promise what the handshake does not do.
+const SPOTIFY_MEDIA_PREFIXES = ['image', 'video'];
 
-// Roles that must NEVER be refused whatever else matches: the music itself, the API, DJ audio.
-// Checked first, so a future 'audio-video-…' oddity cannot cost the user their music.
-const SPOTIFY_KEEP_PREFIXES = ['audio', 'spclient', 'apresolve', 'dealer', 'gew', 'guc', 'dj-'];
+// On spotify.com itself (and cdn.spotify.com) only the video role is media: everything else there
+// is the API, login, the access points and the web player, and squid's regex matches nothing else.
+const SPOTIFY_VIDEO_ONLY_DOMAINS = ['cdn.spotify.com', 'spotify.com'];
+
+// Roles that must NEVER be refused whatever else matches: the music itself (audio* and heads*, the
+// track heads that make playback start instantly), the API, DJ audio. Checked first, so a future
+// 'audio-video-…' oddity cannot cost the user their music.
+const SPOTIFY_KEEP_PREFIXES = ['audio', 'heads', 'spclient', 'apresolve', 'dealer', 'gew', 'guc', 'dj-'];
 
 function endsWithDomain(host, domain) {
   return host === domain || host.endsWith(`.${domain}`);
@@ -67,6 +75,7 @@ function isSpotifyMedia(host) {
   if (!SPOTIFY_DOMAINS.some((d) => endsWithDomain(host, d))) return false;
   const first = host.split('.')[0];
   if (SPOTIFY_KEEP_PREFIXES.some((p) => first.startsWith(p))) return false;
+  if (SPOTIFY_VIDEO_ONLY_DOMAINS.some((d) => endsWithDomain(host, d))) return first.startsWith('video');
   if (SPOTIFY_MEDIA_LABELS.has(first)) return true;
   return SPOTIFY_MEDIA_PREFIXES.some((p) => first.startsWith(p));
 }

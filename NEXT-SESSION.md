@@ -41,13 +41,29 @@ Songs come back → the terminate rule is the cause, and the regex is refusing s
 it is one of the other step 1-5 changes or the reinstalled helper, and the log capture above says
 which. Re-enable by deleting the `#`.
 
-**Hypotheses worth testing in that order:** (1) the regex's short labels (`i`, `o`, `t`, `p`, `pl`)
-are broader than intended and catch something structural; (2) the app fails a whole shelf when its
-image prefetch is refused rather than rendering it blank, which would mean host-level refusal can
-never be safe inside Spotify and the setting must become Spotify-artwork-off = accept-empty-shelves
-or nothing; (3) the newly installed helper answers differently for `spclient`/`apresolve` and the
-catalogue never syncs. Note that the top few tiles DO have pictures, so at least one media host is
-not matched by the regex — that host is worth finding either way.
+**Hypotheses worth testing in that order:** (1) ~~the regex's short labels (`i`, `o`, `t`, `p`, `pl`)
+are broader than intended and catch something structural~~ — **closed offline, see below**; (2) the
+app fails a whole shelf when its image prefetch is refused rather than rendering it blank, which
+would mean host-level refusal can never be safe inside Spotify and the setting must become
+Spotify-artwork-off = accept-empty-shelves or nothing; (3) the newly installed helper answers
+differently for `spclient`/`apresolve` and the catalogue never syncs. Note that the top few tiles
+DO have pictures, so at least one media host is not matched by the regex — that host is worth
+finding either way (podcast and audiobook covers are often served from the publisher's own CDN,
+not Spotify's, which would explain a tile here and there without any regex gap).
+
+**Checked offline (2026-09-19, no access to the box that session):** the regex is anchored `^…$`
+and its short labels are whole first labels, so `i.scdn.co` is refused while `info.scdn.co`,
+`i.spotify.com`, every `*-spclient.spotify.com`, `apresolve`, `dealer`, `login5`, `clienttoken`,
+`ap-*`, `audio*` and `heads*` pass it. So if the one-step isolation brings the songs back, the
+cause is (2), Spotify refusing to render without its pictures, NOT a structural host caught by the
+regex. On (3): yeshiva rung 3 is `webMode: 'blocklist'` with `decrypt: false`, so the Worker
+answers OK for any Spotify host that is not on the explicit or social lists, and the helper's
+answer for `spclient` should be a splice — worth confirming from the capture rather than assuming.
+`test/app-media.test.mjs` now pins the regex in `squid.conf`, `APP_MEDIA_RX` in the apply script
+and `src/app-media.js` to one corpus; the JS had drifted (it refused `heads-fa-tls13`, an AUDIO
+host, and a `mosaic-<cdn>` shape the regex does not match) and was aligned to the regex, which was
+left untouched on purpose while the bug is open. If a `mosaic-<cdn>` host ever shows up in a
+capture, widen the regex's `mosaic` to `mosaic[a-z0-9-]*` in both squid copies and the JS together.
 
 **Rollback for a phone that must work today:** move it to yeshiva rung 4 in `/admin` and run
 `/usr/local/bin/sync-media-on.sh`; its address lands in `/etc/squid/app-media-on.txt` and the
