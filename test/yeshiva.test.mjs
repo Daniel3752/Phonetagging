@@ -7,7 +7,7 @@
 // (Asia/Jerusalem), so the instants below are chosen in UTC and converted by hand in the comments.
 
 import worker from '../src/index.js';
-import { handleProxyCheck } from '../src/proxy-api.js';
+import { handleProxyCheck, handleMediaOnList } from '../src/proxy-api.js';
 import { makeDB } from './d1-shim.mjs';
 
 let failures = 0;
@@ -42,6 +42,10 @@ const proxyCheck = (user, url, extra = {}, now = new Date('2026-09-06T12:00:00Z'
     headers: { 'Content-Type': 'application/json', Authorization: 'Bearer proxy-key' },
     body: JSON.stringify({ user, url, ...extra }),
   }), env, now);
+
+const mediaOn = () => handleMediaOnList(new Request('https://w/api/proxy/media-on', {
+  headers: { Authorization: 'Bearer proxy-key' },
+}), env);
 
 const sha = async (s) => {
   const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
@@ -248,6 +252,36 @@ check('"Locked now" locks the web with the windows deleted', out.allow === false
 await admin('/api/admin/settings', { key: 'shiur_lock_mode', value: 'schedule' });
 out = await (await proxyCheck('10.66.0.4', 'https://brand-new-site.example/', {}, LUNCH)).json();
 check('and releases it again when the toggle goes back', out.allow === true, JSON.stringify(out));
+
+console.log('\n6c. the in-app picture allowlist squid reads');
+{
+  // squid cannot ask the helper at the TLS handshake (see scripts/squid.conf), so the per-rung
+  // answer reaches it as a file of tunnel addresses: an ALLOWLIST, so a phone that is missing from
+  // it has pictures blocked rather than open.
+  const unauth = await handleMediaOnList(new Request('https://w/api/proxy/media-on'), env);
+  check('the list is not open to anyone without the proxy key', unauth.status === 401, String(unauth.status));
+
+  let list = await (await mediaOn()).json();
+  check('a yeshiva rung-2 phone is NOT allowed in-app pictures',
+    !list.addresses.includes('10.66.0.4'), JSON.stringify(list));
+  check('a standard rung-4 phone IS', list.addresses.includes('10.66.0.3'), JSON.stringify(list));
+
+  await admin('/api/admin/devices/level', { id: 'vortex', tag: 'yeshiva', level: 4 });
+  list = await (await mediaOn()).json();
+  check('moving it to yeshiva rung 4 puts it on the list',
+    list.addresses.includes('10.66.0.4'), JSON.stringify(list));
+
+  await admin('/api/admin/devices/level', { id: 'vortex', tag: 'yeshiva', level: 3 });
+  list = await (await mediaOn()).json();
+  check('and rung 3 takes it off again', !list.addresses.includes('10.66.0.4'), JSON.stringify(list));
+
+  await admin('/api/admin/devices', { id: 'named', label: 'Password phone', tag: 'yeshiva', level: 4, proxy_user: 'dovid-phone' });
+  list = await (await mediaOn()).json();
+  check('a phone identified by a login, not an address, is left off (unusable in a src ACL)',
+    !list.addresses.some((a) => !/^\d{1,3}(\.\d{1,3}){3}$/.test(a)), JSON.stringify(list));
+
+  await admin('/api/admin/devices/level', { id: 'vortex', tag: 'yeshiva', level: 2 });
+}
 
 console.log('\n7. migrating off the tag');
 res = await admin('/api/admin/devices/level', { id: 'vortex', tag: 'standard', level: 4 });

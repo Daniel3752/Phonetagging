@@ -197,6 +197,37 @@ async function lookupVerdict(env, hostname) {
   return null;
 }
 
+// GET /api/proxy/media-on  ->  { addresses: [...] }
+//
+// The tunnel addresses of phones whose rung MAY see a pinned app's own pictures (appMedia). squid
+// reads this as a src ACL file and terminates the media hosts for everyone NOT in it, so the list
+// is an ALLOWLIST and the failure direction is pictures-off: a phone this endpoint has never heard
+// of, or a sync that did not run, means blocked, not open.
+//
+// It exists because the per-request helper cannot be trusted at the TLS handshake — see the long
+// comment on app_media_hosts in scripts/squid.conf. A src ACL is evaluated synchronously from a
+// file, so squid always has the answer; scripts/sync-media-on.sh keeps the file current from cron.
+export async function handleMediaOnList(request, env) {
+  const denied = requireProxyKey(request, env);
+  if (denied) return denied;
+
+  const rows = await env.DB.prepare('SELECT proxy_user, level, tag FROM devices')
+    .all().then((r) => r.results || []).catch(() => []);
+
+  const addresses = [];
+  for (const row of rows) {
+    const tag = normalizeTag(row.tag);
+    const def = levelDefinition(normalizeDeviceLevel(row.level, tag), tag);
+    if (!def || !def.appMedia) continue;
+    // Only a bare IPv4 address is usable in a squid src ACL. A password-path phone identified by a
+    // login name simply is not listed, which leaves it on the safe side.
+    const user = String(row.proxy_user || '').trim();
+    if (/^\d{1,3}(\.\d{1,3}){3}$/.test(user) && !addresses.includes(user)) addresses.push(user);
+  }
+  addresses.sort();
+  return json({ addresses });
+}
+
 // POST /api/proxy/check  { user, url, dest?, features? }  ->  { allow, reason, level, action, ... }
 //
 // dest is the request's Sec-Fetch-Dest when the helper has it ('image', 'document', ...).

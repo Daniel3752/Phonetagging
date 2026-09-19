@@ -19,7 +19,7 @@
 import { classifySite } from './gemini.js';
 import { MAX_DEVICE_LEVEL, NEVER_LEVEL, normalizeSiteLevel } from './levels.js';
 import { handleAdmin } from './admin-api.js';
-import { handleProxyCheck } from './proxy-api.js';
+import { handleProxyCheck, handleMediaOnList } from './proxy-api.js';
 import { runScheduler } from './scheduler.js';
 import { runPreClassifier } from './preclassify.js';
 import { renderAdminPage } from './admin-page.js';
@@ -137,6 +137,12 @@ export default {
     // not the operator key, so the proxy holds a credential that cannot administer anything.
     if (url.pathname === '/api/proxy/check' && request.method === 'POST') {
       return handleProxyCheck(request, env);
+    }
+
+    // The phones allowed to see a pinned app's own pictures, as a list of tunnel addresses. Read
+    // from cron by scripts/sync-media-on.sh into a squid src ACL file; see proxy-api.js.
+    if (url.pathname === '/api/proxy/media-on' && request.method === 'GET') {
+      return handleMediaOnList(request, env);
     }
 
     // Classifying a site fetches it and calls the model, so this is an expensive route to leave

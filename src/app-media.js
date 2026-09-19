@@ -29,9 +29,11 @@
 
 // NOTE ON ENFORCEMENT. Squid no longer asks this module at the TLS handshake: it matches the same
 // roles itself (`app_media_hosts` in scripts/squid.conf) and terminates the connection, because an
-// external-ACL answer proved unreliable at that moment — see the comment there. This module still
-// answers for Chrome's decrypted requests and is the readable statement of what counts as in-app
-// media, so the two must be kept in step.
+// external-ACL answer proved unreliable at that moment — see the comment there. Which PHONES that
+// applies to is still per-rung, and still the Worker's answer: squid reads the allowed tunnel
+// addresses from a file that scripts/sync-media-on.sh rewrites from /api/proxy/media-on. This
+// module still answers for Chrome's decrypted requests and is the readable statement of what
+// counts as in-app media, so the two must be kept in step.
 
 import { normalizeHost } from './domains.js';
 
