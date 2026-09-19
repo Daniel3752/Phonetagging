@@ -12,8 +12,10 @@
 #   4. acl browser_port myportname browser + ssl_bump bump browser_port (decrypt only that door)
 #   5. the google_system_hosts pre-filter allow excludes the browser port (else Chrome's requests
 #      to www.gstatic.com / lh3.googleusercontent.com skip the filter and images leak)
-#   6. acl app_media_hosts + `ssl_bump bump app_media_hosts !filter_allows` before the splice, so the
-#      Play Store's picture host is put to the filter instead of being spliced with googleusercontent
+#   6. acl app_media_hosts (a ROLE regex) + acl app_media_exempt + `ssl_bump terminate app_media_hosts
+#      wg_phones !app_media_exempt` right after the browser-port bump: in-app pictures (Spotify
+#      artwork and Canvas, Play Store icons) are closed outright, by name, without asking the helper.
+#      An earlier version asked the helper here and squid spliced hosts the helper had refused.
 #
 # Usage:  sudo scripts/apply-yeshiva-squid.sh            (from a clone on the deployed branch)
 #         SQUID_CONF=/tmp/x.conf scripts/apply-yeshiva-squid.sh --dry-run
@@ -70,21 +72,39 @@ if grep -q '^ssl_bump peek step1' "$work"; then
   else note "4b. ssl_bump bump browser_port already in place"; fi
 else echo "!! 4b. no 'ssl_bump peek step1' line to anchor on. Not touching it." >&2; fi
 
-# 6. in-app pictures on Google hosts (Play Store icons/screenshots): ask the filter before the splice.
-#    The acl goes before `acl google_system_hosts` like browser_port; the rule goes right before
-#    `ssl_bump splice splice_hosts`, which would otherwise swallow the host. Both idempotent.
+# 6. in-app pictures (Spotify artwork/Canvas, Play Store icons): matched by role in squid itself and
+#    terminated, with no helper in the path — see the long comment in scripts/squid.conf. Replaces
+#    any earlier play-lh-only acl and its `bump ... !filter_allows` rule.
+#
+#    Inserted with awk reading the pattern from the environment, NOT sed and NOT `awk -v`: both
+#    process backslash escapes, and this regex is nothing but backslash escapes. Idempotence is
+#    checked by looking for the exact line anywhere in the file, not at a fixed position, so a
+#    comment moving around cannot make the script rewrite the file on every run.
+export APP_MEDIA_RX='^(((i|o|t|p|pl|misc|mosaic|canvaz|pickasso|daylist|concerts|fex|charts-images|daily-mix|dailymix-images|lineup-images|merch-img|newjams-images|profile-images|seeded-session-images|seed-mix-image|thisis-images|wrapped-images|lexicon-assets|mixed-media-images|podz-content|image[a-z0-9-]*|video[a-z0-9-]*)\.(scdn\.co|spotifycdn\.com))|(video[a-z0-9-]*\.(cdn\.)?spotify\.com)|play-lh\.googleusercontent\.com)$'
+APP_MEDIA_ACL="acl app_media_hosts ssl::server_name_regex -i $APP_MEDIA_RX"
+APP_MEDIA_RULE='ssl_bump terminate app_media_hosts wg_phones !app_media_exempt'
+
 if grep -q '^acl google_system_hosts dstdomain' "$work"; then
-  if ! grep -q '^acl app_media_hosts ssl::server_name play-lh.googleusercontent.com$' "$work"; then
-    sed -i '/^acl app_media_hosts ssl::server_name/d; /^acl google_system_hosts dstdomain/i acl app_media_hosts ssl::server_name play-lh.googleusercontent.com' "$work"; changed=1
-    note "6a. added acl app_media_hosts"
-  else note "6a. acl app_media_hosts already present"; fi
+  if ! grep -qxF "$APP_MEDIA_ACL" "$work"; then
+    sed -i '/^acl app_media_hosts /d; /^acl app_media_exempt /d' "$work"
+    awk '/^acl google_system_hosts dstdomain/ && !placed {
+           print "acl app_media_hosts ssl::server_name_regex -i " ENVIRON["APP_MEDIA_RX"]
+           print "acl app_media_exempt src 10.66.0.255"
+           placed = 1
+         } { print }' "$work" > "$work.tmp" && mv "$work.tmp" "$work"
+    changed=1
+    note "6a. placed the app_media_hosts role regex + app_media_exempt"
+  else note "6a. app_media_hosts regex already in place"; fi
 else echo "!! 6a. no 'acl google_system_hosts' line to anchor on. Not touching it." >&2; fi
-if grep -q '^ssl_bump splice splice_hosts$' "$work"; then
-  if ! grep -B1 '^ssl_bump splice splice_hosts$' "$work" | grep -q '^ssl_bump bump app_media_hosts !filter_allows$'; then
-    sed -i '/^ssl_bump bump app_media_hosts !filter_allows$/d; /^ssl_bump splice splice_hosts$/i ssl_bump bump app_media_hosts !filter_allows' "$work"; changed=1
-    note "6b. placed ssl_bump bump app_media_hosts !filter_allows before the splice"
-  else note "6b. app_media_hosts bump rule already in place"; fi
-else echo "!! 6b. no 'ssl_bump splice splice_hosts' line to anchor on. Not touching it." >&2; fi
+
+if grep -q '^ssl_bump bump browser_port$' "$work"; then
+  if ! grep -qxF "$APP_MEDIA_RULE" "$work"; then
+    sed -i '/^ssl_bump bump app_media_hosts !filter_allows$/d' "$work"
+    sed -i "/^ssl_bump bump browser_port$/a $APP_MEDIA_RULE" "$work"
+    changed=1
+    note "6b. placed the terminate rule right after the browser-port bump"
+  else note "6b. terminate rule already in place"; fi
+else echo "!! 6b. no 'ssl_bump bump browser_port' line to anchor on. Not touching it." >&2; fi
 
 # 5. keep the Google exemption off the browser port
 if grep -q '^http_access allow google_system_hosts web_ports$' "$work"; then
