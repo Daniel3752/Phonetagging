@@ -15,7 +15,7 @@
 #   6. acl app_media_hosts (a ROLE regex) + acl app_media_on (a src ACL read from
 #      /etc/squid/app-media-on.txt) + `ssl_bump terminate app_media_hosts wg_phones !app_media_on`
 #      right after the browser-port bump: in-app pictures (Spotify artwork and Canvas, Play Store
-#      icons) are closed by name, without asking the helper — an earlier version asked the helper
+#      icons) are bumped by name, without asking the helper at the handshake — an earlier version asked the helper
 #      here and squid spliced hosts the helper had refused. Which phones are exempt stays per-rung:
 #      sync-media-on.sh rewrites that file from the Worker every five minutes, and it is an
 #      allowlist, so a phone missing from it has pictures blocked rather than open.
@@ -76,17 +76,19 @@ if grep -q '^ssl_bump peek step1' "$work"; then
 else echo "!! 4b. no 'ssl_bump peek step1' line to anchor on. Not touching it." >&2; fi
 
 # 6. in-app pictures (Spotify artwork/Canvas, Play Store icons): matched by role in squid itself and
-#    terminated, with no helper in the path — see the long comment in scripts/squid.conf. Replaces
-#    any earlier play-lh-only acl and its `bump ... !filter_allows` rule.
+#    bumped, with no helper in the path at the handshake — see the long comment in scripts/squid.conf.
+#    Replaces any earlier play-lh-only acl, its `bump ... !filter_allows` rule, and the `terminate`
+#    rule that preceded this one (a terminated handshake emptied Spotify's playlists on the first
+#    phone that met it, and left no usable log line).
 #
 #    Inserted with awk reading the pattern from the environment, NOT sed and NOT `awk -v`: both
 #    process backslash escapes, and this regex is nothing but backslash escapes. Idempotence is
 #    checked by looking for the exact line anywhere in the file, not at a fixed position, so a
 #    comment moving around cannot make the script rewrite the file on every run.
-export APP_MEDIA_RX='^(((i|o|t|p|pl|misc|mosaic|canvaz|pickasso|daylist|concerts|fex|charts-images|daily-mix|dailymix-images|lineup-images|merch-img|newjams-images|profile-images|seeded-session-images|seed-mix-image|thisis-images|wrapped-images|lexicon-assets|mixed-media-images|podz-content|image[a-z0-9-]*|video[a-z0-9-]*)\.(scdn\.co|spotifycdn\.com))|(video[a-z0-9-]*\.(cdn\.)?spotify\.com)|play-lh\.googleusercontent\.com)$'
+export APP_MEDIA_RX='^(((i|o|t|pl|misc|mosaic|canvaz|pickasso|daylist|concerts|fex|charts-images|daily-mix|dailymix-images|lineup-images|merch-img|newjams-images|profile-images|seeded-session-images|seed-mix-image|thisis-images|wrapped-images|lexicon-assets|mixed-media-images|podz-content|image[a-z0-9-]*|video[a-z0-9-]*)\.(scdn\.co|spotifycdn\.com))|(video[a-z0-9-]*\.(cdn\.)?spotify\.com)|play-lh\.googleusercontent\.com)$'
 export APP_MEDIA_ACL="acl app_media_hosts ssl::server_name_regex -i $APP_MEDIA_RX"
 export APP_MEDIA_ON_ACL='acl app_media_on src "/etc/squid/app-media-on.txt"'
-APP_MEDIA_RULE='ssl_bump terminate app_media_hosts wg_phones !app_media_on'
+APP_MEDIA_RULE='ssl_bump bump app_media_hosts wg_phones !app_media_on'
 APP_MEDIA_ON_FILE=/etc/squid/app-media-on.txt
 # squid refuses to start on a missing ACL file, so the file must exist before the acl line does.
 # Placeholder-only until sync-media-on.sh runs, which means pictures off everywhere — the safe way
@@ -150,11 +152,11 @@ fi
 
 if grep -q '^ssl_bump bump browser_port$' "$work"; then
   if ! grep -qxF "$APP_MEDIA_RULE" "$work"; then
-    sed -i '/^ssl_bump bump app_media_hosts !filter_allows$/d; /^ssl_bump terminate app_media_hosts /d' "$work"
+    sed -i '/^ssl_bump bump app_media_hosts !filter_allows$/d; /^ssl_bump terminate app_media_hosts /d; /^ssl_bump bump app_media_hosts wg_phones /d' "$work"
     sed -i "/^ssl_bump bump browser_port$/a $APP_MEDIA_RULE" "$work"
     changed=1
-    note "6b. placed the terminate rule right after the browser-port bump"
-  else note "6b. terminate rule already in place"; fi
+    note "6b. placed the app_media bump rule right after the browser-port bump"
+  else note "6b. app_media bump rule already in place"; fi
 else echo "!! 6b. no 'ssl_bump bump browser_port' line to anchor on. Not touching it." >&2; fi
 
 # 5. keep the Google exemption off the browser port

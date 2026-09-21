@@ -9,6 +9,7 @@
 import worker from '../src/index.js';
 import { handleProxyCheck, handleMediaOnList } from '../src/proxy-api.js';
 import { makeDB } from './d1-shim.mjs';
+import { sha256Hex } from '../src/crypto.js';
 
 let failures = 0;
 function check(name, cond, extra = '') {
@@ -105,6 +106,13 @@ check('the same URL as a document is allowed', out.allow === true);
 await admin('/api/admin/sites/level', { hostname: 'bad-site.example', level: 6, reason: 'Explicit.' });
 out = await (await proxyCheck('10.66.0.4', 'https://www.bad-site.example/', {}, LUNCH)).json();
 check('a site on file as NEVER is blocked', out.allow === false && out.action === 'blocked', JSON.stringify(out));
+// The bug that emptied Spotify on the first yeshiva phone judged at the handshake: a bare address
+// (an app handshake with no readable hostname) was split like a name, "32.36" got a NEVER from
+// the model, and every address ending in .32.36 was refused on this rung too. Plant that row.
+await DB.prepare(`INSERT INTO url_verdicts (url_hash, url, hostname, scope, verdict, reason, source, decided_at, level, site_mode)
+  VALUES (?, 'https://32.36/', '32.36', 'host', 'blocked', 'Unidentified raw IP.', 'gemini', 1, 6, 'filtered')`).bind(await sha256Hex('32.36')).run();
+out = await (await proxyCheck('10.66.0.4', 'https://216.239.32.36/', {}, LUNCH)).json();
+check('a bare address is allowed on a blocklist rung, whatever is on file for its tail, with no model', out.allow === true && modelCalls === 0, JSON.stringify(out));
 await DB.prepare(`INSERT INTO url_verdicts (url_hash, url, hostname, scope, verdict, source, decided_at, level, site_mode)
   VALUES (?, 'https://shut.example/', 'shut.example', 'host', 'blocked', 'operator', 0, 3, 'blocked')`).bind(await sha('shut.example')).run();
 out = await (await proxyCheck('10.66.0.4', 'https://shut.example/', {}, LUNCH)).json();

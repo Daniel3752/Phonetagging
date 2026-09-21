@@ -7,7 +7,7 @@
 
 import { classifySite } from './gemini.js';
 import { sha256Hex } from './crypto.js';
-import { registrableDomain } from './domains.js';
+import { registrableDomain, isIpAddress } from './domains.js';
 import { normalizeSiteLevel, NEVER_LEVEL } from './levels.js';
 
 // Kept tight because this runs INLINE on a request the user is waiting on (first hit of a new
@@ -62,7 +62,9 @@ export function extractPageInfo(html) {
 // the next hit re-judges. The caller decides what a NEVER means for its rung.
 export async function classifyDomain(env, hostOrDomain, { source = 'gemini' } = {}) {
   const domain = registrableDomain(hostOrDomain);
-  if (!domain || !domain.includes('.')) {
+  // A bare address has no site to read; judging it only ever produced a NEVER, and that verdict
+  // used to land under a two-octet "domain" that then refused unrelated addresses (see domains.js).
+  if (!domain || !domain.includes('.') || isIpAddress(domain)) {
     return { level: NEVER_LEVEL, is_doorway: 0, reason: 'Unclassifiable host.', hostname: domain, transient: true };
   }
 

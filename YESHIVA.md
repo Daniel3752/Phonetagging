@@ -42,8 +42,11 @@ rung 4 in `YESHIVA_LEVELS` (`src/levels.js`) — one word.
   music app with no artwork is a worse trade than the pictures are worth at the most open rung.
   `appMedia` in `src/levels.js` is where that lives.
   **Enforced in squid, not by the filter helper** (`app_media_hosts` in `scripts/squid.conf`, step 6
-  of `apply-yeshiva-squid.sh`): squid matches the host by role with a regex and terminates the
-  connection. Asking the Worker per request was tried first and is unsound at the TLS handshake —
+  of `apply-yeshiva-squid.sh`): squid matches the host by role with a regex and bumps the
+  connection — a pinned client rejects the filter's certificate, and a client that trusts it sends
+  a request the Worker refuses as `image_blocked` (blank placeholder). It was a `terminate` for two
+  days; see NEXT-SESSION.md for why that was changed back to a bump.
+  Asking the Worker per request at the handshake was tried first and is unsound there —
   with the helper answering ERR for `image-cdn-fa.spotifycdn.com`, verified by hand with the same
   arguments and the same client address, squid spliced six connections and 182 KB of cover art
   arrived. An external ACL is an asynchronous lookup that squid may not have in hand when it must
