@@ -11,9 +11,13 @@ and must be answered with
     <channel-id> OK
     <channel-id> ERR message="..."
 
-squid.conf actually sends four fields — "%un %SRC %URI %>ha{Sec-Fetch-Dest}" — the login (or "-"),
-the client address, the URL, and what the browser said it was fetching ("image", "document", "-").
-Older 2- and 3-field forms are still accepted so a config and helper can be upgraded separately.
+squid.conf actually sends five fields — "%un %SRC %URI %>ha{Sec-Fetch-Dest} %ssl::>sni" — the login
+(or "-"), the client address, the URL, what the browser said it was fetching ("image", "document",
+"-"), and the TLS client hello's server name. That last one matters at the handshake of an
+INTERCEPTED connection: squid evaluates ssl_bump step 2 against the fake CONNECT it built before
+reading the hello, whose host is the destination IP, so %URI is "1.2.3.4:443" there and only the
+SNI carries the name the phone asked for. Older 2-, 3- and 4-field forms are still accepted so a
+config and helper can be upgraded separately.
 
 Everything here is shaped by one fact: a person is waiting on a page. A single page load fans out
 into dozens of requests, most of them to hosts already decided moments ago, so the local cache below
@@ -120,6 +124,14 @@ def _domain_blocked(host, blockset):
 # phones quickly — a minute of staleness is invisible to a person, and the alternative is a filter
 # where "I've allowed it" means "in an hour".
 CACHE_TTL = float(os.environ.get('SHMIRA_CACHE_TTL', '60'))
+# A FAILURE answer (the Worker unreachable, a timeout, an HTTP error) is cached much more briefly.
+# It still has to be cached — a page load bursts dozens of lookups at once, and if every one of
+# them waited its own 12 s timeout the helper would stall squid behind a wall of dead lookups — but
+# for seconds, not a minute. Every TLS handshake on the app path is one of these lookups, and the
+# answer to a refused handshake is a BUMPED connection, which a certificate-pinning app cannot
+# survive: with a 60 s failure cache one Worker hiccup at the moment Spotify opened its API
+# connections pinned spclient as refused for a minute, and the app synced an empty library.
+FAILURE_TTL = float(os.environ.get('SHMIRA_FAILURE_TTL', '5'))
 CACHE_MAX = 5000
 
 # key -> (expiry, entry) where entry is a decision dict (see _entry below).
@@ -142,7 +154,8 @@ def _cache_put(key, entry):
     # latency shim, not a store — a cold start costs one round trip per host and nothing else.
     if len(_cache) >= CACHE_MAX:
         _cache.clear()
-    _cache[key] = (time.time() + CACHE_TTL, entry)
+    ttl = FAILURE_TTL if entry.get('failure') else CACHE_TTL
+    _cache[key] = (time.time() + ttl, entry)
 
 
 # What this helper can act on itself, told to the Worker so it may hand back answers an older
@@ -153,7 +166,8 @@ HELPER_FEATURES = ['strip_images', 'decrypt']
 
 def _worker_failure(reason):
     return {'allow': False, 'reason': reason, 'level': None, 'images_off': False,
-            'host_scoped': False, 'strip': False, 'decrypt': False, 'block_social': None, 'action': 'error'}
+            'host_scoped': False, 'strip': False, 'decrypt': False, 'block_social': None, 'action': 'error',
+            'failure': True}
 
 
 def ask_worker(user, url, dest=''):
@@ -225,6 +239,18 @@ def _is_image_request(url, dest):
     return path.endswith(_IMAGE_EXTENSIONS)
 
 
+def _looks_like_address(host):
+    """An IPv4 address, or an IPv6 literal (with or without brackets): what squid puts in the fake
+    CONNECT of an intercepted connection."""
+    h = host.strip('[]')
+    if not h:
+        return False
+    if ':' in h:
+        return True
+    parts = h.split('.')
+    return len(parts) == 4 and all(p.isdigit() and 0 <= int(p) <= 255 for p in parts)
+
+
 def _host_of(url):
     try:
         return (urllib.parse.urlsplit(url).hostname or '').lower().rstrip('.')
@@ -272,11 +298,14 @@ def _fast_local_path(url):
     return None
 
 
-def _entry(allow, reason, host_scoped, strip=False, decrypt=False):
+def _entry(allow, reason, host_scoped, strip=False, decrypt=False, failure=False):
     """A cache entry / decision: allow, why, how widely it may be reused, and two per-phone flags
     the answer is derived from at use time — strip (deny image URLs on this host) and decrypt (at
-    the TLS handshake, refuse the splice so squid bumps the connection)."""
-    return {'allow': allow, 'reason': reason, 'host_scoped': host_scoped, 'strip': strip, 'decrypt': decrypt}
+    the TLS handshake, refuse the splice so squid bumps the connection). failure marks a denial
+    that is the filter's own fault (Worker unreachable) rather than a decision, so it is cached
+    for FAILURE_TTL rather than CACHE_TTL."""
+    return {'allow': allow, 'reason': reason, 'host_scoped': host_scoped, 'strip': strip, 'decrypt': decrypt,
+            'failure': failure}
 
 
 def decide(user, url, dest=''):
@@ -322,7 +351,8 @@ def decide(user, url, dest=''):
     if allow and host and block_social and _domain_blocked(host, _blocklists['level2']):
         return _entry(False, 'blocklist: social', True)
 
-    return _entry(allow, reason, w['host_scoped'], strip=w['strip'], decrypt=w['decrypt'])
+    return _entry(allow, reason, w['host_scoped'], strip=w['strip'], decrypt=w['decrypt'],
+                  failure=bool(w.get('failure')))
 
 
 def main():
@@ -363,6 +393,7 @@ def _answer(channel, fields):
         # helper during an upgrade.
         user = urllib.parse.unquote(fields[0])
         dest = ''
+        sni = ''
         if len(fields) >= 3:
             src = urllib.parse.unquote(fields[1])
             url = urllib.parse.unquote(fields[2])
@@ -370,6 +401,8 @@ def _answer(channel, fields):
                 user = src
             if len(fields) >= 4 and fields[3] != '-':
                 dest = urllib.parse.unquote(fields[3]).strip().lower()
+            if len(fields) >= 5 and fields[4] != '-':
+                sni = urllib.parse.unquote(fields[4]).strip().lower().rstrip('.')
         else:
             url = urllib.parse.unquote(fields[1])
         # On an HTTPS CONNECT — and at the TLS handshake, where squid.conf decides whether to splice
@@ -377,9 +410,21 @@ def _answer(channel, fields):
         # that host so the site check runs on the hostname. For a bumped host the decrypted GET
         # arrives later with the full "https://host/path?query" and is checked again — that is
         # where a search query is judged, so nothing is lost by coarse-checking the handshake.
+        #
+        # At the handshake of an INTERCEPTED connection the target squid passes is the destination
+        # ADDRESS ("1.2.3.4:443"), because squid evaluates ssl_bump step 2 against the fake CONNECT
+        # it built before it had read the client hello. The hostname is the hello's SNI, passed
+        # separately; it wins whenever the target is an address (or whenever it is given at all —
+        # the SNI is what the phone asked for). Without it, an address is judged as an address:
+        # on no list, so allowed — which is how every earlier version of this filter waved app
+        # traffic through at the handshake while believing it had checked the host.
         handshake = '://' not in url
         if handshake:
             host = url.rsplit(':', 1)[0] if ':' in url else url
+            if sni and (_looks_like_address(host) or not host):
+                host = sni
+            elif sni and sni != host:
+                host = sni
             url = 'https://' + host + '/'
         # Squid sends "-" for an unauthenticated login; the Worker treats an unknown user as the
         # strictest rung rather than denying outright, so pass it through as-is.
@@ -416,7 +461,7 @@ def _answer(channel, fields):
             try:
                 entry = decide(user, url, dest)
             except Exception as exc:  # a crashed lookup must still answer, and must fail closed
-                entry = _entry(False, f'helper exception {type(exc).__name__}', False)
+                entry = _entry(False, f'helper exception {type(exc).__name__}', False, failure=True)
             _cache_put(host_key if entry['host_scoped'] else (user, url), entry)
         else:
             # Keep the reason: squid.conf forwards it to the block page as `why`, and a "locked"

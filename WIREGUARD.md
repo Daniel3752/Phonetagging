@@ -22,7 +22,15 @@ phone (WG app, always-on+lockdown)
                   ├─ tcp 80  ─ iptables REDIRECT ─→ squid :3129 (intercept)
                   ├─ tcp 443 ─ iptables REDIRECT ─→ squid :3130 (intercept ssl-bump, same CA)
                   ├─ udp 443 ─ REJECT (kills QUIC → browsers fall back to filtered TCP)
+                  ├─ tcp/udp 853 ─ REJECT (no DNS-over-TLS out of the tunnel; see PROXY.md, the DNS layer)
                   └─ the rest ─ NAT out (DNS, push, app APIs; TLS still transits squid → splice.txt applies)
+
+DNS: every phone names 10.66.0.1 as its resolver. With `scripts/install-dns-policy.sh` applied
+that address is the STRICT dnsmasq (refuses the in-app picture hosts for the rungs that have them
+off), which forwards uncached to the OPEN dnsmasq on 127.0.0.1 and 10.66.1.1 (the cache, the ad
+blocklist, upstream 1.1.1.1); squid resolves through the open one, and phones whose rung allows
+the pictures are DNAT'd to it by an ipset that sync-media-on.sh keeps current. One cache for all,
+so squid's host-forgery check still compares like with like.
 ```
 
 Squid passes `%LOGIN %SRC %URI` to the helper; the helper uses the login when present and the

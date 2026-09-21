@@ -118,10 +118,45 @@ r = answer('2 dovid https://example.org/a')
 check('two fields still work', r == '2 OK', r)
 check('the login wins over the source address', calls and calls[0][0] == 'dovid', calls)
 
+print('\n5b. the handshake of an intercepted connection carries an ADDRESS; the SNI is the host')
+reset()
+answers['10.66.0.4'] = {'allow': True, 'reason': 'ok', 'action': 'allow', 'host_scoped': True,
+                        'strip': True, 'decrypt': False, 'block_social': True, 'level': 3}
+r = answer('1 - 10.66.0.4 199.232.214.250:443 - image-cdn-fa.spotifycdn.com')
+check('the Worker is asked about the SNI, not the address', calls and calls[0][1] == 'https://image-cdn-fa.spotifycdn.com/', calls)
+r = answer('2 - 10.66.0.4 157.240.1.1:443 - www.instagram.com')
+check('so the social list applies to an app at the handshake', r.startswith('2 ERR') and 'social' in r, r)
+r = answer('3 - 10.66.0.4 66.22.1.1:443 - pornhub.com')
+check('and the explicit list', r.startswith('3 ERR') and 'explicit' in r, r)
+r = answer('4 - 10.66.0.4 en.wikipedia.org:443 - -')
+check('a name in the target with no SNI is used as before', r == '4 OK' and calls[-1][1] == 'https://en.wikipedia.org/', (r, calls[-1]))
+r = answer('5 - 10.66.0.4 1.2.3.4:443 - -')
+check('an address with no SNI is judged as an address (nothing better is known)', calls[-1][1] == 'https://1.2.3.4/', calls[-1])
+r = answer('6 - 10.66.0.4 https://en.wikipedia.org/wiki/Cat document -')
+check('a decrypted request ignores the (empty) SNI field', r == '6 OK', r)
+
 print('\n6. fast local paths never reach the Worker')
 reset()
 r = answer('1 - 10.66.0.4 https://www.google.com/complete/search?q=x empty')
 check('autocomplete is refused locally', r.startswith('1 ERR') and not calls, r)
+
+print('\n7. a filter failure is cached for seconds, a decision for a minute')
+reset()
+import time as _time
+helper.FAILURE_TTL = 0.05
+answers.pop('10.66.0.7', None)   # no fake answer -> _worker_failure, i.e. the Worker is unreachable
+r = answer('1 - 10.66.0.7 spclient.wg.spotify.com:443 -')
+check('an unreachable Worker fails closed', r.startswith('1 ERR') and 'error' in r, r)
+answers['10.66.0.7'] = {'allow': True, 'reason': 'ok', 'action': 'allow', 'host_scoped': True,
+                        'strip': False, 'decrypt': False, 'block_social': True, 'level': 3}
+r = answer('2 - 10.66.0.7 spclient.wg.spotify.com:443 -')
+check('and the failure is reused for the burst that follows', r.startswith('2 ERR') and len(calls) == 1, (r, calls))
+_time.sleep(0.1)
+r = answer('3 - 10.66.0.7 spclient.wg.spotify.com:443 -')
+check('but expires within seconds, so the next handshake asks again and is spliced', r == '3 OK' and len(calls) == 2, (r, calls))
+r = answer('4 - 10.66.0.7 https://spclient.wg.spotify.com/x document')
+check('a real decision stays cached for the full TTL', r == '4 OK' and len(calls) == 2, (r, calls))
+helper.FAILURE_TTL = 5.0
 
 print(('\n%d FAILURE(S)' % failures) if failures else '\nAll helper checks passed.')
 sys.exit(1 if failures else 0)

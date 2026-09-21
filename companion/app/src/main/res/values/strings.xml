@@ -4,4 +4,6 @@
     <string name="channel_name">Protection status</string>
     <string name="channel_description">Shows that Shmira is running. Nothing to act on.</string>
     <string name="notification_text">Shmira is protecting this phone</string>
+    <string name="guard_description">Keeps WhatsApp\'s Updates tab (Status and Channels) closed on this phone, as set by the school. Managed by Shmira; do not turn off.</string>
+    <string name="guard_self_toast">This setting is managed by Shmira.</string>
 </resources>

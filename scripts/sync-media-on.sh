@@ -16,6 +16,13 @@
 #   * the file always carries a placeholder line, because squid refuses to start on an empty
 #     ACL file and a proxy that will not start is worse than either answer.
 #
+# The same allowlist ALSO drives the DNS layer where install-dns-policy.sh has set it up: the
+# addresses go into the ipset that DNATs a phone's DNS to the open resolver, and the picture
+# HOSTNAMES themselves (/api/proxy/media-hosts) are written as `local=/host/` lines for the strict
+# resolver, which answers NXDOMAIN for them. That is what stops a picture riding an already-open
+# connection to an allowed host on the same CDN (HTTP/2 coalescing), which no SNI rule can see.
+# Both parts are skipped, silently, on a box without the DNS layer.
+#
 # Run every 5 minutes from cron (install-squid.sh sets this up):
 #   */5 * * * *  /usr/local/bin/sync-media-on.sh >> /var/log/shmira-media-on.log 2>&1
 set -euo pipefail
@@ -66,6 +73,57 @@ then
   echo "$(stamp) WARN malformed answer — keeping $DEST as is" >&2
   exit 0
 fi
+
+# --- The DNS layer (only where install-dns-policy.sh has set it up) -----------------------------
+
+IPSET="${SHMIRA_MEDIA_ON_IPSET:-shmira_media_on}"
+# The ipset is swapped atomically: the phones' DNS is never routed by a half-written set.
+if command -v ipset >/dev/null 2>&1 && ipset list -n 2>/dev/null | grep -qx "$IPSET"; then
+  ipset create "${IPSET}_new" hash:ip -exist
+  ipset flush "${IPSET}_new"
+  while read -r a; do
+    [[ "$a" == "$PLACEHOLDER" || "$a" =~ ^# || -z "$a" ]] && continue
+    ipset add "${IPSET}_new" "$a" -exist
+  done < "$out"
+  ipset swap "${IPSET}_new" "$IPSET"
+  ipset destroy "${IPSET}_new"
+fi
+
+STRICT_DIR="${SHMIRA_STRICT_DNS_DIR:-/etc/shmira/dnsmasq-strict.d}"
+if [[ -d "$STRICT_DIR" ]]; then
+  hosts_raw="$(mktemp)"; hosts_out="$(mktemp)"
+  trap 'rm -f "$raw" "$out" "$hosts_raw" "$hosts_out"' EXIT
+  if curl -fsS --max-time 30 -H "Authorization: Bearer $SHMIRA_PROXY_KEY" \
+       "$WORKER/api/proxy/media-hosts" -o "$hosts_raw" \
+     && python3 - "$hosts_raw" > "$hosts_out" <<'PY'
+import json, re, sys
+data = json.load(open(sys.argv[1]))
+hosts = data.get('hosts') if isinstance(data, dict) else None
+if not isinstance(hosts, list):
+    raise SystemExit('no hosts array')
+ok = sorted(set(h.strip().lower() for h in hosts
+                if isinstance(h, str) and re.fullmatch(r'[a-z0-9.-]+\.[a-z]{2,}', h.strip().lower())))
+if not ok:
+    raise SystemExit('empty host list')
+print('# In-app picture hosts refused for phones on the strict resolver. Written by sync-media-on.sh — do not edit.')
+print('# Phones whose rung allows the pictures never reach this resolver (ipset + DNAT, shmira-dns-policy).')
+for h in ok:
+    print('local=/%s/' % h)
+PY
+  then
+    if ! cmp -s "$hosts_out" "$STRICT_DIR/app-media.conf" 2>/dev/null; then
+      install -m 0644 "$hosts_out" "$STRICT_DIR/app-media.conf"
+      echo "$(stamp) updated $STRICT_DIR/app-media.conf ($(grep -c '^local=' "$hosts_out") hosts)"
+      # `local=` lines are read at start only; the strict instance holds no cache, so a restart is free.
+      systemctl try-restart shmira-dnsmasq-strict.service 2>/dev/null \
+        && echo "$(stamp) strict resolver restarted" || echo "$(stamp) note: strict resolver not running"
+    fi
+  else
+    echo "$(stamp) WARN could not fetch or parse the media host list — keeping $STRICT_DIR/app-media.conf as is" >&2
+  fi
+fi
+
+# --- squid's copy -------------------------------------------------------------------------------
 
 if [[ -f "$DEST" ]] && cmp -s "$out" "$DEST"; then
   exit 0

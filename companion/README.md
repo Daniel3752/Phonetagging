@@ -1,8 +1,14 @@
 # Shmira companion
 
-A tiny Android app, installed by Headwind MDM next to its own agent, with one job: **notice an
-app install the moment it completes and make the agent re-apply its configuration**, so a
-blocklisted app is gone within seconds instead of at the agent's next sync.
+A tiny Android app, installed by Headwind MDM next to its own agent, with two jobs:
+
+1. **Notice an app install the moment it completes and make the agent re-apply its
+   configuration**, so a blocklisted app is gone within seconds instead of at the agent's next
+   sync (the install watcher, below).
+2. **Close WhatsApp's Updates tab — Status and Channels — and any channel screen, on phones whose
+   rung says so** (the accessibility guard, [further down](#the-accessibility-guard-whatsapp-updates)).
+   The network cannot do this: the feed rides the same pinned socket as the chats. So it is done
+   where the feed is drawn.
 
 Package `com.getshmira.companion`, no UI, no dependencies beyond the Android platform.
 
@@ -80,7 +86,10 @@ AgentClient marks the run complete; the binding to the agent stays up for the se
   it is resumed and every 15 s, for up to 10 minutes, before leaving it to the boot receiver.
 - **`BootReceiver`** starts the service on `BOOT_COMPLETED` and after the app itself is updated
   (`MY_PACKAGE_REPLACED`). Both are exempt from Android 12+'s restriction on starting foreground
-  services from the background.
+  services from the background. `GuardService` also starts it when the system binds the guard,
+  which happens at every boot on a phone where the guard is enabled.
+- **`PolicyClient`** and **`GuardKeeper`** live inside `WatchService` (the thing that is always
+  running): the policy fetch for the guard, and the watch on the accessibility setting.
 
 Everything is logged with `android.util.Log`, tag `ShmiraCompanion`, and the install line is also
 sent to the Headwind server's device log through `IMdmApi.log()`.
@@ -91,6 +100,110 @@ sent to the Headwind server's device log through `IMdmApi.log()`.
 | Safety-net nudge | every 6 h (first 2 min after start) |
 | Give up waiting for completion | 5 min (bookkeeping only; the agent carries on, the binding stays) |
 | Activity start refused (phone locked, screen off) | retry every 15 s for 10 min |
+| Policy refresh | hourly; 5 min after a failure; at once when the network comes back |
+| Guard: inspect / act / go Home | every 250 ms at most / every 400 ms at most / after 2 actions with no change |
+| Guard keeper: re-check the accessibility setting | on every change, and every 15 min |
+
+## The accessibility guard (WhatsApp Updates)
+
+`GuardService` is an `AccessibilityService` that watches WhatsApp (`com.whatsapp`,
+`com.whatsapp.w4b`) and, on a phone whose policy says so, closes the Updates tab (Status and
+Channels), the channel directory, a channel opened as a conversation, and the status viewer.
+
+**What decides whether it acts.** `PolicyClient` reads the phone's tunnel address off the VPN
+interface (`10.66.0.x`, the same identity the proxy uses) and asks the Worker
+`GET /api/companion/policy?user=<address>`. The answer follows the rung: `whatsappUpdates` in
+`src/levels.js` — closed on yeshiva rungs 1-3 and standard 1-4, open on yeshiva 4 (the rung that
+permits the social apps) and standard 5. It is cached, refreshed hourly and whenever the network
+comes back, and **fails closed**: until the first answer, when the address cannot be read, or for
+a phone the Worker does not know, the tab is closed.
+
+**How it recognises the screens** (`GuardRules`, from `src/companion-rules.js`, served in the
+same answer so a WhatsApp release that moves a button is an edit on the Worker, not a rebuild;
+the APK carries the same defaults in `res/raw/guard_rules.json` and takes a served set whenever
+its `rules_version` is higher):
+
+1. the foreground activity's class name says so — everything WhatsApp calls a *newsletter* is a
+   channel (`NewsletterInfoActivity`, `NewsletterDirectoryActivity`, …), plus the status viewer
+   and composers (`StatusPlaybackActivity`, `…StatusComposerActivity`);
+2. a **visible** node carries a view id that exists only there (`newsletter*`, `updates_list`,
+   `find_channels_btn`, `status_playback*`, …). Visible, because WhatsApp's tab pager can keep
+   an off-screen tab in the node tree;
+3. a **selected** tab, or a title/heading, reads "Updates", "Channels", "Find channels" (or the
+   Hebrew). Never an unselected tab: the bottom bar shows "Updates" on every screen, and a guard
+   that matched it would throw the person out of their chats (a known bug in another kosher
+   shield's history);
+4. a conversation whose subtitle reads "N followers": a channel opened from a link.
+
+The Updates tab itself is a fragment inside `HomeActivity` and its tab items carry no WhatsApp
+ids, so rules 2 and 3 are what catch it; rule 1 catches the screens that are their own activity.
+WhatsApp is moving status to the top of the Chats tab and channels behind a filter there
+(2026 betas), which is why the rules key on the feed's own ids and classes rather than the tab
+alone, and why `status_list`/`status_row` are deliberately NOT rules — they would soon match on
+the Chats tab.
+
+**What it does.** Click the Chats tab if it is on screen, else press Back; if the same screen is
+still there after two tries, go Home. One short toast says why. At most one inspection per
+250 ms and one action per 400 ms, so a stubborn screen cannot spin the CPU. It never sees anything
+outside the watched packages (the service's package list is set from the rules at runtime).
+
+**It guards itself.** Opened in Settings (its accessibility page, its app-info page, or any
+settings screen with this app's name as the title), the guard presses Back, so the switch cannot
+be reached from the phone. And `GuardKeeper` in the watch service observes
+`Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES` and puts the service back the moment it goes
+missing — which it can do only with `WRITE_SECURE_SETTINGS`, a permission Android lets **adb**
+grant to any app that declares it (it is `signature|privileged|development`):
+
+```sh
+adb shell pm grant com.getshmira.companion android.permission.WRITE_SECURE_SETTINGS
+adb shell am start -n com.getshmira.companion/.MainActivity   # or reboot
+```
+
+That is the whole enabling step: with the grant in place the keeper enables the guard itself
+within seconds of the service starting, and re-enables it after any attempt to switch it off.
+Without the grant the keeper can only complain (logcat, and a line in the Headwind device log),
+and the guard has to be enabled once by hand — Settings → Accessibility → Shmira, or
+
+```sh
+adb shell settings put secure enabled_accessibility_services com.getshmira.companion/com.getshmira.companion.GuardService
+adb shell settings put secure accessibility_enabled 1
+```
+
+(the first line REPLACES the list of enabled services; the keeper appends instead). Android 13's
+"restricted setting" for sideloaded apps does not apply: Headwind installs through a session, as
+every Device Owner does, and session installs are exempt.
+
+**Verifying on the phone:**
+
+```sh
+adb shell settings get secure enabled_accessibility_services   # contains …/com.getshmira.companion.GuardService
+adb logcat -s ShmiraCompanion
+```
+
+Expected after the service starts:
+
+```
+accessibility guard is enabled; WRITE_SECURE_SETTINGS granted; enabled services: [...]
+policy for 10.66.0.3: known, whatsapp updates blocked, rules v3
+GuardService connected
+guard: service connected — whatsapp updates BLOCKED, rules v3 ([com.whatsapp, com.whatsapp.w4b])
+```
+
+Open WhatsApp and tap Updates: the Chats tab comes back at once, with the toast
+`Channels and Status are turned off on this phone.` and a line `guard: closed tab "Updates" (chats tab)`.
+Open a channel link: `guard: closed activity com.whatsapp.newsletter…NewsletterInfoActivity (back)`.
+
+**Tuning for a new WhatsApp build.** `adb shell setprop log.tag.ShmiraGuardDump DEBUG` makes the
+guard log every visible node with an id or a text (`adb logcat -s ShmiraGuardDump`); read the ids
+and labels off the screens that should be closed, put them in `src/companion-rules.js`, bump
+`COMPANION_RULES_VERSION`, run `node scripts/build-companion-rules.mjs`, deploy the Worker. Every
+phone picks the new set up within the hour; a rebuild is only needed to change the code.
+
+**Limits.** It is a guard, not a wall: the person sees the Updates tab for the fraction of a
+second before it closes, and a channel's name and last-message preview are in the list it
+closes. A WhatsApp redesign can hide the feed from these rules until the rules are updated (the
+dump above is the tool). Status shown at the top of the Chats tab (2026 betas) is not closed —
+only viewing a status is.
 
 ## Building
 
@@ -134,9 +247,13 @@ before it can take the next version.
    is locked with the screen off at that moment, the launched activity waits until the screen comes
    on (up to 10 minutes) before the service can start; a reboot also starts it. Check with
    `adb logcat -s ShmiraCompanion` that "running in the foreground" appears.
-4. **Updates**: bump `versionCode`/`versionName`, build, upload the new APK as a new version of the
-   same application, and select that version in the configurations. The agent updates the app; the
-   `MY_PACKAGE_REPLACED` receiver restarts the service on the new code.
+4. **Updates**: bump `versionCode`/`versionName` (and `BuildInfo.VERSION`), build, upload the new
+   APK as a new version of the same application, and select that version in the configurations.
+   The agent updates the app; the `MY_PACKAGE_REPLACED` receiver restarts the service on the new
+   code.
+5. **The guard's grant, once per phone, with the cable in** (NEW-PHONE.md step 9b):
+   `adb shell pm grant com.getshmira.companion android.permission.WRITE_SECURE_SETTINGS`, then
+   start the app or reboot. The keeper does the rest.
 
 ## Verifying on the phone
 

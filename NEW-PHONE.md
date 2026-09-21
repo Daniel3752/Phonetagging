@@ -50,6 +50,14 @@ enrollment QR (STOCK `com.hmdm.launcher` only — Google's DPC allowlist blocks 
    `adb push filter-ca.der /sdcard/Download/` → **[phone]** Settings → search "certificate"
    → Install a certificate → CA certificate. (Samsung: Biometrics and security → Other
    security settings.) The scary warning is expected.
+9b. ☐ **[PC]** The companion app's accessibility guard (WhatsApp Updates — Status and Channels
+    — closed on rungs 1-3): once Headwind has installed the companion (it is on every
+    configuration), grant the one permission that lets it switch its own guard on and keep it on:
+    `adb shell pm grant com.getshmira.companion android.permission.WRITE_SECURE_SETTINGS`
+    then `adb shell am start -n com.getshmira.companion/.MainActivity` (or reboot). Verify:
+    `adb shell settings get secure enabled_accessibility_services` names
+    `com.getshmira.companion/com.getshmira.companion.GuardService`, and in WhatsApp the Updates
+    tab snaps back to Chats with a toast. Details and troubleshooting: `companion/README.md`.
 10. ☐ **[phone]** Install the **WireGuard** app (Play Store, or adb-install the APK on
     rungs where Play is hidden).
 11. ☐ **[phone]** WireGuard → + → Scan from QR code → scan step 2's QR → toggle **on** →

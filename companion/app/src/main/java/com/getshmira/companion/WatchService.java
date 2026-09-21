@@ -67,6 +67,10 @@ public class WatchService extends Service {
     private AgentClient agent;
     private BroadcastReceiver packageReceiver;
     private boolean foreground;
+    // The on-device policy (what the accessibility guard enforces) and the thing that keeps the
+    // guard switched on. Both live here because this service is the one that is always running.
+    private PolicyClient policy;
+    private GuardKeeper keeper;
 
     // Nothing posted to the main thread may throw: an uncaught exception in a Handler callback
     // kills the process, and this service exists precisely to be the thing that is still alive.
@@ -115,6 +119,30 @@ public class WatchService extends Service {
         reportRestrictions();
         registerPackageReceiver();
         handler.postDelayed(periodicNudge, FIRST_PERIODIC_MS);
+        startGuard();
+    }
+
+    /** The policy fetcher and the guard keeper. Neither may stop the watcher from starting. */
+    private void startGuard() {
+        try {
+            policy = new PolicyClient(this);
+            policy.start();
+            keeper = new GuardKeeper(this);
+            keeper.start();
+            Log.i(TAG, "accessibility guard " + (GuardKeeper.isEnabled(this) ? "is enabled" : "is NOT enabled")
+                    + "; WRITE_SECURE_SETTINGS " + (GuardKeeper.canWriteSecureSettings(this) ? "granted" : "not granted")
+                    + "; enabled services: " + GuardKeeper.describe(this));
+        } catch (RuntimeException e) {
+            Log.e(TAG, "guard setup failed: " + e, e);
+        }
+    }
+
+    /** A line for the Headwind device log, sent with the next nudge. Any thread. */
+    void reportNote(String note) {
+        AgentClient a = agent;
+        if (a != null) {
+            a.setStatusNote(note);
+        }
     }
 
     /**
@@ -163,6 +191,14 @@ public class WatchService extends Service {
                 // already unregistered
             }
             packageReceiver = null;
+        }
+        if (keeper != null) {
+            keeper.stop();
+            keeper = null;
+        }
+        if (policy != null) {
+            policy.shutdown();
+            policy = null;
         }
         if (agent != null) {
             agent.shutdown();

@@ -13,6 +13,12 @@ final class Companion {
     /** Logcat tag for everything this app prints: {@code adb logcat -s ShmiraCompanion}. */
     static final String TAG = "ShmiraCompanion";
 
+    /** The Worker that answers /api/companion/policy. Reached through the tunnel (squid splices it). */
+    static final String WORKER_URL = "https://phone-url-filter.daniel08-madar.workers.dev";
+
+    /** The WireGuard tunnel's /24: a phone's address on it is its identity (WIREGUARD.md). */
+    static final int[] TUNNEL_NET = {10, 66, 0};
+
     private Companion() {
     }
 

@@ -1,6 +1,196 @@
 # Next session — start here
 
-## OPEN BUG (2026-09-19): Spotify's catalogue went empty on Isaac's phone
+## START HERE (2026-09-21): three things built, nothing deployed, nothing touched a phone
+
+This session (branch `claude/practical-albattani-tu8iy1`) built the three items the operator asked
+for — Spotify pictures for real, in-app ads, WhatsApp Channels — as code and runbooks. **Nothing
+was deployed and nothing on the server or the phones was touched.** Every check that could run
+offline ran: `npm test` (15 suites incl. three new ones), `npm run test:helper`, `npm run
+test:scripts`, `squid -k parse` on the new config (squid 6.14 in the sandbox; parse again on the
+box), `dnsmasq --test` on the new resolver configs, and a `javac` compile of the companion against
+android.jar. What did NOT happen: no APK was built (the signing key is on the PC), and no phone
+ran any of it. The section below each item says how to deploy it and what to look at.
+
+### 1. Spotify pictures — what the ten attempts got wrong, and what is different now
+
+Researched against Spotify's own client URL templates (librespot, the SpotifyPlus dump), live DNS
+and certificate probes of every host, and every community report of DNS-blocking Spotify. Five
+findings, each now fixed:
+
+1. **Two "picture" hosts were audio.** `p.scdn.co` is the 30-second MP3 previews
+   (`audio-preview-url-template`) and `heads-fa*.scdn.co` / `heads-fa-tls13.spotifycdn.com` are the
+   first 128 KB of every track, prefetched so playback starts instantly. Both were refused; both are
+   now on a KEEP list (`app_keep_hosts`, negated on the terminate rule) that no widening of the
+   picture pattern can ever override. Also on it: `seektables`, the access points, `login5`,
+   `clienttoken`, the regional `gew4-/guc3-/gae2-/gue1-spclient` and `-dealer` hosts.
+2. **Spotify's Akamai video hosts were not matched at all** (`video-akpcw-cdn-spotify-com.akamaized.net`,
+   `video-ak-cdn-…`) and two newer image hosts (`blend-playlist-covers`,
+   `adstudio-video-preview-image`) were unknown. The pattern now matches a media WORD anywhere
+   between hyphens (image, img, video, canvas, thumb, cover, artwork …), on `scdn.co`,
+   `spotifycdn.com`, `spotify.com` and Spotify's one-label `akamaized.net` names.
+3. **Three hand-maintained copies of the regex** (Worker, squid.conf, the live patch script) had
+   already drifted (`heads-fa-tls13` refused by one, not the other). `src/app-media.js` now BUILDS
+   both squid regexes; `node scripts/build-squid-media-acls.mjs` writes them; `test/app-media.test.mjs`
+   fails on any difference and checks 80 real hosts both ways. Never edit the patterns by hand.
+4. **A Worker failure was cached for 60 s.** A helper answer of "filter unreachable" was kept for
+   a full minute, and on the app path a refused handshake means a BUMPED connection, which a
+   pinned app cannot survive — one blip at the moment Spotify opens its dozens of API connections
+   (exactly what happens right after clearing its storage) pins `spclient` as refused for a minute
+   and the library syncs empty. Failures are cached for 5 s now (`FAILURE_TTL`, helper test 7).
+   This is the most plausible in-repo cause of the OPEN BUG below; it is not proven.
+5. **An SNI rule cannot see a coalesced request.** Verified: Spotify's `spotifycdn.com` picture
+   hosts (image-cdn-fa, pickasso, seed-mix-image, daylist, misc …) share one Fastly address and
+   one `*.spotifycdn.com` certificate with `heads-fa` and `audio-fa-quic`, and negotiate HTTP/2.
+   OkHttp and Cronet both reuse an HTTP/2 connection for a second host when the certificate covers
+   it and the addresses match; such a request has no handshake and no SNI, and squid sees one
+   spliced connection to `heads-fa` with the artwork inside. (This also explains the "helper said
+   ERR, six connections spliced" observation as well as the async-ACL story does.) Whether the app
+   actually does this is unverified — but a name that does not RESOLVE cannot be coalesced, so the
+   same hosts are now refused at DNS for the rungs that have pictures off: **the DNS layer**,
+   `scripts/install-dns-policy.sh`, two dnsmasq instances with one cache (PROXY.md, "The DNS
+   layer"). The `scdn.co` pool (`i.scdn.co`, mosaic, audio-fa) speaks HTTP/1.1 only, so the SNI
+   rule alone is sound there; DNS is belt and braces.
+
+6. **The helper never saw a hostname at an app's handshake — the root of the ten failures.** Read
+   out of squid 5.7's source (`startPeekAndSplice`): ssl_bump step 2 is evaluated against the fake
+   CONNECT squid built at step 1, before it had read the client hello, and for an intercepted
+   connection that request's host is the destination **IP address**. So every helper-based attempt
+   asked the Worker about `https://199.232.214.250/` — on no list, allowed — while the operator's
+   hand test, run with the hostname, said ERR. Squid "spliced six connections the helper had
+   refused" because the helper was never asked about that name. The same fact means the social and
+   explicit lists never applied to an app's handshake on the tunnel (Chrome's explicit CONNECT on
+   3128 always carried the name). The helper format now passes `%ssl::>sni` and the helper prefers
+   it (helper test 5b); `apply-yeshiva-squid.sh` step 1b adds it on the live box. Expect the app
+   path to become STRICTER after this deploy — a spliced app host now gets the blocklists and the
+   Worker's rung check. Watch cache.log for apps that stop working and use the census to see which
+   host was refused.
+
+Also new: `scripts/debug-app-media.sh` — the census NEXT-SESSION asked for, as a script.
+
+**Deploy, in this order** (from the PC, where wrangler is logged in; then on the box):
+
+```
+git fetch origin && git checkout <this branch or main after merge> && git pull
+npm test && npm run test:helper && npm run test:scripts
+npx wrangler deploy                      # /api/proxy/media-hosts, /api/companion/policy; no migration
+ssh root@mdm.getshmira.com
+cd /opt/Phonetagging && git pull
+scripts/apply-yeshiva-squid.sh --dry-run # shows: the two regexes replace the old one; the keep guard on the rule
+sudo scripts/apply-yeshiva-squid.sh      # + %ssl::>sni in the helper format, the helper (SNI, 5 s failure cache), sync-media-on.sh
+sudo scripts/install-dns-policy.sh       # the DNS layer; prints its own verification, --uninstall to go back
+scripts/check-drift.sh                   # expected clean, or only your access-log line
+```
+
+`install-dns-policy.sh` moves the packaged dnsmasq from `10.66.0.1` to `127.0.0.1 + 10.66.1.1`
+and starts the strict instance on `10.66.0.1` — the phones lose DNS for about a second while it
+does. It probes for `--filter-rr` (dnsmasq 2.90+; the box's install-wireguard.sh already uses it).
+
+**Then the phone test** (Isaac's S22, `10.66.0.3`, yeshiva rung 3). On the box:
+`sudo scripts/debug-app-media.sh 150 10.66.0.3`. During those 150 s, on the phone: force-stop
+Spotify → Settings and privacy → Storage → **Clear cache** (the home grid's tiles are the image
+cache; "clear storage" evidently left them) → open Spotify → wait for home → open a playlist → play
+a track. Read the census: every picture host under **TERMINATED**; nothing on `scdn.co`,
+`spotifycdn.com` or `akamaized.net` with a picture role under **SPLICED**; nothing under
+**BUMPED/409**. Then from the box `dig @10.66.0.1 i.scdn.co` → `NXDOMAIN` and
+`dig @127.0.0.1 i.scdn.co` → an address. If pictures still show and no picture host was spliced,
+the DNS layer is what stops them — check the strict instance is what the phone reaches
+(`shmira-dns-policy.sh status`: the ipset must NOT contain `10.66.0.3`).
+
+**The empty-playlist bug, re-read with the research.** The picture pattern cannot touch it: it
+is anchored to `scdn.co`/`spotifycdn.com` labels and playlist bodies come from
+`<region>-spclient.spotify.com/playlist/v2/…`. Test in this order, each one cheap:
+
+1. The census above, looking at the `spotify.com` hosts: a `bump` on `gew4-/guc3-spclient`,
+   `login5`, `clienttoken` or `dealer` means the helper refused the handshake (the 60 s failure
+   cache, now 5 s, or the Worker down); a `NONE_NONE/409` means squid's host check disagreed with
+   the phone's DNS answer — geo DNS on `edge-web.dual-gslb`, and the shared cache is supposed to
+   prevent it; either one breaks the catalogue while cached tiles still render.
+2. The access-point protocol. `apresolve` hands the app `ap-gew4.spotify.com:4070`, then `:443`,
+   then `:80` — and on 443/80 it is NOT TLS (a Shannon-cipher stream). tcp/4070 is not redirected
+   into squid, so it should work; if it is blocked somewhere upstream of the box the app falls back
+   to `:443`, which lands in squid's intercept port and dies (`on_unsupported_protocol` defaults to
+   `respond`). From the box: `nc -zv -w3 ap-gew4.spotify.com 4070`. Do NOT set
+   `on_unsupported_protocol tunnel` globally — that would blind-relay any non-TLS stream on 443,
+   a VPN bypass.
+3. Only then the one-step isolation from the older block below (comment the terminate rule out).
+
+Spotify's own settings that help on a family plan: managed accounts have video and Canvas off by
+default, and Spotify announced a video-off control for every account in April 2026. Neither hides
+artwork; the artwork answer is this system.
+
+### 2. In-app ads — blocked at DNS for the ad networks, for every phone
+
+`sync-adblock.sh` (installed and scheduled by `install-dns-policy.sh`, 03:41 nightly) pulls
+hagezi's **Pro** list and its encrypted-DNS list — 228k + 3k names in dnsmasq's own `local=/host/`
+format, which dnsmasq loads in 0.1 s and 20 MB — into the open resolver. The strict instance
+forwards to it, so every phone gets NXDOMAIN for AdMob, Meta Audience Network, AppLovin, Unity,
+ironSource, Vungle, Chartboost, InMobi, Pangle, Mintegral, Amazon and the rest: the SDK gets no
+address and shows nothing, for every app, every port, every protocol. squid enforces the same
+list as a side effect (an SNI that does not resolve fails its host check with a 409), and tcp/udp
+853 are rejected in the tunnel so Private DNS cannot route around it.
+
+Verify on the box: `dig @10.66.0.1 googleads.g.doubleclick.net` → `NXDOMAIN`; on a phone, a free
+game that shows AdMob banners shows blank slots. If an app breaks (sign-in, a widget), find the
+host in `/etc/dnsmasq.d/shmira-adblock.conf`, add it to `SHMIRA_ADBLOCK_KEEP` in
+`/etc/squid/filter.env` (space-separated), run `sync-adblock.sh`. The sync refuses a truncated
+download, keeps the old file on a parse error, and rolls back a list that leaves the resolver
+dead. **Not touched, and not touchable by name:** YouTube's in-app ads (googlevideo.com serves
+both), Spotify's free-tier audio ads (`spclient.wg.spotify.com/ads/…`, the API host — a Premium
+account has none), Instagram/Facebook feed ads.
+
+### 3. WhatsApp Channels and Status — closed on the phone by the companion's accessibility guard
+
+The README's old line ("no network filter can separate these") is still true, and this is the
+other half: companion **0.2.0** carries `GuardService`, an accessibility service that closes
+WhatsApp's Updates tab, the channel directory, a channel opened as a conversation and the status
+viewer on phones whose rung says so — `whatsappUpdates` in `src/levels.js`: closed on yeshiva
+rungs 1-3 and standard 1-4, open on yeshiva 4 (the rung that permits the social apps) and standard
+5. The phone asks `GET /api/companion/policy?user=<tunnel ip>` (identity as on the proxy path,
+fails closed), and the detection rules ride along in the answer (`src/companion-rules.js`,
+`rules_version`), so a WhatsApp release that moves a button is an edit on the Worker, not a
+rebuild. The rules come from decompiled WhatsApp (2.24.x, Oct-2025 activity list): everything
+WhatsApp calls a *newsletter* is a channel; the Updates tab is a fragment in `HomeActivity` and is
+caught by its SELECTED tab label and its `updates_list`; the bottom bar's items carry no WhatsApp
+ids, so an unselected "Updates" label is deliberately NOT a hit (that mistake bounces the person
+out of their chats). Full design, verification and the tuning dump: `companion/README.md`.
+
+**To put it on the phones:**
+
+1. On the PC, `cd companion && gradle assembleRelease` with the keystore in place
+   (`companion/README.md`, Building) → `app-release.apk`, 0.2.0 (versionCode 4).
+2. Headwind: Applications → Shmira companion → new version → upload; select it in every
+   configuration (rungs 1-4, shiur). The agent updates the phones; `MY_PACKAGE_REPLACED` restarts
+   the service.
+3. Per phone, once, with the cable in (NEW-PHONE.md step 9b):
+   `adb shell pm grant com.getshmira.companion android.permission.WRITE_SECURE_SETTINGS`, then
+   `adb shell am start -n com.getshmira.companion/.MainActivity` (or reboot). The keeper then
+   switches the guard on itself and keeps it on; without the grant, enable it once in Settings →
+   Accessibility → Shmira and it still guards its own switch.
+4. Verify: `adb shell settings get secure enabled_accessibility_services` names
+   `…/com.getshmira.companion.GuardService`; `adb logcat -s ShmiraCompanion` shows
+   `whatsapp updates BLOCKED`; in WhatsApp, Updates snaps back to Chats with a toast.
+5. **Before trusting it on a new WhatsApp build**, dump the ids once
+   (`adb shell setprop log.tag.ShmiraGuardDump DEBUG`, open the Updates tab, read
+   `adb logcat -s ShmiraGuardDump`) and compare with the rules. The Hebrew labels in the rules
+   come from press coverage, not the APK — check them on a Hebrew-locale phone.
+
+Known: WhatsApp is moving status to the top of the Chats tab and channels behind a filter there
+(2026 betas). The rules key on the feed's own ids and classes, not the tab, so consumption stays
+closed; the status strip on Chats itself will not be (there is nothing to close without breaking
+the chats).
+
+### What is still open after this session
+
+- Everything above needs the deploy and the phone test; the empty-playlist bug has a stronger
+  candidate (item 1.4) and a runbook, not a proof.
+- The Vortex is still the only enrolled test phone; Isaac's is the one with Spotify.
+- Coalescing is a verified precondition, not an observed behaviour of the app; the census will
+  show it (pictures with no picture SNI) if it happens.
+- The old hypotheses in the OPEN BUG block below are superseded by item 1; the block is kept for
+  its evidence and its rollback line.
+
+
+## OPEN BUG (2026-09-19): Spotify's catalogue went empty on Isaac's phone — SEE THE BLOCK ABOVE
 
 **Symptom, on 10.66.0.3 (Isaac's S22, yeshiva rung 3), right after the proxy was brought up to date
 and Spotify's storage was cleared:** the top ~6 tiles on the home page still show pictures, the

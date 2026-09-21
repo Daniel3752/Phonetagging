@@ -23,6 +23,14 @@
     <uses-permission
         android:name="android.permission.QUERY_ALL_PACKAGES"
         tools:ignore="QueryAllPackagesPermission" />
+    <!-- Lets GuardKeeper switch the accessibility guard back on if it is turned off. A
+         signature|privileged|development permission: the system never grants it to us by itself,
+         adb can (pm grant), and it is harmless to declare where it was not granted. -->
+    <uses-permission
+        android:name="android.permission.WRITE_SECURE_SETTINGS"
+        tools:ignore="ProtectedPermissions" />
+    <!-- The policy fetch (/api/companion/policy on the Worker). -->
+    <uses-permission android:name="android.permission.INTERNET" />
 
     <!-- Redundant next to QUERY_ALL_PACKAGES, kept for clarity: the one package we bind to. -->
     <queries>
@@ -66,6 +74,23 @@
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Keeps the MDM agent's app policy applied the moment an app is installed" />
+        </service>
+
+        <!-- The accessibility guard: closes WhatsApp's Updates tab and channel screens on phones
+             whose policy says so. BIND_ACCESSIBILITY_SERVICE is what makes the system the only
+             thing that can bind it. Enabled by the phone setup (adb settings put / the Settings
+             switch) and kept on by GuardKeeper. -->
+        <service
+            android:name=".GuardService"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/guard_service" />
         </service>
 
         <!-- BOOT_COMPLETED and MY_PACKAGE_REPLACED are protected broadcasts (only the system

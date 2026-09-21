@@ -1,0 +1,78 @@
+{
+  "rules_version": 3,
+  "rules": {
+    "packages": [
+      "com.whatsapp",
+      "com.whatsapp.w4b"
+    ],
+    "channel_activities": [
+      {
+        "contains": "newsletter"
+      },
+      {
+        "contains": "StatusPlayback"
+      },
+      {
+        "contains": "MyStatuses"
+      },
+      {
+        "contains": "MutedStatuses"
+      },
+      {
+        "contains": "StatusComposer"
+      },
+      {
+        "contains": "StatusPrivacy"
+      },
+      {
+        "contains": "statusmuting"
+      }
+    ],
+    "updates_view_ids": [
+      {
+        "regex": ".*newsletter.*"
+      },
+      {
+        "regex": "^updates_list$"
+      },
+      {
+        "regex": "^(find_channels_btn|see_all_status_list|status_pager|status_fullscreen)$"
+      },
+      {
+        "regex": "^status_playback.*"
+      },
+      {
+        "regex": "^directory_categories.*"
+      },
+      {
+        "regex": "^menu_?item_(discover|add|create)_newsletter.*"
+      },
+      {
+        "regex": "^menuitem_(see_all_statuses|status_privacy)$"
+      }
+    ],
+    "updates_texts": [
+      {
+        "regex": "^(updates|channels|find channels|explore channels|channel updates|recent updates|viewed updates|muted updates)$"
+      },
+      {
+        "regex": "^(עדכונים|ערוצים|חיפוש ערוצים|מצא ערוצים)$"
+      }
+    ],
+    "home_texts": [
+      {
+        "regex": "^(chats|צ'אטים|צ׳אטים|שיחות)$"
+      }
+    ],
+    "conversation_texts": [
+      {
+        "regex": "^[0-9.,kmKM+ ]+\\s*(followers|עוקבים)$"
+      },
+      {
+        "regex": "^(followers|עוקבים)$"
+      }
+    ],
+    "toast": "Channels and Status are turned off on this phone.",
+    "min_action_interval_ms": 400
+  }
+}

@@ -7,7 +7,7 @@
 // (Asia/Jerusalem), so the instants below are chosen in UTC and converted by hand in the comments.
 
 import worker from '../src/index.js';
-import { handleProxyCheck, handleMediaOnList } from '../src/proxy-api.js';
+import { handleProxyCheck, handleMediaOnList, handleMediaHostsList } from '../src/proxy-api.js';
 import { makeDB } from './d1-shim.mjs';
 
 let failures = 0;
@@ -281,6 +281,16 @@ console.log('\n6c. the in-app picture allowlist squid reads');
     !list.addresses.some((a) => !/^\d{1,3}(\.\d{1,3}){3}$/.test(a)), JSON.stringify(list));
 
   await admin('/api/admin/devices/level', { id: 'vortex', tag: 'yeshiva', level: 2 });
+
+  // The hostnames themselves, for the strict resolver.
+  const noKey = await handleMediaHostsList(new Request('https://w/api/proxy/media-hosts'), env);
+  check('the host list is not open without the proxy key', noKey.status === 401, String(noKey.status));
+  const hosts = await (await handleMediaHostsList(new Request('https://w/api/proxy/media-hosts', {
+    headers: { Authorization: 'Bearer proxy-key' } }), env)).json();
+  check('it lists the Spotify picture hosts and the Play Store host, sorted, once each',
+    hosts.hosts.includes('i.scdn.co') && hosts.hosts.includes('play-lh.googleusercontent.com')
+      && !hosts.hosts.includes('audio-fa.scdn.co') && new Set(hosts.hosts).size === hosts.hosts.length
+      && JSON.stringify(hosts.hosts) === JSON.stringify([...hosts.hosts].sort()), JSON.stringify(hosts));
 }
 
 console.log('\n7. migrating off the tag');

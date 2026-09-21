@@ -100,6 +100,10 @@ check('in-app pictures are off on the strict rungs and on at the most open one',
   // Yeshiva rung 4 keeps Spotify's artwork even though its browser still blanks pictures.
   assert.deepEqual(YESHIVA_LEVELS.filter((l) => !l.appMedia).map((l) => l.level), [1, 2, 3]);
 });
+check("WhatsApp's Updates tab follows the app model: open only where social apps are", () => {
+  assert.deepEqual(LEVELS.filter((l) => l.whatsappUpdates).map((l) => l.level), [5]);
+  assert.deepEqual(YESHIVA_LEVELS.filter((l) => l.whatsappUpdates).map((l) => l.level), [4]);
+});
 check('an unknown rung has no definition', () => {
   assert.equal(levelDefinition(9), null);
 });

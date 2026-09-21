@@ -93,8 +93,22 @@ So the decision is made per hostname, at the TLS handshake, by asking the filter
 | in `splice.txt` | splice, never judged | Google account/Play infrastructure, WhatsApp, the MDM host |
 
 In `squid.conf` this is one rule, `ssl_bump splice filter_allows`, placed before `ssl_bump bump all`.
-The helper already turns the handshake's `host:443` into `https://host/` and runs the site check
-with the phone's rung, so no helper or Worker change is needed.
+The helper turns the handshake's target into `https://host/` and runs the site check with the
+phone's rung.
+
+**Corrected 2026-09-21, from squid's source.** At ssl_bump step 2 squid evaluates the rules against
+the fake CONNECT it built at step 1, before it had read the client hello, and for an INTERCEPTED
+connection that request's host is the destination IP address — so `%URI` handed the helper
+`199.232.214.250:443`, not `image-cdn-fa.spotifycdn.com:443`, and the Worker judged an address:
+on no list, allowed, spliced. Every hostname decision this section describes for the tunnel path
+was hollow from 2026-09-03 until now. The client hello's server name is available only as
+`%ssl::>sni`; the helper format carries it now and the helper prefers it whenever the target is
+an address. (The browser port's explicit `CONNECT host:443` always carried the name, so Chrome
+was filtered as described.) Two further facts from the same reading: an ERR from the helper is
+only a *non-match* of `filter_allows` — the later rules decide, and the last one is `bump all`;
+and a lookup squid cannot complete (helper queue full, a reconfigure restarting the helpers) ends
+the whole evaluation with no match, whose default at step 2 is **splice**. That is why the in-app
+picture rule is matched by squid itself, from the SNI, with fast ACLs only (YESHIVA.md).
 
 What it gives up: on an approved site Chrome is filtered by **hostname**, not full path, and the
 rung-2 image stripping cannot see inside a spliced tunnel. That is the granularity the DNS design
@@ -125,6 +139,46 @@ config with `AllowedIPs = 0.0.0.0/0`, so everything transits the box: iptables o
 tcp/80 and tcp/443 into Squid's intercept ports, rejects udp/443 so QUIC cannot bypass the TCP
 path, and NATs the rest. The tunnel address is the phone's identity. Peers are added by
 `scripts/new-wg-phone.sh`; the per-phone checklist is `NEW-PHONE.md`.
+
+## The DNS layer: two resolvers, one cache (2026-09-21)
+
+The proxy decides by SNI, and two things never present one: an ad an app fetches over a protocol
+or port the proxy does not intercept, and a picture an app sends down a connection it already
+holds to another host on the same CDN (HTTP/2 connection coalescing — same address, a wildcard
+certificate that covers both names, no new handshake). Both are refused where a name is turned
+into an address instead: the phones' resolver. `scripts/install-dns-policy.sh` sets it up.
+
+```
+phone ──DNS──▶ 10.66.0.1  STRICT  (shmira-dnsmasq-strict): NXDOMAIN for the in-app picture hosts
+                  │                 (/etc/shmira/dnsmasq-strict.d/app-media.conf, sync-media-on.sh),
+                  │                 no cache, forwards everything else to ──┐
+                  │                                                         ▼
+phone in the  ──DNS──▶ 10.66.1.1 ─┐                                   127.0.0.1  OPEN (the packaged
+media-on ipset (DNAT)             ├──▶ OPEN: the cache, upstream 1.1.1.1, the ad blocklist
+squid ─────────────▶ 127.0.0.1 ───┘         (/etc/dnsmasq.d/shmira-adblock.conf, sync-adblock.sh)
+```
+
+- **One cache for everyone.** The strict instance caches nothing and forwards to the open one, so
+  every phone and squid draw the same answer — the property squid's intercept host check depends
+  on (`WIREGUARD.md`). The only names the two disagree on are the picture hosts, which a strict
+  phone never connects to, and the ad hosts, which nobody resolves.
+- **The ad list applies to every phone** through that forwarding: in-app ads (AdMob, Meta
+  Audience Network, AppLovin, Unity, ironSource, Vungle, Chartboost, InMobi, Pangle, Mintegral,
+  Amazon …) get no address and the SDK shows nothing. `sync-adblock.sh` pulls hagezi's Pro list
+  plus its encrypted-DNS list nightly (228k + 3k names, `local=/host/` lines; dnsmasq loads them
+  in 0.1 s and 20 MB), normalises any list format, refuses a truncated download, and rolls back a
+  list that leaves the resolver dead. It does NOT touch first-party ads that ride the content's
+  own hosts — YouTube's in-app ads, Spotify's free-tier audio ads, Instagram/Facebook feed ads.
+- **squid enforces the DNS list as a side effect.** An app that reaches an ad host by a hard-coded
+  address still presents the name as SNI; squid resolves it through the open resolver, gets
+  NXDOMAIN, and its intercept host check answers 409. No second ACL is needed.
+- **Private DNS cannot route around it.** `shmira-dns-policy.service` rejects tcp/udp 853 inside
+  the tunnel (Android's "Automatic" mode then falls back to plain DNS at once), the encrypted-DNS
+  list makes DoH resolver names unresolvable, and `no_config_private_dns` locks the setting.
+- **Failure directions.** Strict down = the phones have no DNS (visible at once; the unit
+  restarts itself). Open down = squid has no DNS (the dependency that already existed). Both lists
+  and the ipset are allowlists or refusals that a missed sync leaves as they were. `--uninstall`
+  puts the single resolver back. `health-check.sh` probes both instances and the plumbing.
 
 ## The bug that blocked every search (found 2026-09-04)
 

@@ -36,24 +36,65 @@ rung 4 in `YESHIVA_LEVELS` (`src/levels.js`) — one word.
   helper forwards `Sec-Fetch-Dest` (squid.conf now passes `%>ha{Sec-Fetch-Dest}`).
 - **Images off inside Spotify and the Play Store on rungs 1-3.** Both apps are spliced and cannot
   be read, but Spotify's artwork and Canvas videos, and the Play Store's icons and screenshots,
-  come from hosts of their own (`src/app-media.js`), and those are refused at the TLS handshake.
-  Music plays and the store still installs and updates; the pictures never arrive.
+  come from hosts of their own (`src/app-media.js`), and those are refused by NAME — at the TLS
+  handshake by squid, and at DNS by the phones' resolver. Music plays and the store still installs
+  and updates; the pictures never arrive.
   **Rung 4 is the exception and keeps them**: the browser still blanks every picture there, but a
   music app with no artwork is a worse trade than the pictures are worth at the most open rung.
   `appMedia` in `src/levels.js` is where that lives.
-  **Enforced in squid, not by the filter helper** (`app_media_hosts` in `scripts/squid.conf`, step 6
-  of `apply-yeshiva-squid.sh`): squid matches the host by role with a regex and terminates the
-  connection. Asking the Worker per request was tried first and is unsound at the TLS handshake —
-  with the helper answering ERR for `image-cdn-fa.spotifycdn.com`, verified by hand with the same
-  arguments and the same client address, squid spliced six connections and 182 KB of cover art
-  arrived. An external ACL is an asynchronous lookup that squid may not have in hand when it must
-  choose splice or bump, so a decision that must not fail open cannot rest on it.
-  It stays per-rung all the same, without the helper: `app_media_on` is a `src` ACL read from
+  **Which hosts (2026-09-21, researched against Spotify's own client templates and live DNS).**
+  A host is media when its first label is a known picture role (`i`, `o`, `t`, `misc`, `mosaic`,
+  `canvaz`, `pickasso`, `daylist`, `concerts`, `fex`, `lexicon-assets`, `podz-content`) or carries a
+  media word between hyphens (`image`, `img`, `video`, `canvas`, `thumb`, `cover`, `artwork` …), on
+  `scdn.co`, `spotifycdn.com` or `spotify.com`, or in Spotify's one-label Akamai names
+  (`video-akpcw-cdn-spotify-com.akamaized.net`). A host is NEVER media when its first label starts
+  with a role that carries the music or the API — `audio*`, `heads*` (the first 128 KB of every
+  track, prefetched; NOT artwork, whatever some blocklists say), `p` (`p.scdn.co` is the 30-second
+  previews), `seektables`, `spclient`, `apresolve`, `dealer`, `login5`, `clienttoken`, the access
+  points. That keep list is checked first everywhere, so a wider media pattern can never cost a
+  boy his music. Two things the earlier list got wrong and this one fixes: `p` and `heads-fa-tls13`
+  were refused as pictures (they are audio), and the Akamai video hosts were not matched at all.
+  **Three enforcers, one source.** `src/app-media.js` holds the lists and BUILDS the two squid
+  regexes; `scripts/build-squid-media-acls.mjs` writes them into `scripts/squid.conf` and
+  `scripts/apply-yeshiva-squid.sh`, and `test/app-media.test.mjs` fails if any copy differs or if
+  the Worker and squid disagree on a corpus of 80 real hosts. Never edit the patterns by hand.
+  1. **squid** (`app_media_hosts`, `app_keep_hosts`, step 6 of `apply-yeshiva-squid.sh`):
+     `ssl_bump terminate app_media_hosts !app_keep_hosts wg_phones !app_media_on`. Squid matches
+     the client hello's SNI itself, with fast ACLs only, and closes the connection. Asking the
+     Worker per request was tried first and could never have worked at the handshake, for a
+     reason read out of squid's source this session: at ssl_bump step 2 squid evaluates the rules
+     against the fake CONNECT it built BEFORE reading the hello, and for an intercepted connection
+     that request's host is the destination **address**. The helper was asked about
+     `https://199.232.214.250/`, which is on no list, and answered "allow" — while the operator's
+     hand test, run with the hostname, answered ERR. (Two more ways it fails open: an ERR is only a
+     non-match, so the next rules decide; and a lookup squid cannot complete ends the whole
+     evaluation in a splice.) The same fact hollowed out every app-path hostname check since the
+     tunnel went live; the helper format now carries `%ssl::>sni` and the helper prefers it.
+  2. **DNS** (`scripts/install-dns-policy.sh`, the strict resolver): the same hosts, as an exact
+     list from `GET /api/proxy/media-hosts`, answered NXDOMAIN for phones whose rung has pictures
+     off. This is the part the SNI rule cannot do. Spotify's `spotifycdn.com` picture hosts share
+     one Fastly address and one `*.spotifycdn.com` certificate with `heads-fa` and `audio-fa-quic`
+     and negotiate HTTP/2, and an HTTP/2 client may send a request for one host down an open
+     connection to another when the certificate covers it and the addresses match (OkHttp, Cronet).
+     Such a request has no handshake and no SNI; squid sees one spliced connection to `heads-fa`
+     and the artwork inside it. A name that does not resolve cannot be coalesced.
+  3. **The Worker** (`appMediaHost`) answers the same for Chrome's decrypted requests.
+  **Per rung, without the helper.** `app_media_on` is a `src` ACL read from
   `/etc/squid/app-media-on.txt`, which `scripts/sync-media-on.sh` regenerates every five minutes
-  from `GET /api/proxy/media-on` — the tunnel addresses whose rung has `appMedia` on. A file ACL is
-  evaluated synchronously, so there is nothing to race. The list is an **allowlist**: a phone
-  missing from it, or a sync that did not run, means pictures blocked rather than open. The cost is
-  that a rung change reaches the proxy on the next sync, not instantly.
+  from `GET /api/proxy/media-on` — the tunnel addresses whose rung has `appMedia` on; the same
+  script fills the `shmira_media_on` ipset that routes those phones' DNS to the open resolver, and
+  the strict resolver's host list. All three are **allowlists**: a phone missing from them, or a
+  sync that did not run, means pictures blocked rather than open. A rung change reaches the proxy
+  on the next sync, not instantly.
+  **Verifying on a phone**: `sudo scripts/debug-app-media.sh 120 <tunnel-ip>` logs every handshake
+  to the app domains for two minutes and prints which hosts were terminated, spliced or bumped —
+  run it while clearing Spotify's storage and opening a playlist. Then Settings and privacy →
+  Storage → **Clear cache** in Spotify (the home grid's tiles are the image cache, and "clear
+  storage" does not always empty it) before judging what still shows.
+  **What this cannot do**: Spotify's own audio ads on a free account ride `spclient`, the API
+  host, and cannot be refused by name; a Premium account has none. Spotify's own "video off"
+  account control (managed accounts, rolling out to everyone from 2026-04) turns off Canvas and
+  video clips but not artwork.
 - **Search:** allowed, screened by the keyword list (`keyword_rules`) and by anything already on
   file as NEVER from the standard phones; image search off; result thumbnails are images and get
   blanked like everything else. Not model-judged.

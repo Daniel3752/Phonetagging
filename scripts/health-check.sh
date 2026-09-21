@@ -57,6 +57,22 @@ else
   FAILURES+=("MONITOR_USER/MONITOR_PASS not set in $ENV_FILE — chain probe skipped")
 fi
 
+# 4. The DNS layer, where install-dns-policy.sh has set it up: both resolvers answer, the strict
+#    one refuses a picture host, the open one resolves it, and the plumbing is in place.
+if systemctl is-enabled --quiet shmira-dnsmasq-strict.service 2>/dev/null; then
+  STRICT_IP=${SHMIRA_STRICT_DNS_IP:-10.66.0.1}
+  dig +short +time=3 +tries=1 @127.0.0.1 example.com 2>/dev/null | grep -q . \
+    || FAILURES+=("open resolver (127.0.0.1) not answering")
+  dig +short +time=3 +tries=1 @"$STRICT_IP" example.com 2>/dev/null | grep -q . \
+    || FAILURES+=("strict resolver ($STRICT_IP) not answering — the phones have no DNS")
+  if grep -q '^local=/i.scdn.co/' /etc/shmira/dnsmasq-strict.d/app-media.conf 2>/dev/null; then
+    st=$(dig +time=3 +tries=1 @"$STRICT_IP" i.scdn.co 2>/dev/null | awk '/status:/ {print $6}' | tr -d ',')
+    [[ "$st" == "NXDOMAIN" ]] || FAILURES+=("strict resolver answers ${st:-nothing} for i.scdn.co (expected NXDOMAIN)")
+  fi
+  systemctl is-active --quiet shmira-dns-policy.service || FAILURES+=("shmira-dns-policy.service is not active (no DNAT for picture-allowed phones)")
+  ipset list -n 2>/dev/null | grep -qx "${SHMIRA_MEDIA_ON_IPSET:-shmira_media_on}" || FAILURES+=("media-on ipset missing")
+fi
+
 if [[ ${#FAILURES[@]} -eq 0 ]]; then
   exit 0
 fi

@@ -36,6 +36,9 @@ apt-get install -y wireguard qrencode dnsmasq
 # phones get 10.66.0.1 as their tunnel DNS, squid.conf points at 127.0.0.1. Same cache, same
 # answers, no mismatch.
 echo "==> dnsmasq (shared resolver for phones + squid)"
+if [[ -f /etc/systemd/system/shmira-dnsmasq-strict.service ]]; then
+  echo "    the two-resolver DNS layer is installed (install-dns-policy.sh owns /etc/dnsmasq.d/shmira.conf); leaving it alone"
+else
 cat > /etc/dnsmasq.d/shmira.conf <<'DNSMASQ'
 listen-address=127.0.0.1,10.66.0.1
 bind-interfaces
@@ -51,6 +54,7 @@ cache-size=10000
 # is not.
 filter-rr=HTTPS
 DNSMASQ
+fi
 mkdir -p /etc/systemd/system/dnsmasq.service.d
 cat > /etc/systemd/system/dnsmasq.service.d/after-wg.conf <<'UNIT'
 [Unit]

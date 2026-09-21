@@ -26,6 +26,9 @@ PAIRS=(
   "/etc/squid/squid.conf:scripts/squid.conf"
   "/usr/local/bin/squid-acl-helper.py:scripts/squid-acl-helper.py"
   "/usr/local/bin/sync-blocklists.sh:scripts/sync-blocklists.sh"
+  "/usr/local/bin/sync-media-on.sh:scripts/sync-media-on.sh"
+  "/usr/local/bin/sync-adblock.sh:scripts/sync-adblock.sh"
+  "/usr/local/bin/shmira-dns-policy.sh:scripts/dns-policy-up.sh"
   "/usr/local/bin/shmira-health-check.sh:scripts/health-check.sh"
   "/usr/local/bin/shmira-check-drift.sh:scripts/check-drift.sh"
 )

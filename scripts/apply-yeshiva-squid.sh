@@ -7,18 +7,22 @@
 #
 # The edits (see scripts/squid.conf for the reasoning next to each):
 #   1. external_acl_type format gains %>ha{Sec-Fetch-Dest}   (images with no file extension)
+#      and %ssl::>sni (1b: the hostname at an intercepted handshake — %URI is the address there)
 #   2. deny_info URL gains &why=%o                             (the block page learns "locked")
 #   3. http_port 3128 gains name=browser                       (the browser's own door)
 #   4. acl browser_port myportname browser + ssl_bump bump browser_port (decrypt only that door)
 #   5. the google_system_hosts pre-filter allow excludes the browser port (else Chrome's requests
 #      to www.gstatic.com / lh3.googleusercontent.com skip the filter and images leak)
-#   6. acl app_media_hosts (a ROLE regex) + acl app_media_on (a src ACL read from
-#      /etc/squid/app-media-on.txt) + `ssl_bump terminate app_media_hosts wg_phones !app_media_on`
-#      right after the browser-port bump: in-app pictures (Spotify artwork and Canvas, Play Store
-#      icons) are closed by name, without asking the helper — an earlier version asked the helper
-#      here and squid spliced hosts the helper had refused. Which phones are exempt stays per-rung:
+#   6. acl app_media_hosts (a ROLE regex) + acl app_keep_hosts (the music/API roles, never
+#      terminated) + acl app_media_on (a src ACL read from /etc/squid/app-media-on.txt) +
+#      `ssl_bump terminate app_media_hosts !app_keep_hosts wg_phones !app_media_on` right after
+#      the browser-port bump: in-app pictures (Spotify artwork and Canvas, Play Store icons) are
+#      closed by name, without asking the helper — an earlier version asked the helper here and
+#      squid spliced hosts the helper had refused. Which phones are exempt stays per-rung:
 #      sync-media-on.sh rewrites that file from the Worker every five minutes, and it is an
-#      allowlist, so a phone missing from it has pictures blocked rather than open.
+#      allowlist, so a phone missing from it has pictures blocked rather than open. The two
+#      regexes are generated from src/app-media.js by scripts/build-squid-media-acls.mjs; a
+#      server carrying an older pattern gets the current one on the next run.
 #
 # Usage:  sudo scripts/apply-yeshiva-squid.sh            (from a clone on the deployed branch)
 #         SQUID_CONF=/tmp/x.conf scripts/apply-yeshiva-squid.sh --dry-run
@@ -41,6 +45,13 @@ if grep -qE '^\s*%un %SRC %URI \\$' "$work"; then
   note "1. helper format: added %>ha{Sec-Fetch-Dest}"
 elif grep -q 'Sec-Fetch-Dest' "$work"; then note "1. helper format: already has Sec-Fetch-Dest"
 else echo "!! 1. could not find the '%un %SRC %URI \\' line — is the %LOGIN fix applied? Not touching it." >&2; fi
+# 1b. the SNI: at ssl_bump step 2 %URI is the destination ADDRESS for an intercepted connection,
+#     so the hostname the phone asked for reaches the helper only as %ssl::>sni (see squid.conf).
+if grep -qE '^\s*%un %SRC %URI %>ha\{Sec-Fetch-Dest\} \\$' "$work"; then
+  sed -i -E 's/^(\s*)%un %SRC %URI %>ha\{Sec-Fetch-Dest\} \\$/\1%un %SRC %URI %>ha{Sec-Fetch-Dest} %ssl::>sni \\/' "$work"; changed=1
+  note "1b. helper format: added %ssl::>sni"
+elif grep -q '%ssl::>sni' "$work"; then note "1b. helper format: already has %ssl::>sni"
+else echo "!! 1b. could not find the helper format line to add %ssl::>sni to. Not touching it." >&2; fi
 
 # 2. deny_info why
 if grep -qE '^deny_info https://[^ ]*/blocked\?url=%s filter_allows' "$work"; then
@@ -83,10 +94,13 @@ else echo "!! 4b. no 'ssl_bump peek step1' line to anchor on. Not touching it." 
 #    process backslash escapes, and this regex is nothing but backslash escapes. Idempotence is
 #    checked by looking for the exact line anywhere in the file, not at a fixed position, so a
 #    comment moving around cannot make the script rewrite the file on every run.
-export APP_MEDIA_RX='^(((i|o|t|p|pl|misc|mosaic|canvaz|pickasso|daylist|concerts|fex|charts-images|daily-mix|dailymix-images|lineup-images|merch-img|newjams-images|profile-images|seeded-session-images|seed-mix-image|thisis-images|wrapped-images|lexicon-assets|mixed-media-images|podz-content|image[a-z0-9-]*|video[a-z0-9-]*)\.(scdn\.co|spotifycdn\.com))|(video[a-z0-9-]*\.(cdn\.)?spotify\.com)|play-lh\.googleusercontent\.com)$'
+export APP_MEDIA_RX='^(((i|o|t|misc|mosaic|canvaz|pickasso|daylist|concerts|fex|daily-mix|lexicon-assets|podz-content|([a-z0-9]+-)*(image|images|img|video[0-9]*|videos|canvas|canvaz|thumb|thumbs|thumbnail|thumbnails|cover|covers|artwork|mosaic|pickasso|picasso)(-[a-z0-9]+)*)\.(scdn\.co|spotifycdn\.com|spotify\.com|pscdn\.co))|(([a-z0-9]+-)*(image|images|img|video[0-9]*|videos|canvas|canvaz|thumb|thumbs|thumbnail|thumbnails|cover|covers|artwork|mosaic|pickasso|picasso)(-[a-z0-9]+)*-spotify-com\.akamaized\.net)|play-lh\.googleusercontent\.com)$'
 export APP_MEDIA_ACL="acl app_media_hosts ssl::server_name_regex -i $APP_MEDIA_RX"
+# The hosts that carry the music and the API, negated on the terminate rule (see squid.conf).
+export APP_KEEP_RX='^((p)\.|(audio|heads|seektables|spclient|apresolve|dealer|login|clienttoken|accounts|api|exp|ap-|ap\.|mobile-ap|dj-|anon-podcast|podcast|encore|open|www|sdk|download|upgrade|episode|tts|sharing|gew|guc|gae|gue|connect|partner|pathfinder|quic|wg)[a-z0-9-]*\.)'
+export APP_KEEP_ACL="acl app_keep_hosts ssl::server_name_regex -i $APP_KEEP_RX"
 export APP_MEDIA_ON_ACL='acl app_media_on src "/etc/squid/app-media-on.txt"'
-APP_MEDIA_RULE='ssl_bump terminate app_media_hosts wg_phones !app_media_on'
+APP_MEDIA_RULE='ssl_bump terminate app_media_hosts !app_keep_hosts wg_phones !app_media_on'
 APP_MEDIA_ON_FILE=/etc/squid/app-media-on.txt
 # squid refuses to start on a missing ACL file, so the file must exist before the acl line does.
 # Placeholder-only until sync-media-on.sh runs, which means pictures off everywhere — the safe way
@@ -105,8 +119,8 @@ fi
 if grep -q '^acl google_system_hosts dstdomain' "$work"; then
   # BOTH lines, not just the regex: a server patched by an earlier version of this script has the
   # regex already but names the companion ACL app_media_exempt, and would otherwise keep it.
-  if ! grep -qxF "$APP_MEDIA_ACL" "$work" || ! grep -qxF "$APP_MEDIA_ON_ACL" "$work"; then
-    sed -i '/^acl app_media_hosts /d; /^acl app_media_exempt /d; /^acl app_media_on /d' "$work"
+  if ! grep -qxF "$APP_MEDIA_ACL" "$work" || ! grep -qxF "$APP_KEEP_ACL" "$work" || ! grep -qxF "$APP_MEDIA_ON_ACL" "$work"; then
+    sed -i '/^acl app_media_hosts /d; /^acl app_keep_hosts /d; /^acl app_media_exempt /d; /^acl app_media_on /d' "$work"
     # ABOVE acl browser_port, not directly above google_system_hosts: step 4a checks that
     # browser_port is the line immediately before google_system_hosts, and inserting between the
     # two would make 4a move it back on every future run — a script that never settles.
@@ -115,14 +129,15 @@ if grep -q '^acl google_system_hosts dstdomain' "$work"; then
     # Whole lines out of the environment: nothing to escape, in a regex that is all escapes.
     awk '$0 ~ ENVIRON["APP_MEDIA_ANCHOR"] && !placed {
            print ENVIRON["APP_MEDIA_ACL"]
+           print ENVIRON["APP_KEEP_ACL"]
            print ENVIRON["APP_MEDIA_ON_ACL"]
            placed = 1
          } { print }' "$work" > "$work.tmp"
     mv "$work.tmp" "$work"
-    grep -qxF "$APP_MEDIA_ACL" "$work" || { echo "!! 6a. insert failed — not writing a broken config" >&2; exit 1; }
+    grep -qxF "$APP_MEDIA_ACL" "$work" && grep -qxF "$APP_KEEP_ACL" "$work" || { echo "!! 6a. insert failed — not writing a broken config" >&2; exit 1; }
     changed=1
-    note "6a. placed the app_media_hosts role regex + app_media_on"
-  else note "6a. app_media_hosts regex already in place"; fi
+    note "6a. placed the app_media_hosts + app_keep_hosts regexes + app_media_on"
+  else note "6a. app_media_hosts / app_keep_hosts regexes already in place"; fi
 else echo "!! 6a. no 'acl google_system_hosts' line to anchor on. Not touching it." >&2; fi
 
 # 6d. The live file may still carry the paragraph saying this is "no longer per-rung" and naming

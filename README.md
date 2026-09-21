@@ -71,10 +71,16 @@ inside the native apps.
 
 Worth knowing before promising anything to families:
 
-- **It cannot separate YouTube Shorts, Instagram Reels, or WhatsApp Status/Channels from the rest of
-  those apps.** No network filter can — in-app those are the same endpoints as ordinary content,
-  behind certificate pinning. Feature-level control inside an app needs an on-device Accessibility
-  service, which is not built. The app tier is all-or-nothing for these.
+- **The network cannot separate YouTube Shorts, Instagram Reels, or WhatsApp Status/Channels from
+  the rest of those apps** — in-app those are the same endpoints as ordinary content, behind
+  certificate pinning. WhatsApp's Updates tab (Status and Channels) is the one handled anyway, ON
+  the phone: the companion app's accessibility guard closes it on rungs whose policy says so
+  (`companion/README.md`, `whatsappUpdates` in `src/levels.js`). Shorts and Reels are still
+  all-or-nothing at the app tier.
+- **In-app ads are blocked at DNS for the ad networks, not for first-party ads.** AdMob, Meta
+  Audience Network, AppLovin, Unity and the rest get no address (`PROXY.md`, the DNS layer).
+  Ads that ride the content's own hosts — YouTube's, Spotify's free tier, Instagram's feed —
+  are that app's own traffic and cannot be refused by name.
 - **It does not enforce duration quotas** ("90 minutes of YouTube per day"). Time *windows* work;
   quotas need on-device usage accounting. See the plan's v1.5 note.
 - **A factory reset removes everything.** Without an enterprise Google binding there is no
@@ -96,8 +102,11 @@ Worth knowing before promising anything to families:
 | `src/admin-api.js` | Operator API behind `/api/admin/*` |
 | `src/admin-page.js` | Operator console (`/admin`) |
 | `src/block-page.js` | Block page (`/blocked`); also the blank placeholder served for a stripped image |
-| `src/app-media.js`, `scripts/sync-media-on.sh` | In-app pictures (Spotify artwork, Play Store icons): which hosts carry them, and which phones' rungs may see them |
-| `companion/` | The Shmira companion Android app: on-phone install watcher that makes the Headwind agent re-apply its app rules the moment an app is installed (`companion/README.md`) |
+| `src/app-media.js`, `scripts/build-squid-media-acls.mjs`, `scripts/sync-media-on.sh` | In-app pictures (Spotify artwork, Play Store icons): which hosts carry them (one source for squid's regexes, the strict resolver's list and the Worker), and which phones' rungs may see them |
+| `scripts/install-dns-policy.sh`, `scripts/dns-policy-up.sh`, `scripts/sync-adblock.sh` | The DNS layer: strict and open resolvers, the per-rung routing between them, the ad-network blocklist (`PROXY.md`) |
+| `scripts/debug-app-media.sh` | Two-minute census of what squid did with Spotify's hosts, for a phone test |
+| `src/companion-api.js`, `src/companion-rules.js` | What the companion app enforces on a phone (`/api/companion/policy`) and the detection rules its guard runs on |
+| `companion/` | The Shmira companion Android app: the install watcher that makes the Headwind agent re-apply its app rules the moment an app is installed, and the accessibility guard that closes WhatsApp's Updates tab (`companion/README.md`) |
 | `schema.sql`, `migrations/` | D1 schema |
 | `scripts/setup-gateway.sh` | One-time Gateway config |
 | `test/` | Offline test suite |

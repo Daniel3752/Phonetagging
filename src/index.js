@@ -19,7 +19,8 @@
 import { classifySite } from './gemini.js';
 import { MAX_DEVICE_LEVEL, NEVER_LEVEL, normalizeSiteLevel } from './levels.js';
 import { handleAdmin } from './admin-api.js';
-import { handleProxyCheck, handleMediaOnList } from './proxy-api.js';
+import { handleProxyCheck, handleMediaOnList, handleMediaHostsList } from './proxy-api.js';
+import { handleCompanionPolicy } from './companion-api.js';
 import { runScheduler } from './scheduler.js';
 import { runPreClassifier } from './preclassify.js';
 import { renderAdminPage } from './admin-page.js';
@@ -143,6 +144,17 @@ export default {
     // from cron by scripts/sync-media-on.sh into a squid src ACL file; see proxy-api.js.
     if (url.pathname === '/api/proxy/media-on' && request.method === 'GET') {
       return handleMediaOnList(request, env);
+    }
+
+    // The in-app media hostnames themselves, for the strict resolver (same script, same key).
+    if (url.pathname === '/api/proxy/media-hosts' && request.method === 'GET') {
+      return handleMediaHostsList(request, env);
+    }
+
+    // The companion app on a phone asking what to enforce on-device (WhatsApp's Updates tab).
+    // Identified by its tunnel address; no credential, nothing secret in the answer, fails closed.
+    if (url.pathname === '/api/companion/policy' && request.method === 'GET') {
+      return handleCompanionPolicy(request, env);
     }
 
     // Classifying a site fetches it and calls the model, so this is an expensive route to leave

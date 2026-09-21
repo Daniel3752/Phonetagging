@@ -35,7 +35,7 @@ import { parseSearchUrl, searchCacheKey, isSearchEngineHost } from './search.js'
 import { keywordRating } from './keywords.js';
 import { classifyDomain } from './classify.js';
 import { registrableDomain, normalizeHost } from './domains.js';
-import { appMediaHost } from './app-media.js';
+import { appMediaHost, APP_MEDIA_DNS_HOSTS } from './app-media.js';
 import { isVisibleAtLevel, levelDefinition, normalizeDeviceLevel, normalizeSiteLevel, normalizeTag, MIN_LEVEL, NEVER_LEVEL, DEFAULT_TAG } from './levels.js';
 import { resolveEffectivePolicy, SHIUR_POLICY_ID } from './policy.js';
 import { sha256Hex, timingSafeEqual } from './crypto.js';
@@ -226,6 +226,21 @@ export async function handleMediaOnList(request, env) {
   }
   addresses.sort();
   return json({ addresses });
+}
+
+// GET /api/proxy/media-hosts  ->  { hosts: [...] }
+//
+// The exact in-app media hostnames, for the strict resolver: scripts/sync-media-on.sh writes them as
+// dnsmasq `local=/host/` lines, so a phone whose rung has in-app pictures off cannot even resolve
+// them. This closes what the squid rule cannot see — an image request sent down an already-open
+// connection to an allowed host on the same CDN (HTTP/2 connection coalescing), which carries no
+// handshake and no SNI of its own. DNS has no regex; the list is the hosts actually seen, and the
+// squid regex covers the shapes nobody has seen yet. Same key as the address list.
+export async function handleMediaHostsList(request, env) {
+  const denied = requireProxyKey(request, env);
+  if (denied) return denied;
+  const hosts = [...new Set(Object.values(APP_MEDIA_DNS_HOSTS).flat().map((h) => normalizeHost(h)).filter(Boolean))].sort();
+  return json({ hosts });
 }
 
 // POST /api/proxy/check  { user, url, dest?, features? }  ->  { allow, reason, level, action, ... }

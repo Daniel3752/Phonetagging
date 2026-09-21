@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The accessibility guard (GuardService). packageNames is set at runtime from the rules
+     (WhatsApp, WhatsApp Business, and the settings apps for the self-guard). Window content is
+     needed to read the tab names; view ids to tell a tab from a message bubble;
+     not-important views because WhatsApp marks some structural views that way. -->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/guard_description"
+    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged|typeViewSelected|typeViewClicked"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagReportViewIds|flagIncludeNotImportantViews|flagRetrieveInteractiveWindows"
+    android:canRetrieveWindowContent="true"
+    android:notificationTimeout="100"
+    android:isAccessibilityTool="false" />

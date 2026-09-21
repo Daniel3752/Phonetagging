@@ -50,15 +50,20 @@ export const NEVER_LEVEL = 6;
 // seen — the only way to turn those off is to refuse the hosts that carry them, since the proxy
 // cannot read inside the app. It does NOT track `images`: the yeshiva browser blanks pictures on
 // every rung, but rung 4 keeps Spotify's covers, because a music app with no artwork is a worse
-// trade than the pictures are worth at the most open rung. Mirrors
+// trade than the pictures are worth at the most open rung. whatsappUpdates says whether the phone
+// may open WhatsApp's Updates tab — Status and Channels, WhatsApp's own social feed. No network
+// filter can see it (same pinned socket as the chats), so it is enforced ON the phone by the
+// companion app's accessibility guard, which reads this flag from /api/companion/policy. It
+// follows the rung's APP model rather than its browser: a rung that permits social apps permits
+// WhatsApp's feed too. Mirrors
 // level_definitions in the schema — the DB rows are the source of truth for enforcement ids, this is
 // the source of truth for the semantics, and the two are kept in step.
 export const LEVELS = [
-  { level: 1, name: 'No browser', webMode: 'none', images: false, textSearch: false, imageSearch: false, blockSocial: true,  appMedia: false },
-  { level: 2, name: 'Text-only',  webMode: 'web',  images: false, textSearch: true,  imageSearch: false, blockSocial: true,  appMedia: false },
-  { level: 3, name: 'Essential',  webMode: 'web',  images: true,  textSearch: true,  imageSearch: true,  blockSocial: true,  appMedia: true  },
-  { level: 4, name: 'General',    webMode: 'web',  images: true,  textSearch: true,  imageSearch: true,  blockSocial: true,  appMedia: true  },
-  { level: 5, name: 'Open',       webMode: 'web',  images: true,  textSearch: true,  imageSearch: true,  blockSocial: false, appMedia: true  },
+  { level: 1, name: 'No browser', webMode: 'none', images: false, textSearch: false, imageSearch: false, blockSocial: true,  appMedia: false, whatsappUpdates: false },
+  { level: 2, name: 'Text-only',  webMode: 'web',  images: false, textSearch: true,  imageSearch: false, blockSocial: true,  appMedia: false, whatsappUpdates: false },
+  { level: 3, name: 'Essential',  webMode: 'web',  images: true,  textSearch: true,  imageSearch: true,  blockSocial: true,  appMedia: true,  whatsappUpdates: false },
+  { level: 4, name: 'General',    webMode: 'web',  images: true,  textSearch: true,  imageSearch: true,  blockSocial: true,  appMedia: true,  whatsappUpdates: false },
+  { level: 5, name: 'Open',       webMode: 'web',  images: true,  textSearch: true,  imageSearch: true,  blockSocial: false, appMedia: true,  whatsappUpdates: true  },
 ];
 
 // The yeshiva temp tag. The BROWSER is the same on every rung that has one: blocklist-only (the
@@ -86,11 +91,14 @@ export const LEVELS = [
 // needs a splice entry. decrypt: true would instead make the helper force a bump of every
 // approved host for these phones at the TLS handshake — the fallback if the Chrome setting cannot
 // be pushed, at the cost of breaking apps that reject the filter's certificate. Off.
+//
+// whatsappUpdates: rungs 1-3 keep WhatsApp's Updates tab (Status and Channels) closed; rung 4, the
+// rung that permits the social apps, permits WhatsApp's feed with them. One word to flip.
 export const YESHIVA_LEVELS = [
-  { level: 1, name: 'Apps only',            webMode: 'none',      images: false, textSearch: false, imageSearch: false, blockSocial: true, appMedia: false, appModel: 'allowlist', decrypt: false },
-  { level: 2, name: 'Apps + browser',       webMode: 'blocklist', images: false, textSearch: true,  imageSearch: false, blockSocial: true, appMedia: false, appModel: 'allowlist', decrypt: false, textOnlyGoogle: true },
-  { level: 3, name: 'Blocklist, no social', webMode: 'blocklist', images: false, textSearch: true,  imageSearch: false, blockSocial: true, appMedia: false, appModel: 'blocklist', decrypt: false, textOnlyGoogle: true },
-  { level: 4, name: 'Blocklist',            webMode: 'blocklist', images: false, textSearch: true,  imageSearch: false, blockSocial: true, appMedia: true,  appModel: 'blocklist', decrypt: false, textOnlyGoogle: true },
+  { level: 1, name: 'Apps only',            webMode: 'none',      images: false, textSearch: false, imageSearch: false, blockSocial: true, appMedia: false, whatsappUpdates: false, appModel: 'allowlist', decrypt: false },
+  { level: 2, name: 'Apps + browser',       webMode: 'blocklist', images: false, textSearch: true,  imageSearch: false, blockSocial: true, appMedia: false, whatsappUpdates: false, appModel: 'allowlist', decrypt: false, textOnlyGoogle: true },
+  { level: 3, name: 'Blocklist, no social', webMode: 'blocklist', images: false, textSearch: true,  imageSearch: false, blockSocial: true, appMedia: false, whatsappUpdates: false, appModel: 'blocklist', decrypt: false, textOnlyGoogle: true },
+  { level: 4, name: 'Blocklist',            webMode: 'blocklist', images: false, textSearch: true,  imageSearch: false, blockSocial: true, appMedia: true,  whatsappUpdates: true,  appModel: 'blocklist', decrypt: false, textOnlyGoogle: true },
 ];
 
 // The tags a device can carry, with the ladder each one uses and the app-policy id convention
