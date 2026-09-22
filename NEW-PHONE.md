@@ -27,10 +27,12 @@ Legend: **[server]** = SSH to the MDM box · **[panel]** = https://mdm.getshmira
 4. ☐ **[phone]** Remove ALL accounts (Settings → Accounts — Google, Samsung, everything).
    Apps, photos and chats stay; only sync pauses.
 5. ☐ **[phone]** Enable Developer options + USB debugging; connect the cable.
-6. ☐ **[PC]** Install the stock agent APK, then:
+6. ☐ **[PC]** Install the stock agent APK **first** (it is easy to skip and causes an
+   "Invalid component" refusal later — see §H), then:
    `adb shell dpm set-device-owner com.hmdm.launcher/.AdminReceiver`
-   If it refuses, check `adb shell dpm list-owners` for a carrier-preinstalled owner and
-   look for stray non-removable accounts. A refusal on a new model = fall back to reset path.
+   If it refuses, **§H** walks the refusal chain in order (secondary users / Secure Folder →
+   accounts, orphaned and WhatsApp included → agent-not-installed). `adb shell dpm list-owners`
+   also shows a carrier-preinstalled owner. A refusal on a new model = fall back to reset path.
 7. ☐ **[phone]** Re-add the owner's accounts.
 
 **New / reset phone:** factory reset → tap welcome screen 6× → scan the Headwind
@@ -128,3 +130,90 @@ enrollment QR (STOCK `com.hmdm.launcher` only — Google's DPC allowlist blocks 
     Never `pm disable` them.
 33. ☐ **[phone]** Turn USB debugging back off (or apply `no_debugging_features`).
 34. ☐ **[panel/D1]** Double-check the row: level, timezone, tunnel IP, Headwind id. Done.
+
+## H. Troubleshooting — set-device-owner refusals (live, Ray Cohen S24, 2026-09-22)
+
+`dpm set-device-owner` refuses for one reason at a time and reports only the first it hits, so
+you fix, re-run, and get the next message. The order we saw, and the fix for each:
+
+1. **"already several users on the device"** — a secondary Android *user* exists (not an account).
+   `adb shell pm list users`; remove every entry whose id is **not 0** with
+   `adb shell pm remove-user <id>`. On Samsung the usual culprit is **Secure Folder** (id ~150).
+   An empty, not-signed-in Secure Folder is safe to remove. **If it holds anything, empty it
+   first** (open it → Move out of Secure Folder) — `pm remove-user` deletes its contents. The
+   owner's normal photos/files live under user 0 and are untouched.
+
+2. **"already some accounts on the device"** — AccountManager accounts block it.
+   `adb shell dumpsys account | findstr "name="` — the LIVE ones are the `Account {name=…}`
+   lines at the top (Session/history lines below just contain the word `name=`, ignore them).
+   - The blockers are app-created accounts whose authenticator does not declare itself
+     device-owner-allowed. Real ones we hit: OneDrive (`com.microsoft.skydrive`), Google Meet
+     (`com.google.android.apps.tachyon`), SoundCloud. **WhatsApp declared itself allowed but was
+     still the final blocker** — it had to go too.
+   - Remove an app account with `adb shell pm clear <pkg>` (or `pm uninstall --user 0 <pkg>` if
+     clear does not stick because the app re-adds it).
+   - **Orphaned account** (its app reports "not installed for 0", so it is not in Settings →
+     Accounts and cannot be cleared): reattach the app, wipe it, and the account goes:
+     `adb shell cmd package install-existing <pkg>` then `adb shell pm clear <pkg>`. This is how
+     the stuck OneDrive account cleared.
+   - **WhatsApp:** back up chats first (Settings → Chats → Chat backup — the local backup under
+     `/sdcard/WhatsApp` survives `pm clear`), then `adb shell pm clear com.whatsapp`, and after
+     device owner is set, re-register with the SMS code and tap Restore.
+   - **After a reboot the account list is not reliable until the phone is UNLOCKED.** Do not run
+     set-device-owner from the lock screen — it reads stale state and re-throws "some accounts".
+
+3. **"Invalid component … for device owner"** — the accounts are clear but **the agent is not
+   actually installed** (or only a stale admin record remains). `adb shell pm list packages |
+   findstr hmdm` — if it prints nothing, install the stock agent and retry. The server keeps it
+   at `/var/cache/tomcat9/files/hmdm-6.38-os.apk`, served at
+   `https://mdm.getshmira.com/files/hmdm-6.38-os.apk` (or F-Droid `com.hmdm.launcher`):
+   `adb install "%USERPROFILE%\Downloads\hmdm-6.38-os.apk"`. Then set-device-owner.
+   NOTE: the shell prints `… was already an admin for user 0. No need to set it again.` as a
+   separate line — that is **not** success. Success is `Success: Device owner set to …`; if the
+   exception prints under the "already an admin" line, it did not take.
+
+**Not blockers, but they show up:** KnoxGuard (`com.samsung.android.kgclient`) and third-party
+admins like AppBlock (`cz.mobilesoft.appblock`) appear under `dumpsys device_policy` as active
+device admins. They do **not** block the adb device-owner path. KnoxGuard being active can mean the
+phone is under a carrier financing/lock program — worth noting, not a blocker here.
+
+### Agent will not connect through the tunnel — enroll with the tunnel OFF
+
+The server-built `-os` APK has the server URL baked in, but the agent (an app) does **not** trust
+the user-installed filter CA, so once the tunnel is up and Squid bumps `mdm.getshmira.com`, the
+agent gets "error connecting" while **Chrome loads the panel fine** (Chrome trusts user CAs, apps
+do not). Enroll with **WireGuard off**, let it register and sync, then make it survive the tunnel:
+confirm `mdm.getshmira.com` is in `/etc/squid/splice.txt` — `install-squid.sh` only seeds that line
+when the file does not yet exist, so a box upgraded in place can be missing it —
+`grep mdm.getshmira.com /etc/squid/splice.txt || echo mdm.getshmira.com >> /etc/squid/splice.txt`
+then `squid -k parse && squid -k reconfigure`. Splicing the MDM host lets the agent see the real
+certificate and stay online with the tunnel on.
+
+### "Private DNS server can't be connected" every time the tunnel comes up
+
+Leftover from the DNS-only era: Android Private DNS is still on Automatic or a DoT hostname, which
+is unreachable once DNS goes through the tunnel to `10.66.0.1`. Set **Private DNS → Off** (Settings
+→ Connections → More connection settings). Do this **before** `no_config_private_dns` locks it, so
+it locks at Off. The proxy does the filtering; Private DNS is not used in the WireGuard era.
+
+### Re-adding accounts with no recovery phone
+
+Removing then re-adding a Google account with 2-Step on, and no recovery phone, risks a lockout.
+Bootstrap the fallback **while the account is still on the phone** (the phone approves the login):
+sign the account into a computer in an incognito window first (grab backup codes, or simply turn
+2-Step off for the re-add), THEN remove it. WhatsApp/SoundCloud/in-app logins are not in Settings →
+Accounts and are not touched by the removal.
+
+### The always-on VPN seam (known, not closable in this stack)
+
+Turning off **Always-on VPN** or **Block connections without VPN** in Settings does not unfilter
+immediately (the tunnel keeps carrying traffic), but it makes the phone **fail open** — the moment
+the tunnel drops or is toggled off, traffic goes direct and unfiltered. **Deleting WireGuard** is
+worse: uninstalling the always-on app clears always-on + lockdown, so on most builds it leaves
+plain unfiltered internet, not "no internet". This stack cannot hard-lock that toggle:
+`no_config_vpn` would, but it disables our own tunnel, and a device-owner
+`setAlwaysOnVpnPackage(..., lockdown=true)` (the real fix) is exposed by neither adb nor Headwind.
+Mitigate with both: **hide WireGuard** AND **block its uninstall**. There is no per-app uninstall
+block in Headwind Community, so it is the global `no_uninstall_apps` restriction (the user can no
+longer uninstall any app — the agent still removes blocklisted ones, and installs still work) or
+nothing.
