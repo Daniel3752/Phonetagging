@@ -188,6 +188,34 @@ Known: WhatsApp is moving status to the top of the Chats tab and channels behind
 closed; the status strip on Chats itself will not be (there is nothing to close without breaking
 the chats).
 
+### Proven end to end in the sandbox (2026-09-22), on real software
+
+Not a phone, but not only unit tests either. In the cloud sandbox: squid 6.14 with THIS
+`squid.conf` and THIS helper, intercepting connections (NAT redirect) from two loopback addresses
+standing in for phones; the Worker on wrangler's local runtime with a local D1 built from
+`schema.sql`, two phones seeded (`10.66.0.5` yeshiva rung 3, `10.66.0.9` yeshiva rung 4); both
+dnsmasq instances from `install-dns-policy.sh`'s configs; the real hagezi lists. What happened:
+
+| From | To | squid did | Why it matters |
+|---|---|---|---|
+| rung 3 | `i.scdn.co`, `image-cdn-fa`, `mosaic`, `blend-playlist-covers`, `video-cf`, the Akamai video host | **terminate** | the picture rule, by SNI, incl. the hosts the old regex missed |
+| rung 3 | `audio-fa`, `heads-fa-tls13`, `p.scdn.co`, `spclient` | **splice** | the keep guard; music and API untouched |
+| rung 3 | `www.instagram.com`, `pornhub.com` | **bump** → 302 to the block page, `why=blocklist: social` / `explicit` | the SNI now reaches the helper (the fake CONNECT was to a bare IP) |
+| rung 4 | `i.scdn.co` | **splice** | `app_media_on` from `/api/proxy/media-on` |
+| rung 3 | `googleads.g.doubleclick.net` by hard-coded address | splice, then **409** | the ad list enforced by squid's host check |
+| rung 3 | a TLS client sending no server name | **bump** (squid's own certificate) | the no-SNI refusal |
+| strict resolver | `i.scdn.co`, `googleads`, `dns.google`, `cloudflare-dns.com` | **NXDOMAIN**; `graph.facebook.com`, `play.googleapis.com`, `youtubei.googleapis.com`, `example.com` resolve | the DNS layer, the allowlist pins, 243,800 entries |
+
+Also run for real against that stack: `sync-media-on.sh` (squid file, the ipset, the strict list
+of 36 hosts, squid reconfigured), `sync-adblock.sh` (the three lists, resolver restarted),
+`dns-policy-up.sh up/status/down` (the iptables/ipset calls), `apply-yeshiva-squid.sh` on the
+running squid (settled, reconfigured), and `debug-app-media.sh` during a replay of the Spotify
+handshakes (the census printed the terminated and spliced hosts correctly and cleaned up). The
+companion's rule engine ran on the real Java regex engine and JSON parser against the shipped
+rules and the decompiled WhatsApp ids. What this does NOT prove: what the Spotify app does on a
+phone (coalescing, the empty playlists), what WhatsApp's current build draws, and the installer's
+systemd units — those need the box and the phone.
+
 ### What is still open after this session
 
 - Everything above needs the deploy and the phone test; the empty-playlist bug has a stronger
