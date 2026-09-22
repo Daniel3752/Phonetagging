@@ -55,6 +55,11 @@ STRICT_CONF=$ETC/dnsmasq-strict.conf
 STRICT_DIR=$ETC/dnsmasq-strict.d
 OPEN_CONF=/etc/dnsmasq.d/shmira.conf
 ADBLOCK_CONF=/etc/dnsmasq.d/shmira-adblock.conf
+# The pre-change backup MUST live outside /etc/dnsmasq.d: the packaged dnsmasq's conf-dir reads
+# every file in that directory that does not end in .dpkg-*, so a backup left beside shmira.conf is
+# loaded as a second config and collides with it ("illegal repeated keyword"). Keep it under /etc/shmira.
+BACKUP=$ETC/shmira.conf.pre-dns-policy
+LEGACY_BACKUP=$OPEN_CONF.pre-dns-policy   # where older installs wrongly put it; cleaned up below
 UNIT_STRICT=/etc/systemd/system/shmira-dnsmasq-strict.service
 UNIT_POLICY=/etc/systemd/system/shmira-dns-policy.service
 
@@ -71,10 +76,14 @@ uninstall() {
   systemctl disable --now shmira-dns-policy.service 2>/dev/null || true
   rm -f "$UNIT_STRICT" "$UNIT_POLICY"
   systemctl daemon-reload
+  # A stray backup a broken older install left inside the scanned directory would keep the packaged
+  # dnsmasq from starting; remove it first.
+  rm -f "$LEGACY_BACKUP"
   # The packaged instance goes back to the phone-facing address: the config from before this
   # script ran, if it is still there, else the listen-address line rewritten.
-  if [[ -f "$OPEN_CONF.pre-dns-policy" ]]; then
-    install -m 0644 "$OPEN_CONF.pre-dns-policy" "$OPEN_CONF"
+  restore="$BACKUP"; [[ -f "$restore" ]] || restore="$LEGACY_BACKUP"
+  if [[ -f "$restore" ]]; then
+    install -m 0644 "$restore" "$OPEN_CONF"
   else
     sed -i "s|^listen-address=127.0.0.1,$OPEN_IP\$|listen-address=127.0.0.1,$STRICT_IP|" "$OPEN_CONF"
   fi
@@ -105,7 +114,10 @@ fi
 # configured to move off $STRICT_IP at its next restart (which the nightly ad-list sync does).
 stage="$(mktemp -d)"
 open_stage="$stage/shmira.conf"; strict_stage="$stage/dnsmasq-strict.conf"
-backup="$OPEN_CONF.pre-dns-policy"
+backup="$BACKUP"
+# A broken earlier run may have left its backup inside the scanned directory, where the packaged
+# dnsmasq would parse it and refuse to start. Remove it before we restart anything.
+rm -f "$LEGACY_BACKUP"
 switched=0
 rollback() {
   local rc=$?
@@ -209,11 +221,15 @@ chmod 644 /etc/cron.d/shmira-adblock
 echo "==> Parse both configs before touching anything live"
 dnsmasq --test --conf-file="$strict_stage"
 # The open instance's config as the packaged unit will read it: /etc/dnsmasq.conf plus the
-# conf-dir with the staged shmira.conf standing in for the live one.
+# conf-dir with the staged shmira.conf standing in for the live one. Mirror the packaged unit's
+# conf-dir semantics exactly — every file NOT ending .dpkg-{dist,old,new}, not just *.conf — so a
+# stray file (e.g. an old backup) that would break the live start also breaks this test.
 stage_d="$stage/dnsmasq.d"; mkdir -p "$stage_d"
-cp /etc/dnsmasq.d/*.conf "$stage_d/" 2>/dev/null || true
+find /etc/dnsmasq.d -maxdepth 1 -type f \
+  ! -name '*.dpkg-dist' ! -name '*.dpkg-old' ! -name '*.dpkg-new' ! -name 'shmira.conf' \
+  -exec cp {} "$stage_d/" \; 2>/dev/null || true
 cp "$open_stage" "$stage_d/shmira.conf"
-dnsmasq --test --conf-file=/etc/dnsmasq.conf --conf-dir="$stage_d"
+dnsmasq --test --conf-file=/etc/dnsmasq.conf --conf-dir="$stage_d,.dpkg-dist,.dpkg-old,.dpkg-new"
 
 echo "==> Switch (rolled back on any failure)"
 [[ -f "$backup" ]] || cp "$OPEN_CONF" "$backup"
