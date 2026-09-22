@@ -1,5 +1,41 @@
 # Next session — start here
 
+## TOMORROW, in order (written 2026-09-22 end of day)
+
+The phone went back to its owner in a good state. Nothing is half-applied and nothing needs undoing.
+
+**Deploy first — there is an undeployed commit.** The per-device policy override was stored and
+validated but never actually read by the scheduler; that is fixed and tested but still needs
+`git pull && npx wrangler deploy` (no migration). Until that lands, pointing one phone at another
+policy does nothing, which is the whole mechanism for testing on one handset.
+
+1. **Companion 0.1.2 onto Isaac's phone only.** The fleet runs 0.1.1, which dies about two minutes
+   after every start, so nothing is watching for installs. Route: copy configuration 5 in Headwind,
+   create policy `yeshiva_rung_3_test` mapped to it, set Isaac's override `policy_id` to that,
+   upload `companion/releases/shmira-companion-0.1.2.apk` and add it to the test configuration only.
+   Verify, then add it to configuration 5 and clear the override.
+2. **Chrome images.** Check configuration 5 for the Chrome managed settings `ProxyMode=fixed_servers`
+   and `ProxyServer=10.66.0.1:3128`. Recorded as present on configuration 4 only. If they are
+   missing, that is the whole reason pictures still show, and the fix is entering two settings.
+3. **The VPN ordering test.** Always-on + lockdown first, sync, THEN `no_config_vpn`. Needs no adb.
+   If the tunnel survives while the setting locks, the patched-agent question disappears.
+4. **Location.** The agent policy-granted itself the permission (hence the greyed-out toggle), so
+   the phone is the wrong place to fix it. Look for the configuration's permission-granting setting.
+   If Headwind offers none, fold it into the agent patch in (3) — dropping the permission from the
+   agent's manifest rides along with the always-on VPN call.
+5. **Isaac's iptables bypass.** Confirm `-i wg0 -s 10.66.0.3 -j RETURN` is gone from the server, or
+   that handset is unfiltered regardless of everything above. Does not survive a reboot.
+
+**Why the phone is safe meanwhile:** the streaming block does not depend on the companion. Even if
+Netflix is reinstalled, the app cannot work — the Worker refuses netflix.com and the video CDNs for
+every yeshiva rung, in Chrome and at the TLS handshake. The dead companion only costs SPEED of
+removal, not the block itself.
+
+Still unverified and worth one glance: netflix.com refused in Chrome on the handset. The app block
+is confirmed; the browser half was never eyeballed.
+
+---
+
 ## AUDIT (2026-09-22): where each open item actually lives, and what was fixed
 
 Asked to trace six things through the filter (yeshiva ladder only — the operator confirmed this
