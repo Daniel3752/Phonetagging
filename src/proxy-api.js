@@ -83,9 +83,9 @@ async function resolveDevice(env, proxyUser, now) {
            s.end_min AS s_end_min, s.priority AS s_priority, s.created_at AS s_created_at,
            ap.web_mode AS s_web_mode
     FROM devices d
-    LEFT JOIN policies bp ON bp.id = d.policy_id
     LEFT JOIN device_overrides o ON o.device_id = d.id
-    LEFT JOIN schedules s ON (s.base_policy_id = d.policy_id OR s.base_policy_id = 'tag:' || d.tag)
+    LEFT JOIN policies bp ON bp.id = COALESCE(o.policy_id, d.policy_id)
+    LEFT JOIN schedules s ON (s.base_policy_id = COALESCE(o.policy_id, d.policy_id) OR s.base_policy_id = 'tag:' || d.tag)
                          AND (s.device_id IS NULL OR s.device_id = d.id)
     LEFT JOIN policies ap ON ap.id = s.active_policy_id
     WHERE d.proxy_user = ?
@@ -95,8 +95,12 @@ async function resolveDevice(env, proxyUser, now) {
   const row = rows[0];
   const tag = normalizeTag(row.tag);
   const level = normalizeDeviceLevel(row.level, tag);
-  const device = { id: row.id, policy_id: row.policy_id, timezone: row.timezone, tag, shiur_lock: row.shiur_lock };
-  const webModeByPolicy = new Map([[row.policy_id, row.base_web_mode]]);
+  // The baseline follows a per-device policy override, the same way the scheduler resolves it
+  // (src/scheduler.js). If the two disagreed, the phone would be running one configuration's apps
+  // while the proxy judged its web by another's.
+  const baselinePolicyId = row.o_policy_id || row.policy_id;
+  const device = { id: row.id, policy_id: baselinePolicyId, timezone: row.timezone, tag, shiur_lock: row.shiur_lock };
+  const webModeByPolicy = new Map([[baselinePolicyId, row.base_web_mode]]);
   const schedules = [];
   for (const r of rows) {
     if (!r.s_id) continue;
