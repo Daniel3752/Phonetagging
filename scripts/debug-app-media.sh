@@ -26,7 +26,7 @@ PHONE=${2:-}
 
 if [[ $EUID -ne 0 ]]; then echo "Run with sudo." >&2; exit 1; fi
 [[ "$SECS" =~ ^[0-9]+$ ]] || { echo "seconds must be a number" >&2; exit 1; }
-grep -q '^access_log none' "$CONF" || { echo "no 'access_log none' line in $CONF to anchor on" >&2; exit 1; }
+grep -qE '^access_log ' "$CONF" || { echo "no 'access_log' line in $CONF to anchor on" >&2; exit 1; }
 
 cleanup() {
   sed -i "/$MARK\$/d" "$CONF"
@@ -35,20 +35,26 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Remove a previous run's lines first (a killed run may have left them), then add ours BEFORE
-# `access_log none`: a matching `none` line stops all logging that follows it.
+# Remove a previous run's lines first (a killed run may have left them), then splice ours in BEFORE
+# the FIRST access_log line — whatever it targets. The sandbox had `access_log none` (all logging
+# off); the live box logs to a file. Either way our debug log has a restrictive host ACL, so only
+# handshakes to the app media domains land in it; the box's normal logging is left as it is.
 sed -i "/$MARK\$/d" "$CONF"
 src_acl=''
-if [[ -n "$PHONE" ]]; then
-  src_acl=" shmira_debug_phone"
-  sed -i "/^access_log none/i acl shmira_debug_phone src $PHONE $MARK" "$CONF"
-fi
-# %ts (seconds since the epoch), not %tl: %tl is "date time zone" — two whitespace-separated
-# tokens — and the census below reads the log by field number.
-sed -i "/^access_log none/i logformat shmira_media %ts %>a %ssl::>sni %ssl::bump_mode %Ss/%03>Hs %<st %rm %ru $MARK" "$CONF"
-# Anchored at both ends: the app domains and their subdomains, and the one exact Play host.
-sed -i "/^access_log none/i acl shmira_debug_hosts ssl::server_name_regex -i (^|\\\\.)(scdn\\\\.co|spotifycdn\\\\.com|spotify\\\\.com|pscdn\\\\.co|akamaized\\\\.net)\$|^play-lh\\\\.googleusercontent\\\\.com\$ $MARK" "$CONF"
-sed -i "/^access_log none/i access_log $LOG shmira_media shmira_debug_hosts$src_acl $MARK" "$CONF"
+[[ -n "$PHONE" ]] && src_acl=" shmira_debug_phone"
+
+# Build the block in shell (single quotes keep the regex backslashes literal) and splice it with
+# awk via the environment, so no sed/regex layer mangles the escapes. %ts (epoch seconds), not
+# %tl: %tl is "date time zone", two tokens, and the census reads the log by field number.
+block=''
+[[ -n "$PHONE" ]] && block+="acl shmira_debug_phone src $PHONE $MARK"$'\n'
+block+="logformat shmira_media %ts %>a %ssl::>sni %ssl::bump_mode %Ss/%03>Hs %<st %rm %ru $MARK"$'\n'
+block+='acl shmira_debug_hosts ssl::server_name_regex -i (^|\.)(scdn\.co|spotifycdn\.com|spotify\.com|pscdn\.co|akamaized\.net)$|^play-lh\.googleusercontent\.com$ '"$MARK"$'\n'
+block+="access_log $LOG shmira_media shmira_debug_hosts$src_acl $MARK"
+SHMIRA_BLOCK="$block" awk '
+  /^access_log / && !spliced { print ENVIRON["SHMIRA_BLOCK"]; spliced=1 }
+  { print }
+' "$CONF" > "$CONF.shmira-tmp" && cat "$CONF.shmira-tmp" > "$CONF" && rm -f "$CONF.shmira-tmp"
 
 if ! squid -f "$CONF" -k parse >/dev/null 2>&1; then
   echo "!! $CONF does not parse with the debug lines; removing them:" >&2
