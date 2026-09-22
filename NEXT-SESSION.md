@@ -121,8 +121,11 @@ artwork; the artwork answer is this system.
 ### 2. In-app ads — blocked at DNS for the ad networks, for every phone
 
 `sync-adblock.sh` (installed and scheduled by `install-dns-policy.sh`, 03:41 nightly) pulls
-hagezi's **Pro** list and its encrypted-DNS list — 228k + 3k names in dnsmasq's own `local=/host/`
-format, which dnsmasq loads in 0.1 s and 20 MB — into the open resolver. The strict instance
+hagezi's **Pro** list and its encrypted-DNS + VPN/proxy-bypass list — 228k + 16k names in
+dnsmasq's own `local=/host/` format, which dnsmasq loads in 0.1 s and 20 MB — into the open
+resolver. Pro was checked against the eleven mobile ad-SDK families on 2026-09-22: it is the first
+hagezi tier that covers all of them and the last that leaves Meta's, Google's, Samsung's and
+WhatsApp's own hosts alone; do not go up a tier. The strict instance
 forwards to it, so every phone gets NXDOMAIN for AdMob, Meta Audience Network, AppLovin, Unity,
 ironSource, Vungle, Chartboost, InMobi, Pangle, Mintegral, Amazon and the rest: the SDK gets no
 address and shows nothing, for every app, every port, every protocol. squid enforces the same
@@ -132,7 +135,9 @@ list as a side effect (an SNI that does not resolve fails its host check with a 
 Verify on the box: `dig @10.66.0.1 googleads.g.doubleclick.net` → `NXDOMAIN`; on a phone, a free
 game that shows AdMob banners shows blank slots. If an app breaks (sign-in, a widget), find the
 host in `/etc/dnsmasq.d/shmira-adblock.conf`, add it to `SHMIRA_ADBLOCK_KEEP` in
-`/etc/squid/filter.env` (space-separated), run `sync-adblock.sh`. The sync refuses a truncated
+`/etc/squid/filter.env` (space-separated), run `sync-adblock.sh` — the phones re-ask within
+seconds (Android does not cache these NXDOMAINs). Every port-53 packet from the tunnel is DNAT'd
+to our resolvers, so a hard-coded 8.8.8.8 gets the same answers. The sync refuses a truncated
 download, keeps the old file on a parse error, and rolls back a list that leaves the resolver
 dead. **Not touched, and not touchable by name:** YouTube's in-app ads (googlevideo.com serves
 both), Spotify's free-tier audio ads (`spclient.wg.spotify.com/ads/…`, the API host — a Premium

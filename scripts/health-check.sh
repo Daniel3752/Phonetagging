@@ -61,6 +61,9 @@ fi
 #    one refuses a picture host, the open one resolves it, and the plumbing is in place.
 if systemctl is-enabled --quiet shmira-dnsmasq-strict.service 2>/dev/null; then
   STRICT_IP=${SHMIRA_STRICT_DNS_IP:-10.66.0.1}
+  command -v dig >/dev/null 2>&1 || FAILURES+=("dig is missing (apt-get install dnsutils) — the resolver probes cannot run")
+  n_hosts=$(grep -c '^local=' /etc/shmira/dnsmasq-strict.d/app-media.conf 2>/dev/null || echo 0)
+  (( n_hosts >= 10 )) || FAILURES+=("the strict resolver's picture host list has only $n_hosts entries (sync-media-on.sh failing?)")
   dig +short +time=3 +tries=1 @127.0.0.1 example.com 2>/dev/null | grep -q . \
     || FAILURES+=("open resolver (127.0.0.1) not answering")
   dig +short +time=3 +tries=1 @"$STRICT_IP" example.com 2>/dev/null | grep -q . \

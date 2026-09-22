@@ -86,6 +86,14 @@ check('APP_MEDIA_DNS_HOSTS are all matched, and none is a keep host', () => {
   }
 });
 
+console.log('\n2c. the strict resolver seed file is current');
+check('scripts/app-media.dnsmasq lists exactly APP_MEDIA_DNS_HOSTS (run node scripts/build-squid-media-acls.mjs)', () => {
+  const seed = readFileSync(new URL('../scripts/app-media.dnsmasq', import.meta.url), 'utf8')
+    .split('\n').filter((l) => l.startsWith('local=')).map((l) => l.slice(7, -1));
+  const want = [...new Set(Object.values(APP_MEDIA_DNS_HOSTS).flat())].sort();
+  assert.deepEqual(seed, want);
+});
+
 console.log('\n3. a corpus of hosts, both ways');
 const corpus = [
   // Seen on live phones or in Spotify's published lists: pictures and video.

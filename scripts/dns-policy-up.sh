@@ -5,11 +5,16 @@
 # nothing the second time — so a restart of the unit, or of wg0, can never double a rule.
 #
 #   up:   add 10.66.1.1/32 to wg0 (the OPEN resolver's tunnel address), create the ipset of phones
-#         allowed in-app pictures, and DNAT their DNS from 10.66.0.1 (the STRICT resolver) to
-#         10.66.1.1; reject DNS-over-TLS/QUIC (tcp+udp 853) inside the tunnel so a phone's Private
-#         DNS setting cannot route around either resolver.
+#         allowed in-app pictures, and DNAT every DNS packet from the tunnel — whatever resolver it
+#         was addressed to — to one of ours: 10.66.1.1 (OPEN) for the ipset's members, 10.66.0.1
+#         (STRICT) for everyone else. An app with a hard-coded resolver (8.8.8.8) or a "DNS changer"
+#         gets our answers all the same. DNS-over-TLS/QUIC (tcp+udp 853) is rejected inside the
+#         tunnel so a phone's Private DNS setting cannot route around it either.
 #   down: remove all of it (the ipset stays: sync-media-on.sh keeps it current and squid does not
 #         read it, so an empty set costs nothing).
+# The nat table takes the FIRST matching rule per packet, so the members' rule must sit above the
+# catch-all; `rule` inserts at position 1, hence the catch-all is added first and the members'
+# rule after it.
 set -euo pipefail
 
 WG_IF=${WG_IF:-wg0}
@@ -31,18 +36,21 @@ case "${1:-}" in
     ip -4 addr show dev "$WG_IF" | grep -q " $OPEN_IP/32 " || ip addr add "$OPEN_IP/32" dev "$WG_IF"
     ipset create "$IPSET" hash:ip -exist
     for proto in udp tcp; do
-      rule nat PREROUTING -i "$WG_IF" -d "$STRICT_IP" -p "$proto" --dport 53 \
+      # Catch-all first (it ends up below), then the members' rule (inserted above it).
+      rule nat PREROUTING -i "$WG_IF" -p "$proto" --dport 53 -j DNAT --to-destination "$STRICT_IP"
+      rule nat PREROUTING -i "$WG_IF" -p "$proto" --dport 53 \
         -m set --match-set "$IPSET" src -j DNAT --to-destination "$OPEN_IP"
       # DNS-over-TLS / DNS-over-QUIC to anyone outside: REJECT so Android's "Automatic" Private DNS
       # falls back to plain DNS at once instead of waiting on a timeout.
       rule filter FORWARD -i "$WG_IF" -p "$proto" --dport 853 -j REJECT
     done
-    echo "dns policy up: $OPEN_IP on $WG_IF, ipset $IPSET, DNAT 53 for its members, 853 rejected"
+    echo "dns policy up: $OPEN_IP on $WG_IF, ipset $IPSET, all DNS to $STRICT_IP (members: $OPEN_IP), 853 rejected"
     ;;
   down)
     for proto in udp tcp; do
-      DEL=1 rule nat PREROUTING -i "$WG_IF" -d "$STRICT_IP" -p "$proto" --dport 53 \
+      DEL=1 rule nat PREROUTING -i "$WG_IF" -p "$proto" --dport 53 \
         -m set --match-set "$IPSET" src -j DNAT --to-destination "$OPEN_IP"
+      DEL=1 rule nat PREROUTING -i "$WG_IF" -p "$proto" --dport 53 -j DNAT --to-destination "$STRICT_IP"
       DEL=1 rule filter FORWARD -i "$WG_IF" -p "$proto" --dport 853 -j REJECT
     done
     ip -4 addr show dev "$WG_IF" 2>/dev/null | grep -q " $OPEN_IP/32 " && ip addr del "$OPEN_IP/32" dev "$WG_IF" || true

@@ -67,27 +67,59 @@ uninstall() {
   systemctl disable --now shmira-dns-policy.service 2>/dev/null || true
   rm -f "$UNIT_STRICT" "$UNIT_POLICY"
   systemctl daemon-reload
-  # The packaged instance goes back to the phone-facing address.
-  sed -i "s|^listen-address=127.0.0.1,$OPEN_IP\$|listen-address=127.0.0.1,$STRICT_IP|" "$OPEN_CONF"
+  # The packaged instance goes back to the phone-facing address: the config from before this
+  # script ran, if it is still there, else the listen-address line rewritten.
+  if [[ -f "$OPEN_CONF.pre-dns-policy" ]]; then
+    install -m 0644 "$OPEN_CONF.pre-dns-policy" "$OPEN_CONF"
+  else
+    sed -i "s|^listen-address=127.0.0.1,$OPEN_IP\$|listen-address=127.0.0.1,$STRICT_IP|" "$OPEN_CONF"
+  fi
   rm -f /etc/cron.d/shmira-adblock
+  dnsmasq --test --conf-file=/etc/dnsmasq.conf --conf-dir=/etc/dnsmasq.d,.dpkg-dist,.dpkg-old,.dpkg-new
   systemctl restart dnsmasq
   echo "uninstalled: one resolver again on $STRICT_IP (ad blocklist file left in place: $ADBLOCK_CONF)"
 }
 if [[ "${1:-}" == "--uninstall" ]]; then uninstall; exit 0; fi
 
-apt-get install -y -qq ipset >/dev/null
+apt-get install -y -qq ipset dnsutils >/dev/null    # dnsutils: dig, for the checks below and health-check.sh
 
 echo "==> $ETC"
 mkdir -p "$ETC" "$STRICT_DIR"
 chmod 755 "$ETC" "$STRICT_DIR"
-# The picture list must exist before the strict instance starts (conf-dir tolerates an empty dir,
-# but an empty list means "no pictures refused", so say so in the file).
-if [[ ! -f "$STRICT_DIR/app-media.conf" ]]; then
-  printf '# In-app picture hosts refused for phones on the strict resolver. Written by sync-media-on.sh.\n# (empty until the first sync: nothing refused yet)\n' > "$STRICT_DIR/app-media.conf"
+# The picture list is a REFUSAL list — an empty one refuses nothing — so it is seeded from the
+# repository (scripts/app-media.dnsmasq, generated from src/app-media.js) before the strict
+# instance ever starts; sync-media-on.sh then keeps it current from the Worker.
+if ! grep -q '^local=' "$STRICT_DIR/app-media.conf" 2>/dev/null; then
+  install -m 0644 "$HERE/app-media.dnsmasq" "$STRICT_DIR/app-media.conf"
+  echo "    seeded $STRICT_DIR/app-media.conf from the repository ($(grep -c '^local=' "$STRICT_DIR/app-media.conf") hosts)"
 fi
+[[ -f "$ADBLOCK_CONF" ]] || printf '# Ad-network hosts refused for every phone. Written by sync-adblock.sh.\n' > "$ADBLOCK_CONF"
 
-echo "==> OPEN resolver (the packaged dnsmasq): 127.0.0.1 + $OPEN_IP"
-cat > "$OPEN_CONF" <<DNSMASQ
+# Everything below is written to staging files and VALIDATED before a single live file changes;
+# then the live switch is one short sequence under a rollback trap, so a failure at any point
+# puts the previous single-resolver layout back rather than leaving the packaged dnsmasq
+# configured to move off $STRICT_IP at its next restart (which the nightly ad-list sync does).
+stage="$(mktemp -d)"
+open_stage="$stage/shmira.conf"; strict_stage="$stage/dnsmasq-strict.conf"
+backup="$OPEN_CONF.pre-dns-policy"
+switched=0
+rollback() {
+  local rc=$?
+  rm -rf "$stage"
+  if (( switched )); then
+    echo "!! failed (exit $rc) — restoring the single-resolver layout" >&2
+    systemctl disable --now shmira-dnsmasq-strict.service 2>/dev/null || true
+    systemctl disable --now shmira-dns-policy.service 2>/dev/null || true
+    [[ -f "$backup" ]] && install -m 0644 "$backup" "$OPEN_CONF"
+    systemctl restart dnsmasq || true
+    echo "!! restored $OPEN_CONF from $backup and restarted dnsmasq; the units are disabled. Fix and re-run." >&2
+  fi
+  exit "$rc"
+}
+trap rollback ERR
+
+echo "==> OPEN resolver (the packaged dnsmasq): 127.0.0.1 + $OPEN_IP (staged)"
+cat > "$open_stage" <<DNSMASQ
 # The OPEN resolver (install-dns-policy.sh). squid resolves here (127.0.0.1), and so do the phones
 # whose rung allows in-app pictures, via the DNAT rule of shmira-dns-policy.service ($OPEN_IP). The
 # STRICT instance (shmira-dnsmasq-strict, $STRICT_IP) forwards everything it does not refuse here,
@@ -106,10 +138,9 @@ cache-size=10000
 # Without HTTPS records browsers fall back to a plain-SNI handshake.
 $FILTER_RR
 DNSMASQ
-[[ -f "$ADBLOCK_CONF" ]] || printf '# Ad-network hosts refused for every phone. Written by sync-adblock.sh.\n' > "$ADBLOCK_CONF"
 
-echo "==> STRICT resolver: $STRICT_IP"
-cat > "$STRICT_CONF" <<DNSMASQ
+echo "==> STRICT resolver: $STRICT_IP (staged)"
+cat > "$strict_stage" <<DNSMASQ
 # The STRICT resolver (install-dns-policy.sh): what every phone's tunnel config names as its DNS.
 # Refuses the in-app picture hosts ($STRICT_DIR/app-media.conf, from sync-media-on.sh) and
 # forwards everything else, UNCACHED, to the open instance on 127.0.0.1 — one cache for phones and
@@ -172,15 +203,30 @@ CRON
 chmod 644 /etc/cron.d/shmira-adblock
 
 echo "==> Parse both configs before touching anything live"
-dnsmasq --test --conf-file="$STRICT_CONF"
-dnsmasq --test --conf-file=/etc/dnsmasq.conf --conf-dir=/etc/dnsmasq.d,.dpkg-dist,.dpkg-old,.dpkg-new
+dnsmasq --test --conf-file="$strict_stage"
+# The open instance's config as the packaged unit will read it: /etc/dnsmasq.conf plus the
+# conf-dir with the staged shmira.conf standing in for the live one.
+stage_d="$stage/dnsmasq.d"; mkdir -p "$stage_d"
+cp /etc/dnsmasq.d/*.conf "$stage_d/" 2>/dev/null || true
+cp "$open_stage" "$stage_d/shmira.conf"
+dnsmasq --test --conf-file=/etc/dnsmasq.conf --conf-dir="$stage_d"
 
-echo "==> Start"
+echo "==> Switch (rolled back on any failure)"
+[[ -f "$backup" ]] || cp "$OPEN_CONF" "$backup"
 systemctl daemon-reload
-systemctl enable --now shmira-dns-policy.service
-systemctl restart dnsmasq                      # now on 127.0.0.1 + $OPEN_IP
-systemctl enable --now shmira-dnsmasq-strict.service
+switched=1
+install -m 0644 "$strict_stage" "$STRICT_CONF"
+systemctl enable --now shmira-dns-policy.service      # the $OPEN_IP address, the ipset, the DNAT rules
+install -m 0644 "$open_stage" "$OPEN_CONF"
+systemctl restart dnsmasq                             # now on 127.0.0.1 + $OPEN_IP
+systemctl enable --now shmira-dnsmasq-strict.service  # now on $STRICT_IP
 sleep 1
+dig +short +time=3 +tries=1 @127.0.0.1 example.com | grep -q .     || { echo "!! OPEN resolver (127.0.0.1) does not answer" >&2; false; }
+dig +short +time=3 +tries=1 @"$STRICT_IP" example.com | grep -q . || { echo "!! STRICT resolver ($STRICT_IP) does not answer" >&2; false; }
+trap - ERR
+rm -rf "$stage"
+
+echo "==> First syncs (failures here are not fatal: cron retries, and the seed list is in place)"
 /usr/local/bin/sync-media-on.sh || echo "    !! media-on sync failed — the picture list and ipset stay as they were" >&2
 /usr/local/bin/sync-adblock.sh || echo "    !! ad blocklist sync failed — cron retries nightly" >&2
 
@@ -196,6 +242,7 @@ fi
 /usr/local/bin/shmira-dns-policy.sh status
 if (( ok )); then
   echo "done. Phones: strict on $STRICT_IP; allowed phones DNAT'd to $OPEN_IP; squid on 127.0.0.1."
+  echo "The previous resolver config is kept at $backup; $0 --uninstall puts it back."
 else
-  echo "!! something above failed. To fall back to one resolver: $0 --uninstall" >&2; exit 1
+  echo "!! a check above failed but both resolvers answer. To fall back to one resolver: $0 --uninstall" >&2; exit 1
 fi

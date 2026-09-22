@@ -5,7 +5,9 @@
 # the systemd/squid/ipset calls fail harmlessly. Run with: npm run test:scripts
 set -u
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-T="$(mktemp -d)"; trap 'rm -rf "$T"; kill "${HTTP_PID:-0}" 2>/dev/null' EXIT
+T="$(mktemp -d)"; HTTP_PID=""
+cleanup() { rm -rf "$T"; if [[ -n "$HTTP_PID" ]]; then kill "$HTTP_PID" 2>/dev/null || true; fi; }
+trap cleanup EXIT
 fail=0
 check() { if eval "$2"; then echo "  PASS  $1"; else echo "  FAIL  $1"; fail=1; fi; }
 
@@ -37,8 +39,10 @@ check "adblock ||host^ form is taken"             "grep -qx 'local=/adblock.exam
 check "hosts-file forms are taken"                "grep -qx 'local=/hosts.example/' $T/adblock.conf && grep -qx 'local=/hosts2.example/' $T/adblock.conf"
 check "plain domains and *. wildcards are taken"  "grep -qx 'local=/plaindomain.example/' $T/adblock.conf && grep -qx 'local=/wild.example/' $T/adblock.conf"
 check "junk is dropped"                           "! grep -q 'not a domain' $T/adblock.conf"
-check "the filter's own hosts are never refused"  "! grep -q 'workers.dev' $T/adblock.conf && ! grep -q 'accounts.google.com' $T/adblock.conf"
-check "sign-in hosts apps need are never refused" "! grep -q 'graph.facebook.com' $T/adblock.conf"
+check "the filter's own hosts are never refused"  "! grep -q 'local=/.*workers.dev/' $T/adblock.conf && ! grep -q 'local=/accounts.google.com/' $T/adblock.conf"
+check "sign-in hosts apps need are never refused" "! grep -q 'local=/graph.facebook.com/' $T/adblock.conf"
+check "and are pinned to the upstream so no parent entry can cover them" "grep -qx 'server=/graph.facebook.com/1.1.1.1' $T/adblock.conf"
+check "Firefox's DoH canary is refused by hand"    "grep -qx 'local=/use-application-dns.net/' $T/adblock.conf"
 check "a too-short list is refused, the old file kept" \
   "printf 'x.example\n' > $T/short.txt && SHMIRA_ENV_FILE=/nonexistent SHMIRA_ADBLOCK_URLS=file://$T/short.txt SHMIRA_ADBLOCK_FILE=$T/adblock.conf SHMIRA_ADBLOCK_MIN=3 bash $HERE/../scripts/sync-adblock.sh >/dev/null 2>&1; grep -qx 'local=/ads.example.com/' $T/adblock.conf"
 if command -v dnsmasq >/dev/null; then
@@ -61,7 +65,7 @@ check "malformed hosts are dropped"                                    "! grep -
 if command -v dnsmasq >/dev/null; then
   check "dnsmasq parses the strict list" "dnsmasq --test --conf-file=$T/strict.d/app-media.conf >/dev/null 2>&1"
 fi
-kill "$HTTP_PID" 2>/dev/null; HTTP_PID=0
+kill "$HTTP_PID" 2>/dev/null; HTTP_PID=""
 printf '{"addresses":"nope"}' > "$T/mock/api/proxy/media-on"
 (cd "$T/mock" && python3 -m http.server "$port" >/dev/null 2>&1) & HTTP_PID=$!
 for _ in $(seq 1 20); do curl -fs "http://127.0.0.1:$port/api/proxy/media-on" >/dev/null 2>&1 && break; sleep 0.2; done

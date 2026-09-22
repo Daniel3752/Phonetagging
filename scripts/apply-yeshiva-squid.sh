@@ -43,14 +43,14 @@ note() { echo "  $1"; }
 if grep -qE '^\s*%un %SRC %URI \\$' "$work"; then
   sed -i -E 's/^(\s*)%un %SRC %URI \\$/\1%un %SRC %URI %>ha{Sec-Fetch-Dest} \\/' "$work"; changed=1
   note "1. helper format: added %>ha{Sec-Fetch-Dest}"
-elif grep -q 'Sec-Fetch-Dest' "$work"; then note "1. helper format: already has Sec-Fetch-Dest"
+elif grep -qE '^\s*%un %SRC %URI.*Sec-Fetch-Dest' "$work"; then note "1. helper format: already has Sec-Fetch-Dest"
 else echo "!! 1. could not find the '%un %SRC %URI \\' line — is the %LOGIN fix applied? Not touching it." >&2; fi
 # 1b. the SNI: at ssl_bump step 2 %URI is the destination ADDRESS for an intercepted connection,
 #     so the hostname the phone asked for reaches the helper only as %ssl::>sni (see squid.conf).
 if grep -qE '^\s*%un %SRC %URI %>ha\{Sec-Fetch-Dest\} \\$' "$work"; then
   sed -i -E 's/^(\s*)%un %SRC %URI %>ha\{Sec-Fetch-Dest\} \\$/\1%un %SRC %URI %>ha{Sec-Fetch-Dest} %ssl::>sni \\/' "$work"; changed=1
   note "1b. helper format: added %ssl::>sni"
-elif grep -q '%ssl::>sni' "$work"; then note "1b. helper format: already has %ssl::>sni"
+elif grep -qE '^\s*%un %SRC %URI.*%ssl::>sni' "$work"; then note "1b. helper format: already has %ssl::>sni"
 else echo "!! 1b. could not find the helper format line to add %ssl::>sni to. Not touching it." >&2; fi
 
 # 2. deny_info why
@@ -163,8 +163,11 @@ if grep -q '^# The cost: this is no longer per-rung' "$work" && grep -q 'app_med
   note "6d. rewrote the stale 'no longer per-rung' comment"
 fi
 
+#    Position matters here, unlike the acl lines: the rule is only sound ahead of every splice, so
+#    it is checked as THE line right after the browser-port bump (as step 4b checks its own line),
+#    and a copy anywhere else — an older form, or one someone moved below the splices — is removed.
 if grep -q '^ssl_bump bump browser_port$' "$work"; then
-  if ! grep -qxF "$APP_MEDIA_RULE" "$work"; then
+  if ! sed -n '/^ssl_bump bump browser_port$/{n;p}' "$work" | grep -qxF "$APP_MEDIA_RULE"; then
     sed -i '/^ssl_bump bump app_media_hosts !filter_allows$/d; /^ssl_bump terminate app_media_hosts /d' "$work"
     sed -i "/^ssl_bump bump browser_port$/a $APP_MEDIA_RULE" "$work"
     changed=1

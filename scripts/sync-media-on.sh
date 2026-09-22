@@ -12,9 +12,14 @@
 #
 # Fails SAFE in both directions:
 #   * a failed fetch or malformed answer leaves the previous file in place;
-#   * the list is an ALLOWLIST, so a phone that is missing from it has pictures blocked, not open;
+#   * the address list is an ALLOWLIST, so a phone that is missing from it has pictures blocked,
+#     not open;
 #   * the file always carries a placeholder line, because squid refuses to start on an empty
 #     ACL file and a proxy that will not start is worse than either answer.
+# The picture HOST list for the strict resolver (below) is the one piece that is a refusal list,
+# not an allowlist — an empty one refuses nothing — which is why install-dns-policy.sh seeds it
+# from the repository (scripts/app-media.dnsmasq) before the first sync, this script only ever
+# replaces it with a list that parses, and health-check.sh alerts when it is short.
 #
 # The same allowlist ALSO drives the DNS layer where install-dns-policy.sh has set it up: the
 # addresses go into the ipset that DNATs a phone's DNS to the open resolver, and the picture
@@ -112,11 +117,30 @@ for h in ok:
 PY
   then
     if ! cmp -s "$hosts_out" "$STRICT_DIR/app-media.conf" 2>/dev/null; then
-      install -m 0644 "$hosts_out" "$STRICT_DIR/app-media.conf"
-      echo "$(stamp) updated $STRICT_DIR/app-media.conf ($(grep -c '^local=' "$hosts_out") hosts)"
-      # `local=` lines are read at start only; the strict instance holds no cache, so a restart is free.
-      systemctl try-restart shmira-dnsmasq-strict.service 2>/dev/null \
-        && echo "$(stamp) strict resolver restarted" || echo "$(stamp) note: strict resolver not running"
+      # Prove the fragment parses before it goes live, and keep the previous one to fall back on.
+      # The strict instance holds no cache, so a restart costs nothing; `restart`, not
+      # `try-restart` (which is a no-op on a stopped unit and reports success), so a strict
+      # resolver that is down comes back here rather than staying down.
+      if dnsmasq --test --conf-file="$hosts_out" >/dev/null 2>&1; then
+        prev_hosts="$(mktemp)"; cp "$STRICT_DIR/app-media.conf" "$prev_hosts" 2>/dev/null || : > "$prev_hosts"
+        install -m 0644 "$hosts_out" "$STRICT_DIR/app-media.conf"
+        echo "$(stamp) updated $STRICT_DIR/app-media.conf ($(grep -c '^local=' "$hosts_out") hosts)"
+        if systemctl cat shmira-dnsmasq-strict.service >/dev/null 2>&1; then
+          systemctl restart shmira-dnsmasq-strict.service 2>/dev/null || true
+          sleep 1
+          if command -v dig >/dev/null 2>&1 \
+             && ! dig +short +time=3 +tries=1 @"${SHMIRA_STRICT_DNS_IP:-10.66.0.1}" example.com 2>/dev/null | grep -q .; then
+            echo "$(stamp) ERROR strict resolver not answering after restart — restoring the previous host list" >&2
+            install -m 0644 "$prev_hosts" "$STRICT_DIR/app-media.conf"
+            systemctl restart shmira-dnsmasq-strict.service 2>/dev/null || true
+          else
+            echo "$(stamp) strict resolver restarted"
+          fi
+        fi
+        rm -f "$prev_hosts"
+      else
+        echo "$(stamp) WARN the new host list does not parse — keeping $STRICT_DIR/app-media.conf as is" >&2
+      fi
     fi
   else
     echo "$(stamp) WARN could not fetch or parse the media host list — keeping $STRICT_DIR/app-media.conf as is" >&2

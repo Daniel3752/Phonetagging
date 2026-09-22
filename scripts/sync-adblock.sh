@@ -13,9 +13,21 @@
 # Lists (SHMIRA_ADBLOCK_URLS, space-separated, in /etc/squid/filter.env to override). Any of the
 # usual formats is accepted and normalised here to `local=/host/` lines: dnsmasq (local=/x/ or
 # address=/x/…), hosts files (0.0.0.0 x), plain domain lists, and AdGuard/ABP-style ||x^ lines.
-# The default is hagezi's "Pro" list — curated for daily use with app breakage tracked as bugs —
-# plus hagezi's encrypted-DNS list, so an app carrying its own DNS-over-HTTPS resolver
-# (dns.google, cloudflare-dns.com …) cannot route around the resolver at all.
+# The default is hagezi's "Pro" list — checked 2026-09-22 against the eleven mobile ad-SDK families
+# (AdMob, Meta Audience Network, AppLovin, Unity, ironSource, Vungle, Chartboost, InMobi, Pangle,
+# Mintegral, Amazon): Pro is the first tier that covers all of them (Light and Multi have no
+# Vungle and no Chartboost at all) and the last that keeps graph.facebook.com, the Play, YouTube,
+# Instagram, WhatsApp and Samsung hosts intact (Pro++ breaks Instagram, Ultimate breaks Meta) —
+# plus hagezi's encrypted-DNS + VPN/proxy-bypass list (a superset of its plain DoH list: the DoH
+# resolvers an app might carry, and the web proxies and "school bypass" sites a kid would look
+# for; audited clean of CDN wildcards and of the usual school services), so nothing routes around
+# the resolver. Pro does block Firebase Crashlytics/analytics and app-measurement.com on purpose;
+# FCM push and Firebase's function hosts are untouched.
+#
+# Two things are added by hand: use-application-dns.net (Firefox's canary — an NXDOMAIN here is
+# Mozilla's own signal for the browser to keep DNS-over-HTTPS off; neither hagezi list has it),
+# and a `server=/host/<upstream>` line for every KEEP host, which dnsmasq honours over any
+# `local=` parent because the most specific rule wins — the robust form of an allowlist.
 #
 # Fails SAFE: a failed download, an empty result or a config that does not parse leaves the
 # previous list in place; a restart that leaves the resolver dead is rolled back to the previous
@@ -28,7 +40,11 @@ set -euo pipefail
 ENV_FILE="${SHMIRA_ENV_FILE:-/etc/squid/filter.env}"
 if [[ -r "$ENV_FILE" ]]; then set -a; . "$ENV_FILE"; set +a; fi
 
-URLS="${SHMIRA_ADBLOCK_URLS:-https://raw.githubusercontent.com/hagezi/dns-blocklists/main/dnsmasq/pro.txt https://raw.githubusercontent.com/hagezi/dns-blocklists/main/dnsmasq/doh.txt}"
+URLS="${SHMIRA_ADBLOCK_URLS:-https://raw.githubusercontent.com/hagezi/dns-blocklists/main/dnsmasq/pro.txt https://raw.githubusercontent.com/hagezi/dns-blocklists/main/dnsmasq/doh-vpn-proxy-bypass.txt https://raw.githubusercontent.com/hagezi/dns-blocklists/main/dnsmasq/doh.txt}"
+# Refused by hand, whatever the lists say (space-separated; SHMIRA_ADBLOCK_EXTRA adds more).
+EXTRA="use-application-dns.net ${SHMIRA_ADBLOCK_EXTRA:-}"
+# Where an allowlisted name is resolved: the open resolver's own upstreams.
+UPSTREAM="${SHMIRA_ADBLOCK_UPSTREAM:-1.1.1.1}"
 DEST="${SHMIRA_ADBLOCK_FILE:-/etc/dnsmasq.d/shmira-adblock.conf}"
 # Never refuse these whatever a list says: the filter's own plumbing, and hosts apps need to work
 # (sign-in, push). One per line, suffix match. Override/extend with SHMIRA_ADBLOCK_KEEP (space-separated).
@@ -49,9 +65,11 @@ for u in $URLS; do
   echo >> "$raw"
 done
 
-python3 - "$raw" "$KEEP" > "$out" <<'PY'
+python3 - "$raw" "$KEEP" "$EXTRA" "$UPSTREAM" > "$out" <<'PY'
 import re, sys
 keep = [k.strip().lower().lstrip('.') for k in sys.argv[2].split() if k.strip()]
+extra = [k.strip().lower().lstrip('.') for k in sys.argv[3].split() if k.strip()]
+upstream = sys.argv[4]
 def kept(d):
     return any(d == k or d.endswith('.' + k) for k in keep)
 label = re.compile(r'^[a-z0-9_](?:[a-z0-9_-]{0,62}[a-z0-9_])?$')
@@ -77,12 +95,18 @@ for line in open(sys.argv[1], encoding='utf-8', errors='replace'):
     if kept(d):
         continue
     doms.add(d)
+for d in extra:
+    if not kept(d) and all(label.match(l) for l in d.split('.')):
+        doms.add(d)
 # A `local=/example.com/` already covers every subdomain: drop shadowed entries so the file is
 # as small as it can be (dnsmasq would take them either way).
 def shadowed(d):
     parts = d.split('.')
     return any('.'.join(parts[i:]) in doms for i in range(1, len(parts) - 1))
 print('# Ad-network and encrypted-DNS hosts refused for every phone. Written by sync-adblock.sh — do not edit.')
+print('# Allowlist: the most specific rule wins in dnsmasq, so these resolve whatever a local= line above them says.')
+for k in sorted(set(keep)):
+    print('server=/%s/%s' % (k, upstream))
 for d in sorted(x for x in doms if not shadowed(x)):
     print('local=/%s/' % d)
 PY

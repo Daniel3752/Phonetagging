@@ -30,7 +30,7 @@ grep -q '^access_log none' "$CONF" || { echo "no 'access_log none' line in $CONF
 
 cleanup() {
   sed -i "/$MARK\$/d" "$CONF"
-  squid -k reconfigure 2>/dev/null || true
+  squid -f "$CONF" -k reconfigure 2>/dev/null || true
   rm -f "$LOG"
 }
 trap cleanup EXIT
@@ -43,17 +43,20 @@ if [[ -n "$PHONE" ]]; then
   src_acl=" shmira_debug_phone"
   sed -i "/^access_log none/i acl shmira_debug_phone src $PHONE $MARK" "$CONF"
 fi
-sed -i "/^access_log none/i logformat shmira_media %tl %>a %ssl::>sni %ssl::bump_mode %Ss/%03>Hs %<st %rm %ru $MARK" "$CONF"
-sed -i "/^access_log none/i acl shmira_debug_hosts ssl::server_name_regex -i (scdn\\\\.co|spotifycdn\\\\.com|spotify\\\\.com|pscdn\\\\.co|akamaized\\\\.net|play-lh\\\\.googleusercontent\\\\.com)\$ $MARK" "$CONF"
+# %ts (seconds since the epoch), not %tl: %tl is "date time zone" — two whitespace-separated
+# tokens — and the census below reads the log by field number.
+sed -i "/^access_log none/i logformat shmira_media %ts %>a %ssl::>sni %ssl::bump_mode %Ss/%03>Hs %<st %rm %ru $MARK" "$CONF"
+# Anchored at both ends: the app domains and their subdomains, and the one exact Play host.
+sed -i "/^access_log none/i acl shmira_debug_hosts ssl::server_name_regex -i (^|\\\\.)(scdn\\\\.co|spotifycdn\\\\.com|spotify\\\\.com|pscdn\\\\.co|akamaized\\\\.net)\$|^play-lh\\\\.googleusercontent\\\\.com\$ $MARK" "$CONF"
 sed -i "/^access_log none/i access_log $LOG shmira_media shmira_debug_hosts$src_acl $MARK" "$CONF"
 
-if ! squid -k parse >/dev/null 2>&1; then
-  echo "!! squid.conf does not parse with the debug lines; removing them:" >&2
-  squid -k parse 2>&1 | grep -i -A2 'fatal\|error' | head -20 >&2 || true
+if ! squid -f "$CONF" -k parse >/dev/null 2>&1; then
+  echo "!! $CONF does not parse with the debug lines; removing them:" >&2
+  squid -f "$CONF" -k parse 2>&1 | grep -i -A2 'fatal\|error' | head -20 >&2 || true
   exit 1
 fi
 : > "$LOG"; chown proxy:proxy "$LOG" 2>/dev/null || true
-squid -k reconfigure
+squid -f "$CONF" -k reconfigure
 echo "Logging handshakes to the app media domains for ${SECS}s${PHONE:+ from $PHONE} ..."
 echo "  (phone: force-stop Spotify, clear its storage, open it, open a playlist, play a song)"
 sleep "$SECS"

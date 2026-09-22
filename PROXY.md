@@ -165,16 +165,25 @@ squid ─────────────▶ 127.0.0.1 ───┘         
 - **The ad list applies to every phone** through that forwarding: in-app ads (AdMob, Meta
   Audience Network, AppLovin, Unity, ironSource, Vungle, Chartboost, InMobi, Pangle, Mintegral,
   Amazon …) get no address and the SDK shows nothing. `sync-adblock.sh` pulls hagezi's Pro list
-  plus its encrypted-DNS list nightly (228k + 3k names, `local=/host/` lines; dnsmasq loads them
-  in 0.1 s and 20 MB), normalises any list format, refuses a truncated download, and rolls back a
-  list that leaves the resolver dead. It does NOT touch first-party ads that ride the content's
-  own hosts — YouTube's in-app ads, Spotify's free-tier audio ads, Instagram/Facebook feed ads.
+  nightly (228k names, `local=/host/` lines; dnsmasq loads them in 0.1 s and 20 MB — checked
+  2026-09-22: Pro is the first tier covering all eleven SDK families and the last that leaves
+  Meta's, Google's, Samsung's and WhatsApp's own hosts alone) plus its encrypted-DNS and
+  VPN/proxy-bypass lists (16k names: DoH resolvers, web proxies, "school bypass" sites), adds
+  Firefox's DoH canary by hand, pins the hosts apps need (`graph.facebook.com`, the filter's own)
+  with `server=` lines that win over any parent entry, normalises any list format, refuses a
+  truncated download, and rolls back a list that leaves the resolver dead. Android does not
+  cache these NXDOMAINs (they carry no SOA) and re-asks every couple of seconds, so an allowlist
+  change takes effect at once. It does NOT touch first-party ads that ride the content's own
+  hosts — YouTube's in-app ads, Spotify's free-tier audio ads, Instagram/Facebook feed ads.
 - **squid enforces the DNS list as a side effect.** An app that reaches an ad host by a hard-coded
   address still presents the name as SNI; squid resolves it through the open resolver, gets
   NXDOMAIN, and its intercept host check answers 409. No second ACL is needed.
-- **Private DNS cannot route around it.** `shmira-dns-policy.service` rejects tcp/udp 853 inside
-  the tunnel (Android's "Automatic" mode then falls back to plain DNS at once), the encrypted-DNS
-  list makes DoH resolver names unresolvable, and `no_config_private_dns` locks the setting.
+- **No resolver but ours.** `shmira-dns-policy.service` DNATs every port-53 packet from the
+  tunnel — whatever resolver it was addressed to, 8.8.8.8 included — to the strict resolver (or
+  the open one for a picture-allowed phone), rejects tcp/udp 853 (DNS-over-TLS/QUIC; Android's
+  "Automatic" Private DNS uses plain DNS meanwhile and backs off), the bypass list makes DoH
+  resolver names unresolvable, Chrome's DoH auto-upgrade never fires for a private resolver
+  address, and `no_config_private_dns` locks the setting.
 - **Failure directions.** Strict down = the phones have no DNS (visible at once; the unit
   restarts itself). Open down = squid has no DNS (the dependency that already existed). Both lists
   and the ipset are allowlists or refusals that a missed sync leaves as they were. `--uninstall`
