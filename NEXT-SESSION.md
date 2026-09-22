@@ -4,8 +4,12 @@
 
 Asked to trace six things through the filter (yeshiva ladder only — the operator confirmed this
 mid-session), plus a per-phone test bench and the always-on-VPN lockdown. Findings first, then what
-this session changed. **Everything below is code on this branch, inert until `npx wrangler deploy`
-and `npm run db:migrate`.** Nothing on the server or on any phone was touched.
+this session changed.
+
+**STATUS: the streaming fix is DEPLOYED AND CONFIRMED ON A PHONE (2026-09-22).** The Worker was
+deployed, 0022 and 0023 were applied, the yeshiva rung-3 apps were pushed, and **the Netflix app is
+blocked on the handset** — verified by the operator. The squid box was not touched and needed no
+change. Everything else in this section is still findings, not fixes.
 
 ### 1. Netflix on rung 3 — FIXED (both halves), and the cause was structural
 
@@ -36,7 +40,9 @@ inversion recorded further down for rungs 1-2 in September; it was fixed for the
 and streaming was never in any bucket.
 
 **Fixed in this session, both halves — they must stay in step, because the app is only gone until
-someone reinstalls it, and the site was always reachable in Chrome regardless:**
+someone reinstalls it, and the site was always reachable in Chrome regardless. The APP half is
+confirmed working on a live phone; the BROWSER half (netflix.com refused in Chrome) had not been
+eyeballed on the handset at the time of writing, so check it once:**
 
 - `src/streaming.js` — a pure hostname matcher, same shape as `app-media.js`. Whole registrable
   domains (the video CDNs live on domains of their own: `nflxvideo.net`, `aiv-cdn.net`), plus exact
