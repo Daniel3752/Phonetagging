@@ -188,6 +188,66 @@ Known: WhatsApp is moving status to the top of the Chats tab and channels behind
 closed; the status strip on Chats itself will not be (there is nothing to close without breaking
 the chats).
 
+### 4. Streaming apps and the preinstalled sweep — the blocklist rungs had no rows for either
+
+Found while deploying: rungs 4-5 (standard) and 3-4 (yeshiva) are BLOCKLIST policies, so an app
+with no row installs and runs. **Not one streaming app existed anywhere in the repo** — no Netflix,
+Disney+, Prime Video, Google TV, Plex, nor any Israeli service. YouTube and Twitch were covered only
+because they sit in the social bucket. The same hole covered the preinstalled apps, and one of them
+matters more than the rest: **Galaxy Store (`com.sec.android.app.samsungapps`) is a second app
+store**, so on a blocklist rung a boy could install a blocked app from it with the Play Store
+restrictions still in force.
+
+Three new buckets, in the generators (`scripts/build-app-rules-seed.mjs`,
+`scripts/build-yeshiva-seed.mjs`) — never edit the migrations by hand:
+
+- **VIDEO** — Netflix, Disney+, Prime Video, Google TV, YouTube Music, Samsung TV Plus, Twitch,
+  Hulu, Plex, MX Player, VLC, and the Israeli services. Rides with the social bucket by the
+  operator's decision: blocked until the most open rung of each ladder (standard rung 5, yeshiva
+  rung 4). **Music streaming is deliberately not included** — Spotify keeps its per-rung states and
+  its artwork is refused at the network layer instead.
+- **APP SOURCES / BYPASS** — Galaxy Store, F-Droid, Amazon Appstore, Aurora, APKPure, Aptoide,
+  Smart Switch, Bixby, the Google app, and Samsung's dormant Facebook installer stubs. Blocked on
+  **every** rung including the most open one: these do not deliver content, they deliver whatever
+  the policy just refused. The Play Store is deliberately absent — the blocklist rungs need it.
+- **PREINSTALLED CONTENT** — Samsung Free/Daily, Game Launcher, Play Games, Google News and
+  Podcasts, Samsung Members, AR Zone, Tips, Galaxy Themes. Social shape. These are system apps, so
+  Headwind hides them rather than uninstalling them.
+
+Two faults found and fixed while building it, both of which would have hit the fleet:
+
+1. **The yeshiva refresh clears rules BY POLICY**, which would have deleted the
+   `com.getshmira.companion` row migration 0021 put on every policy — taking away the WhatsApp
+   Updates guard and the install watchdog. There is now a MANAGEMENT bucket (agent, WireGuard,
+   companion) written as an explicit `allowed` row on every policy of both ladders. It was also
+   missing from the standard ladder entirely: on an allowlist rung (standard 1-3) an app with no
+   `allowed` row is hidden, so the first re-enrolment would have hidden the Headwind agent itself.
+2. **The standard refresh deleted rows by package name with no policy filter.** Many of those
+   packages (WhatsApp, the banks, the social and explicit buckets) also carry yeshiva rows, so it
+   would have stripped them there and never put them back. The DELETE is now scoped to
+   `apps_rung_1..5`. `test/app-rules.test.mjs` pins both.
+
+**Deploy** (from the PC; no server or phone step):
+
+```
+git pull && npm test
+npx wrangler d1 migrations apply phone-url-filter-db --remote   # or: npm run db:migrate
+```
+
+0022 (standard) and 0023 (yeshiva) are both re-runnable. 0023 also rebuilds `yeshiva_rung_3_yt`
+from rung 3 the way 0020 did, so the YouTube-option phones pick up the additions too.
+
+Then, in Headwind: **Push apps** on each mapped configuration, so the agent gets the new Remove
+entries. Nothing reaches a phone until that push.
+
+**READ THIS BEFORE TRUSTING IT.** On an ALLOWLIST rung a wrong package name is harmless — there is
+simply nothing to allow. On a BLOCKLIST rung it is a **silent hole**: the app stays allowed and
+nothing says so. Every entry labelled `CONFIRM package` in the two generators — all the Israeli
+services, several of the stores — is a best guess. Reconcile them against Headwind's installed-apps
+list for a real handset (Applications → the device → installed apps) before treating the blocklist
+rungs as covered. The quickest reconciliation is `adb shell pm list packages -3` on a phone that has
+the apps, and `adb shell pm list packages -s` for the preinstalled ones.
+
 ### Proven end to end in the sandbox (2026-09-22), on real software
 
 Not a phone, but not only unit tests either. In the cloud sandbox: squid 6.14 with THIS

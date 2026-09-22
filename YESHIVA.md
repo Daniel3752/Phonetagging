@@ -11,12 +11,34 @@ rung 1–5 and it is migrated. It lives in the same console — https://phone-ur
 |---|---|---|
 | 1 Apps only | **allowlist** — essentials + necessities; Chrome not on it | none |
 | 2 Apps + browser | the same allowlist, **with Chrome** | the yeshiva browser |
-| 3 Blocklist, no social | everything except **social, explicit/dating, other browsers, VPNs** | the yeshiva browser |
-| 4 Blocklist | everything except **explicit/dating, other browsers, VPNs** (social apps allowed) | the yeshiva browser |
+| 3 Blocklist, no social | everything except **social, video streaming, preinstalled content, explicit/dating, other browsers, VPNs, app sources** | the yeshiva browser |
+| 4 Blocklist | everything except **explicit/dating, other browsers, VPNs, app sources** (social, video and the preinstalled extras allowed) | the yeshiva browser |
 
 The app lists are `migrations/0016_yeshiva_tag.sql`, generated from `scripts/build-yeshiva-seed.mjs`
-(edit the buckets there, re-run it, commit both). Package names for the stock apps are listed in
-their Google/AOSP/Samsung flavours; reconcile against Headwind's installed-apps list.
+(edit the buckets there, re-run it, commit both). The generator also writes
+`migrations/0023_yeshiva_streaming_and_preinstalled.sql`, the re-runnable refresh that actually
+reaches the live database — 0016 and 0019 are already applied and a migration never runs twice.
+Package names for the stock apps are listed in their Google/AOSP/Samsung flavours; reconcile against
+Headwind's installed-apps list.
+
+**Video streaming rides with the social bucket** (Netflix, Disney+, Prime Video, Google TV, Samsung
+TV Plus, the Israeli services): off at rung 3, permitted at rung 4 where social is. Music streaming
+does not — Spotify stays allowed and its artwork is refused at the network layer instead (PROXY.md).
+
+**App sources are refused on BOTH blocklist rungs**, rung 4 included: Galaxy Store, F-Droid, Amazon
+Appstore, Aurora, APKPure, Aptoide, Smart Switch, Bixby and the Google app. A second app store
+installs whatever the blocklist just refused, so the open rung is exactly where it matters. The Play
+Store itself stays — rungs 3 and 4 need it.
+
+**The agent, WireGuard and the companion are written as explicit `allowed` rows on every policy**,
+shiur included. On an allowlist rung an unlisted app is hidden, which would remove the very things
+that enforce the policy; on a blocklist rung the row is what marks the app INSTALL, so the agent
+puts it back if a phone loses it.
+
+> A wrong package name is harmless on an allowlist rung — there is nothing to allow. On a
+> **blocklist** rung it is a silent hole: the app stays allowed and nothing reports it. Every entry
+> marked `CONFIRM package` in the generator must be checked against a real handset before rungs 3
+> and 4 are treated as covered.
 
 **The browser is one profile at every rung that has one**, exactly as specified: "one type, no
 images, no explicit sites, no social media". So rung 4's browser still blocks the social *sites*

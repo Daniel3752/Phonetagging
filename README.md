@@ -42,6 +42,16 @@ Policies are named sets of app rules, each mapped onto a Headwind configuration.
 - **hidden** — stays installed but is concealed from the launcher; this is how apps the phone
   shipped with get disabled without uninstalling them
 
+Every policy also declares what it says about an app it has **no** rule for. Rungs 1-3 (standard)
+and 1-2 (yeshiva) are allowlists: an unlisted app is hidden. The upper rungs are blocklists, where
+an unlisted app simply runs — so on those, video streaming (Netflix, Disney+, Prime Video, the
+preinstalled TV apps), the preinstalled content apps, and alternative app stores each need naming.
+Video rides with the social bucket, off until the most open rung of each ladder; music streaming
+does not, since Spotify's pictures are handled at the network layer instead. Alternative app stores
+are refused on every rung including the most open one, because a second store installs whatever the
+blocklist just refused. The agent, the tunnel and the companion carry an explicit `allowed` row
+everywhere, so no rung can hide the things that do the enforcing.
+
 Schedules swap a device onto a different policy for a time window — "WhatsApp available 6–9pm".
 Windows are expressed in **the phone's own local time**, so a fleet spread across time zones still
 reads "blocked after 10pm" as each family's 10pm. A window whose end precedes its start crosses
