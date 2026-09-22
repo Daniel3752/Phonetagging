@@ -165,8 +165,11 @@ HELPER_FEATURES = ['strip_images', 'decrypt']
 
 
 def _worker_failure(reason):
+    # host_scoped: the Worker being unreachable is true of every URL on the host, and a page-load
+    # burst's followers wait on the HOST key — a per-URL failure entry would leave each of them
+    # to time out on its own after the leader already did.
     return {'allow': False, 'reason': reason, 'level': None, 'images_off': False,
-            'host_scoped': False, 'strip': False, 'decrypt': False, 'block_social': None, 'action': 'error',
+            'host_scoped': True, 'strip': False, 'decrypt': False, 'block_social': None, 'action': 'error',
             'failure': True}
 
 
@@ -419,17 +422,32 @@ def _answer(channel, fields):
         # on no list, so allowed — which is how every earlier version of this filter waved app
         # traffic through at the handshake while believing it had checked the host.
         handshake = '://' not in url
+        no_name = False
         if handshake:
             host = url.rsplit(':', 1)[0] if ':' in url else url
-            if sni and (_looks_like_address(host) or not host):
-                host = sni
-            elif sni and sni != host:
-                host = sni
+            if _looks_like_address(host) or not host:
+                if sni:
+                    host = sni
+                else:
+                    # An intercepted handshake with no server name at all: nothing to judge by.
+                    # Refused (fails closed) — a bare-address TLS connection is what a hand-rolled
+                    # bypass looks like, and no app the fleet runs is known to need one. The
+                    # census (debug-app-media.sh) shows such a refusal as a bump on a bare IP.
+                    no_name = True
+            # A NAME in the target (the browser port's explicit CONNECT, verified by squid) is
+            # kept even when the hello's SNI differs: the SNI is the client's to choose.
             url = 'https://' + host + '/'
         # Squid sends "-" for an unauthenticated login; the Worker treats an unknown user as the
         # strictest rung rather than denying outright, so pass it through as-is.
         if user == '-':
             user = ''
+
+        if no_name:
+            out = 'ERR message="no_server_name: a TLS connection with no server name cannot be judged"'
+            with _stdout_lock:
+                sys.stdout.write(f'{channel} {out}\n' if channel else f'{out}\n')
+                sys.stdout.flush()
+            return
 
         # Two cache keys. A page load fans out into dozens of URLs on one host, and for an ordinary
         # site the answer is the same for all of them — so when the Worker says its decision was

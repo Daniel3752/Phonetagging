@@ -31,7 +31,9 @@ answers = {}
 def fake_ask(user, url, dest=''):
     calls.append((user, url, dest))
     a = dict(helper._worker_failure('no fake answer'))
-    a.update(answers.get(user, {}))
+    if user in answers:
+        a['failure'] = False           # a real answer, not the Worker being unreachable
+        a.update(answers[user])
     return a
 
 helper.ask_worker = fake_ask
@@ -130,10 +132,13 @@ r = answer('3 - 10.66.0.4 66.22.1.1:443 - pornhub.com')
 check('and the explicit list', r.startswith('3 ERR') and 'explicit' in r, r)
 r = answer('4 - 10.66.0.4 en.wikipedia.org:443 - -')
 check('a name in the target with no SNI is used as before', r == '4 OK' and calls[-1][1] == 'https://en.wikipedia.org/', (r, calls[-1]))
+n_before = len(calls)
 r = answer('5 - 10.66.0.4 1.2.3.4:443 - -')
-check('an address with no SNI is judged as an address (nothing better is known)', calls[-1][1] == 'https://1.2.3.4/', calls[-1])
+check('an address with no SNI is refused without asking anyone (nothing to judge by)', r.startswith('5 ERR') and 'no_server_name' in r and len(calls) == n_before, (r, len(calls) - n_before))
 r = answer('6 - 10.66.0.4 https://en.wikipedia.org/wiki/Cat document -')
 check('a decrypted request ignores the (empty) SNI field', r == '6 OK', r)
+r = answer('7 - 10.66.0.4 pornhub.com:443 - www.wikipedia.org')
+check("a NAME in the target (the browser's CONNECT) is kept even when the hello's SNI differs", r.startswith('7 ERR') and 'explicit' in r, r)
 
 print('\n6. fast local paths never reach the Worker')
 reset()
@@ -149,11 +154,12 @@ r = answer('1 - 10.66.0.7 spclient.wg.spotify.com:443 -')
 check('an unreachable Worker fails closed', r.startswith('1 ERR') and 'error' in r, r)
 answers['10.66.0.7'] = {'allow': True, 'reason': 'ok', 'action': 'allow', 'host_scoped': True,
                         'strip': False, 'decrypt': False, 'block_social': True, 'level': 3}
-r = answer('2 - 10.66.0.7 spclient.wg.spotify.com:443 -')
-check('and the failure is reused for the burst that follows', r.startswith('2 ERR') and len(calls) == 1, (r, calls))
+r = answer('2 - 10.66.0.7 https://spclient.wg.spotify.com/other/url document')
+check('and the failure is reused for the whole host, so a burst pays one timeout', r.startswith('2 ERR') and len(calls) == 1, (r, calls))
 _time.sleep(0.1)
 r = answer('3 - 10.66.0.7 spclient.wg.spotify.com:443 -')
 check('but expires within seconds, so the next handshake asks again and is spliced', r == '3 OK' and len(calls) == 2, (r, calls))
+_time.sleep(0.1)   # past FAILURE_TTL: a real decision must still be there
 r = answer('4 - 10.66.0.7 https://spclient.wg.spotify.com/x document')
 check('a real decision stays cached for the full TTL', r == '4 OK' and len(calls) == 2, (r, calls))
 helper.FAILURE_TTL = 5.0

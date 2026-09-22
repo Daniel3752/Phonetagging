@@ -62,8 +62,10 @@ findings, each now fixed:
    3128 always carried the name). The helper format now passes `%ssl::>sni` and the helper prefers
    it (helper test 5b); `apply-yeshiva-squid.sh` step 1b adds it on the live box. Expect the app
    path to become STRICTER after this deploy — a spliced app host now gets the blocklists and the
-   Worker's rung check. Watch cache.log for apps that stop working and use the census to see which
-   host was refused.
+   Worker's rung check, and a TLS connection that carries NO server name at all (a bare-address
+   client, the shape of a hand-rolled bypass) is refused outright. Watch cache.log for apps that
+   stop working and use the census to see which host was refused: a `bump` on a bare IP is the
+   no-server-name refusal.
 
 Also new: `scripts/debug-app-media.sh` — the census NEXT-SESSION asked for, as a script.
 
