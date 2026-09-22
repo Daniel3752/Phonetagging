@@ -255,7 +255,18 @@ a blocklisted app installed from Play stayed usable until the next sync. The com
 foreground service, sees `PACKAGE_ADDED` the moment an install completes, and calls the agent's own
 plugin API (`com.hmdm.action.Connect`, `forceConfigUpdate`) to re-apply now. Blocklisted app gone in
 seconds. No agent fork, no Knox. `companion/README.md` has the design, the build, the Headwind steps
-and the known limits; the signed APK is `companion/releases/shmira-companion-0.1.1.apk`.
+and the known limits; the signed APK is `companion/releases/shmira-companion-0.1.2.apk`.
+
+**NOT YET UPLOADED TO HEADWIND (as of 2026-09-22) — and the version on the phones is broken.**
+0.1.1 is what the fleet is running, and on it every nudge threw SecurityException out of a Handler
+callback and killed the process about two minutes after each start (the manifest was missing
+ACCESS_NETWORK_STATE, which the offline gate needs). So the companion is effectively dead on the
+phones: nothing is watching for installs, and a blocklisted app survives until the agent's next
+scheduled configuration fetch instead of going in seconds. That undercuts the streaming block
+shipped the same day — a reinstalled Netflix lingers rather than disappearing. 0.1.2 fixes the
+permission and makes every callback swallow RuntimeException rather than die. It is built, signed
+with the same key (so it upgrades in place) and committed; it only needs uploading via the
+Applications tab and adding to each configuration. See companion/README.md.
 
 Reviewed by four lenses (Android platform rules, the agent API, robustness, build) and the real
 findings applied: the binding to the agent is persistent (unbinding mid-update would strand the
