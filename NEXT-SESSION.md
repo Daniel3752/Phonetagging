@@ -758,8 +758,17 @@ test `no_config_vpn`), and only then un-bypass Isaac and unscope the rule.
   **DECIDED 2026-09-22: location tracking is NOT wanted. Turn it off.** Nothing in this system uses
   it — the companion app declares no location permission at all (check its manifest), WireGuard
   does not report position, and squid keeps no access log by design. It is purely a Headwind agent
-  feature. Turn it off in the Headwind configuration's location setting, and if the notice survives
-  a sync, revoke Location from the agent on the phone (Settings → Apps → Headwind → Permissions).
+  feature. **Turning it off in the panel is NOT enough, confirmed 2026-09-22:** with the
+  configuration's location setting already off, the phone still reported the MDM admin app as
+  tracking location. The two are different things — the panel setting stops the agent REPORTING
+  position, while Android's notice describes what the admin app CAN do, which follows the
+  permission the agent still holds. Revoke it on the phone: Settings → Apps → Headwind MDM
+  (com.hmdm.launcher) → Permissions → Location → Don't allow. Nothing in this system needs it, so
+  revoking breaks nothing. Watch for the agent re-granting itself (a Device Owner can), in which
+  case turn off whatever auto-grants permissions in the configuration. Note that the generic
+  "device is managed by your organization" disclosure is NOT removable by any means — Android
+  surfaces device management deliberately — so the goal here is ending the location claim
+  specifically, not hiding that the phone is managed.
   Worth doing rather than ignoring: the boys can see that notice, and a filter that also reports
   location is a different proposition from one that does not.
 - A second Claude session was working on branch `claude/phone-filter-deployment-review-b9witi`
