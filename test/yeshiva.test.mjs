@@ -273,7 +273,8 @@ console.log('\n6c. the in-app picture allowlist squid reads');
 
   await admin('/api/admin/devices/level', { id: 'vortex', tag: 'yeshiva', level: 3 });
   list = await (await mediaOn()).json();
-  check('and rung 3 takes it off again', !list.addresses.includes('10.66.0.4'), JSON.stringify(list));
+  check('rung 3 now keeps them too (regular Spotify; refusing the hosts emptied the catalogue)',
+    list.addresses.includes('10.66.0.4'), JSON.stringify(list));
 
   await admin('/api/admin/devices', { id: 'named', label: 'Password phone', tag: 'yeshiva', level: 4, proxy_user: 'dovid-phone' });
   list = await (await mediaOn()).json();

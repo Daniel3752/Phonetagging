@@ -86,10 +86,16 @@ export const LEVELS = [
 // needs a splice entry. decrypt: true would instead make the helper force a bump of every
 // approved host for these phones at the TLS handshake — the fallback if the Chrome setting cannot
 // be pushed, at the cost of breaking apps that reject the filter's certificate. Off.
+//
+// appMedia on rung 3: refusing Spotify's image hosts emptied the catalogue (playlists and podcasts
+// showed no songs), not just the artwork — see NEXT-SESSION.md. Until that is understood, rung 3
+// keeps in-app pictures (appMedia: true), so Spotify works normally there. Rungs 1-2 (apps-only and
+// text-only) still refuse them. Flip back to false once the host set that empties the catalogue is
+// identified.
 export const YESHIVA_LEVELS = [
   { level: 1, name: 'Apps only',            webMode: 'none',      images: false, textSearch: false, imageSearch: false, blockSocial: true, appMedia: false, appModel: 'allowlist', decrypt: false },
   { level: 2, name: 'Apps + browser',       webMode: 'blocklist', images: false, textSearch: true,  imageSearch: false, blockSocial: true, appMedia: false, appModel: 'allowlist', decrypt: false, textOnlyGoogle: true },
-  { level: 3, name: 'Blocklist, no social', webMode: 'blocklist', images: false, textSearch: true,  imageSearch: false, blockSocial: true, appMedia: false, appModel: 'blocklist', decrypt: false, textOnlyGoogle: true },
+  { level: 3, name: 'Blocklist, no social', webMode: 'blocklist', images: false, textSearch: true,  imageSearch: false, blockSocial: true, appMedia: true,  appModel: 'blocklist', decrypt: false, textOnlyGoogle: true },
   { level: 4, name: 'Blocklist',            webMode: 'blocklist', images: false, textSearch: true,  imageSearch: false, blockSocial: true, appMedia: true,  appModel: 'blocklist', decrypt: false, textOnlyGoogle: true },
 ];
 

@@ -34,13 +34,17 @@ rung 4 in `YESHIVA_LEVELS` (`src/levels.js`) — one word.
   flat light-grey SVG that stretches to whatever box the page gave the picture. Layout survives;
   the picture is a grey rectangle. This works for images with no file extension too, because the
   helper forwards `Sec-Fetch-Dest` (squid.conf now passes `%>ha{Sec-Fetch-Dest}`).
-- **Images off inside Spotify and the Play Store on rungs 1-3.** Both apps are spliced and cannot
+- **Images off inside Spotify and the Play Store on rungs 1-2.** Both apps are spliced and cannot
   be read, but Spotify's artwork and Canvas videos, and the Play Store's icons and screenshots,
   come from hosts of their own (`src/app-media.js`), and those are refused at the TLS handshake.
   Music plays and the store still installs and updates; the pictures never arrive.
-  **Rung 4 is the exception and keeps them**: the browser still blanks every picture there, but a
-  music app with no artwork is a worse trade than the pictures are worth at the most open rung.
-  `appMedia` in `src/levels.js` is where that lives.
+  **Rungs 3 and 4 keep them**: the browser still blanks every picture there.
+  Rung 3 was `appMedia: false` originally, but refusing Spotify's image hosts on rung 3 emptied the
+  whole catalogue — playlists and podcasts showed no songs, not just missing covers (the open bug in
+  `NEXT-SESSION.md`). Until the host set responsible is identified, rung 3 runs regular Spotify with
+  pictures on (`appMedia: true`); flip it back once the catalogue-emptying host is known. Rung 4 was
+  always kept, because a music app with no artwork is a worse trade than the pictures are worth at
+  the most open rung. `appMedia` in `src/levels.js` is where that lives.
   **Enforced in squid, not by the filter helper** (`app_media_hosts` in `scripts/squid.conf`, step 6
   of `apply-yeshiva-squid.sh`): squid matches the host by role with a regex and terminates the
   connection. Asking the Worker per request was tried first and is unsound at the TLS handshake —

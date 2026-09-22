@@ -65,10 +65,11 @@ give a phone `tag = standard` and a rung 1–5.
   else loads. No model call, ever.
 - **Images blanked.** Every image is refused and replaced with a flat grey rectangle of the same
   shape, so layout survives but no picture arrives. Search result thumbnails are blanked too.
-- **In-app pictures off on rungs 1–3.** Spotify artwork and Play Store icons/screenshots come
+- **In-app pictures off on rungs 1–2.** Spotify artwork and Play Store icons/screenshots come
   from their own hosts, which are refused at the TLS handshake. Music still plays and the store
-  still installs; the pictures never load. **Rung 4 keeps them** — at the most open rung, a music
-  app with no artwork is a worse trade than the pictures are worth.
+  still installs; the pictures never load. **Rungs 3 and 4 keep them.** Rung 3 was meant to block
+  them too, but refusing Spotify's image hosts emptied the catalogue (see the status table), so it
+  runs regular Spotify with pictures on until that is fixed.
 - **Search screened by keyword.** A keyword hit refuses at rating 5 or above (5 = immodest,
   6 = explicit). Image search off. Not model-judged. Known gap: a text search for explicit
   material that dodges the keyword list returns text results (the sites themselves are then on
@@ -127,7 +128,7 @@ sound and covered.
 |---|---|
 | Standard rungs 1–5 (web filtering) | The live path since 25 Aug 2026; the daily fleet runs on it |
 | Yeshiva rungs 1, 2, 4 (web) | Enrolled and running on live phones |
-| **Yeshiva rung 3 — OPEN BUG** | On Isaac's S22, Spotify's catalogue went **empty** (playlists and podcasts show no songs) after the in-app-image terminate rule was applied. Empty libraries are worse than pictures. **Rollback: move the phone to yeshiva rung 4 and re-run `sync-media-on.sh`** — the terminate rule stops applying within seconds. Root cause is under investigation in `NEXT-SESSION.md`. |
+| **Yeshiva rung 3 — Spotify** | Enrolled and running. Blocking in-app pictures on rung 3 had emptied Spotify's catalogue (playlists and podcasts showed no songs), so **rung 3 now keeps in-app pictures on — regular Spotify** — until the host set responsible is found (`NEXT-SESSION.md`). The browser's own image blanking is unaffected. |
 | Shiur lock — web half | Working; the proxy enforces it |
 | Shiur lock — **app half** | **Not built.** Headwind Remove uninstalls a Play app permanently, so it cannot take an app away for a window and give it back. Needs kiosk / Managed Launcher / app-suspension; none chosen yet. Do not map a Shiur configuration that lists a Play app as Remove. |
 | Chrome honouring the pushed proxy | A documented Android managed policy; confirm per phone at `chrome://policy` |
@@ -139,5 +140,6 @@ Settings): `no_install_apps`, and removing the Play Store (`com.android.vending`
 need the store. Note that rungs 1 and 2 enforce via the blocklist, not the allowlist — Push apps
 never removes an app merely for being absent from an allowlist.
 
-Bottom line: **standard rungs and yeshiva rungs 1/2/4 are usable now; yeshiva rung 3 has a live
-Spotify bug with a one-step rollback; the shiur lock protects the web but not yet the apps.**
+Bottom line: **standard rungs and all four yeshiva rungs are usable now; yeshiva rung 3 runs
+regular Spotify (in-app pictures on) until the catalogue-emptying host is found; the shiur lock
+protects the web but not yet the apps.**
