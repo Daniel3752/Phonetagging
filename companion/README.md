@@ -111,7 +111,9 @@ sent to the Headwind server's device log through `IMdmApi.log()`.
 Channels), the channel directory, a channel opened as a conversation, and the status viewer.
 
 **What decides whether it acts.** `PolicyClient` reads the phone's tunnel address off the VPN
-interface (`10.66.0.x`, the same identity the proxy uses) and asks the Worker
+interface — only the VPN's (`tun0`/`wg0`), never Wi-Fi's, so a router that hands out
+`10.66.0.x` cannot lend a phone another phone's identity — (`10.66.0.x`, the same identity the
+proxy uses) and asks the Worker
 `GET /api/companion/policy?user=<address>`. The answer follows the rung: `whatsappUpdates` in
 `src/levels.js` — closed on yeshiva rungs 1-3 and standard 1-4, open on yeshiva 4 (the rung that
 permits the social apps) and standard 5. It is cached, refreshed hourly and whenever the network
@@ -133,7 +135,8 @@ its `rules_version` is higher):
    Hebrew). Never an unselected tab: the bottom bar shows "Updates" on every screen, and a guard
    that matched it would throw the person out of their chats (a known bug in another kosher
    shield's history);
-4. a conversation whose subtitle reads "N followers": a channel opened from a link.
+4. a conversation whose HEADER subtitle reads "N followers": a channel opened from a link. Only
+   the header counts — a message that says "2.5k followers" is a message.
 
 The Updates tab itself is a fragment inside `HomeActivity` and its tab items carry no WhatsApp
 ids, so rules 2 and 3 are what catch it; rule 1 catches the screens that are their own activity.
@@ -147,9 +150,9 @@ still there after two tries, go Home. One short toast says why. At most one insp
 250 ms and one action per 400 ms, so a stubborn screen cannot spin the CPU. It never sees anything
 outside the watched packages (the service's package list is set from the rules at runtime).
 
-**It guards itself.** Opened in Settings (its accessibility page, its app-info page, or any
-settings screen with this app's name as the title), the guard presses Back, so the switch cannot
-be reached from the phone. And `GuardKeeper` in the watch service observes
+**It guards itself.** Opened in Settings (its accessibility page or its app-info page — a screen
+whose own title is this app's name; a list row named "Shmira" in the app list is not one), the
+guard presses Back, so the switch cannot be reached from the phone. And `GuardKeeper` in the watch service observes
 `Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES` and puts the service back the moment it goes
 missing — which it can do only with `WRITE_SECURE_SETTINGS`, a permission Android lets **adb**
 grant to any app that declares it (it is `signature|privileged|development`):

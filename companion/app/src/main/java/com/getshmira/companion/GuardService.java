@@ -135,15 +135,23 @@ public class GuardService extends AccessibilityService {
             enforcing = PolicyClient.blockWhatsappUpdates(this);
             GuardRules served = GuardRules.parse(PolicyClient.servedRulesJson(this));
             GuardRules builtIn = GuardRules.parse(readRaw(R.raw.guard_rules));
+            GuardRules next;
             if (served != null && (builtIn == null || served.version >= builtIn.version)) {
-                rules = served;
+                next = served;
             } else {
-                rules = builtIn;
+                next = builtIn;
             }
-            if (rules == null) {
-                Log.e(TAG, "guard: no usable rules at all; the guard is idle");
+            if (next == null) {
+                // Nothing parsed this time (a resource read failing right after an update, say):
+                // keep the set the guard is running on rather than replace it with nothing.
+                if (rules == null) {
+                    Log.e(TAG, "guard: no usable rules at all; the guard is idle until the next reload");
+                    return;
+                }
+                Log.w(TAG, "guard: rules could not be reloaded; keeping version " + rules.version);
                 return;
             }
+            rules = next;
             AccessibilityServiceInfo info = getServiceInfo();
             if (info != null) {
                 // The watched packages plus the settings apps (for the self-guard). An empty list
@@ -326,10 +334,31 @@ public class GuardService extends AccessibilityService {
                 return "tab \"" + (text != null ? text : desc) + "\"";
             }
         }
-        if (GuardRules.any(rules.conversationTexts, trim(text)) || GuardRules.any(rules.conversationTexts, trim(desc))) {
+        // The follower count is the conversation HEADER's subtitle (conversation_contact_status),
+        // never a message: a bubble that says "2.5k followers" must not count.
+        if (isHeaderLike(n, id) && (GuardRules.any(rules.conversationTexts, trim(text))
+                || GuardRules.any(rules.conversationTexts, trim(desc)))) {
             return "channel conversation (\"" + (text != null ? text : desc) + "\")";
         }
         return null;
+    }
+
+    /** The toolbar / contact header of a conversation, by the node's or its parent's view id. */
+    private static boolean isHeaderLike(AccessibilityNodeInfo n, String id) {
+        if (id != null && (id.contains("contact_status") || id.contains("subtitle") || looksLikeTitle(id))) {
+            return true;
+        }
+        AccessibilityNodeInfo p = n.getParent();
+        if (p == null) {
+            return false;
+        }
+        try {
+            String pid = p.getViewIdResourceName();
+            return pid != null && (pid.contains("contact_status") || pid.contains("subtitle") || pid.contains("toolbar")
+                    || pid.contains("header") || pid.contains("action_bar"));
+        } finally {
+            recycle(p);
+        }
     }
 
     /**
@@ -570,8 +599,12 @@ public class GuardService extends AccessibilityService {
                 CharSequence t = n.getText();
                 if (t != null && t.toString().trim().equalsIgnoreCase(name)) {
                     String id = n.getViewIdResourceName();
-                    // A title/heading, or a collapsing toolbar title; a list row is neither.
-                    if (isHeading(n) || looksStructural(id) || (id != null && id.contains("entity_header"))) {
+                    // The screen's own title: a heading, the toolbar / collapsing-toolbar title, or
+                    // the app-info page's entity header. NOT a preference row's label, whose id is
+                    // android:id/title on every Settings list — matching that would throw the
+                    // person out of the whole app list the moment it scrolled past "Shmira".
+                    boolean rowLabel = id != null && id.endsWith(":id/title");
+                    if (!rowLabel && (isHeading(n) || looksStructural(id) || (id != null && id.contains("entity_header")))) {
                         hit = true;
                     }
                 }

@@ -7,9 +7,9 @@ import android.net.LinkAddress;
 import android.net.LinkProperties;
 import android.net.Network;
 import android.net.NetworkCapabilities;
+import android.net.NetworkRequest;
 import android.os.Handler;
 import android.os.HandlerThread;
-import android.os.Looper;
 import android.util.Log;
 
 import org.json.JSONException;
@@ -68,15 +68,8 @@ final class PolicyClient {
     private final SharedPreferences prefs;
     private final HandlerThread thread;
     private final Handler worker;
-    private final Handler main = new Handler(Looper.getMainLooper());
     private volatile boolean stopped;
-
-    /** Called on the main thread after every successful fetch that changed something. */
-    interface Listener {
-        void onPolicyChanged();
-    }
-
-    private volatile Listener listener;
+    private ConnectivityManager.NetworkCallback networkCallback;
 
     PolicyClient(Context context) {
         this.context = context.getApplicationContext();
@@ -84,10 +77,6 @@ final class PolicyClient {
         this.thread = new HandlerThread("ShmiraCompanion-policy");
         this.thread.start();
         this.worker = new Handler(this.thread.getLooper());
-    }
-
-    void setListener(Listener l) {
-        listener = l;
     }
 
     // ----------------------------------------------------------------------------------
@@ -115,9 +104,32 @@ final class PolicyClient {
 
     // ----------------------------------------------------------------------------------
 
-    /** Starts the refresh loop: one fetch now, then hourly (or every five minutes after a failure). */
+    /**
+     * Starts the refresh loop: one fetch now, then hourly (or every five minutes after a failure),
+     * and one as soon as a validated network appears — the tunnel coming up after a reboot is
+     * when the first answer is usually possible at all. (The guard learns of a changed answer
+     * through the SharedPreferences it reads; nothing else needs telling.)
+     */
     void start() {
         worker.post(this::loop);
+        try {
+            ConnectivityManager cm = context.getSystemService(ConnectivityManager.class);
+            if (cm != null) {
+                networkCallback = new ConnectivityManager.NetworkCallback() {
+                    @Override
+                    public void onAvailable(Network network) {
+                        refreshSoon();
+                    }
+                };
+                cm.registerNetworkCallback(new NetworkRequest.Builder()
+                        .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                        .addCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+                        .build(), networkCallback);
+            }
+        } catch (RuntimeException e) {
+            Log.w(TAG, "policy: cannot watch the network (" + e + "); the timer alone will refresh");
+            networkCallback = null;
+        }
     }
 
     /** A fetch as soon as possible (the network came back, the service restarted). */
@@ -129,6 +141,17 @@ final class PolicyClient {
     void shutdown() {
         stopped = true;
         worker.removeCallbacksAndMessages(null);
+        if (networkCallback != null) {
+            try {
+                ConnectivityManager cm = context.getSystemService(ConnectivityManager.class);
+                if (cm != null) {
+                    cm.unregisterNetworkCallback(networkCallback);
+                }
+            } catch (RuntimeException ignored) {
+                // never registered, or already gone
+            }
+            networkCallback = null;
+        }
         thread.quitSafely();
     }
 
@@ -205,16 +228,7 @@ final class PolicyClient {
             Log.w(TAG, "policy: this tunnel address is not on the Worker's books; enforcing the strictest policy");
         }
         if (changed) {
-            Listener l = listener;
-            if (l != null) {
-                main.post(() -> {
-                    try {
-                        l.onPolicyChanged();
-                    } catch (RuntimeException e) {
-                        Log.e(TAG, "policy listener threw: " + e, e);
-                    }
-                });
-            }
+            Log.i(TAG, "policy changed; the guard picks it up from its preferences");
         }
         return true;
     }
@@ -252,11 +266,16 @@ final class PolicyClient {
     // ----------------------------------------------------------------------------------
     // The phone's identity: its address on the WireGuard tunnel.
 
-    /** 10.66.0.x from the VPN interface, or null when no tunnel address is up. */
+    /**
+     * 10.66.0.x from the VPN (tunnel) interface, or null when no tunnel address is up. Only the
+     * VPN network's addresses count, never Wi-Fi's: a Wi-Fi network numbered 10.66.0.0/24 by
+     * whoever runs its router must not let a phone claim another phone's identity — and its
+     * policy — while the tunnel is down.
+     */
     String tunnelAddress() {
         String a = fromVpnLinkProperties();
         if (a == null) {
-            a = fromInterfaces();
+            a = fromTunInterfaces();
         }
         return a;
     }
@@ -298,14 +317,18 @@ final class PolicyClient {
         return null;
     }
 
-    /** Fallback: walk the interfaces (tun0 on most phones). */
-    private static String fromInterfaces() {
+    /** Fallback: walk the interfaces, but only the tunnel ones (tun0 / wg0 on Android). */
+    private static String fromTunInterfaces() {
         try {
             Enumeration<NetworkInterface> ifs = NetworkInterface.getNetworkInterfaces();
             if (ifs == null) {
                 return null;
             }
             for (NetworkInterface nif : Collections.list(ifs)) {
+                String name = nif.getName() == null ? "" : nif.getName();
+                if (!(name.startsWith("tun") || name.startsWith("wg"))) {
+                    continue;
+                }
                 List<InetAddress> addrs = Collections.list(nif.getInetAddresses());
                 for (InetAddress a : addrs) {
                     if (isTunnelAddress(a)) {
