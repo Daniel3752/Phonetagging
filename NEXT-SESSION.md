@@ -123,14 +123,15 @@ artwork; the artwork answer is this system.
 ### 2. In-app ads — blocked at DNS for the ad networks, for every phone
 
 `sync-adblock.sh` (installed and scheduled by `install-dns-policy.sh`, 03:41 nightly) pulls
-hagezi's **Pro** list and its encrypted-DNS + VPN/proxy-bypass list — 228k + 16k names in
-dnsmasq's own `local=/host/` format, which dnsmasq loads in 0.1 s and 20 MB — into the open
-resolver. Pro was checked against the eleven mobile ad-SDK families on 2026-09-22: it is the first
+hagezi's **Pro** list and its two encrypted-DNS lists (the VPN/proxy-bypass one and the plain
+DoH one it mostly contains) — 228k + 16k names in dnsmasq's own `local=/host/` format, which
+dnsmasq loads in 0.1 s and 20 MB — into the open resolver. Pro was checked against the eleven mobile ad-SDK families on 2026-09-22: it is the first
 hagezi tier that covers all of them and the last that leaves Meta's, Google's, Samsung's and
 WhatsApp's own hosts alone; do not go up a tier. The strict instance
-forwards to it, so every phone gets NXDOMAIN for AdMob, Meta Audience Network, AppLovin, Unity,
-ironSource, Vungle, Chartboost, InMobi, Pangle, Mintegral, Amazon and the rest: the SDK gets no
-address and shows nothing, for every app, every port, every protocol. squid enforces the same
+forwards to it, so every phone gets NXDOMAIN for AdMob, AppLovin, Unity, ironSource, Vungle,
+Chartboost, InMobi, Pangle, Mintegral, Amazon and the rest: the SDK gets no address and shows
+nothing, for every app, every port, every protocol. Meta Audience Network only in part — its ad
+requests share `graph.facebook.com` with Facebook sign-in, which is kept. squid enforces the same
 list as a side effect (an SNI that does not resolve fails its host check with a 409), and tcp/udp
 853 are rejected in the tunnel so Private DNS cannot route around it.
 
@@ -165,9 +166,10 @@ out of their chats). Full design, verification and the tuning dump: `companion/R
 
 1. On the PC, `cd companion && gradle assembleRelease` with the keystore in place
    (`companion/README.md`, Building) → `app-release.apk`, 0.2.0 (versionCode 4).
-2. Headwind: Applications → Shmira companion → new version → upload; select it in every
-   configuration (rungs 1-4, shiur). The agent updates the phones; `MY_PACKAGE_REPLACED` restarts
-   the service.
+2. Headwind: Applications → Shmira companion → new version → upload; select it in every mapped
+   configuration — 6 (rung 1), 4 (rung 2), 5 (rung 3), 8 (rung 3 with YouTube), 7 (rung 4); the
+   shiur policy is deliberately unmapped (YESHIVA.md). The agent updates the phones;
+   `MY_PACKAGE_REPLACED` restarts the service.
 3. Per phone, once, with the cable in (NEW-PHONE.md step 9b):
    `adb shell pm grant com.getshmira.companion android.permission.WRITE_SECURE_SETTINGS`, then
    `adb shell am start -n com.getshmira.companion/.MainActivity` (or reboot). The keeper then

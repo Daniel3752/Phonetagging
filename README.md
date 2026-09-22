@@ -77,8 +77,9 @@ Worth knowing before promising anything to families:
   the phone: the companion app's accessibility guard closes it on rungs whose policy says so
   (`companion/README.md`, `whatsappUpdates` in `src/levels.js`). Shorts and Reels are still
   all-or-nothing at the app tier.
-- **In-app ads are blocked at DNS for the ad networks, not for first-party ads.** AdMob, Meta
-  Audience Network, AppLovin, Unity and the rest get no address (`PROXY.md`, the DNS layer).
+- **In-app ads are blocked at DNS for the ad networks, not for first-party ads.** AdMob,
+  AppLovin, Unity, ironSource, Vungle and the rest get no address (`PROXY.md`, the DNS layer);
+  Meta Audience Network only in part, because its ad requests share a host with Facebook sign-in.
   Ads that ride the content's own hosts — YouTube's, Spotify's free tier, Instagram's feed —
   are that app's own traffic and cannot be refused by name.
 - **It does not enforce duration quotas** ("90 minutes of YouTube per day"). Time *windows* work;

@@ -35,9 +35,13 @@
 #   to, and the ad hosts, which nobody resolves.
 #
 # FAILURE DIRECTIONS. STRICT down = phones have no DNS (visible at once; Restart=always). OPEN down
-# = squid has no DNS (the existing dependency). The picture list and the ipset are ALLOWLISTS: a
-# sync that has not run means pictures off, never on. bind-dynamic on both instances so an address
-# that appears late (wg0 after boot) is picked up rather than fatal.
+# = phones have no DNS either (STRICT forwards to it), and squid falls over to 1.1.1.1 (its
+# dns_nameservers failover) — resolving, but no longer from the same cache as the phones and no
+# longer refusing the ad hosts. The address file and the ipset are ALLOWLISTS: a sync that has not
+# run means pictures off, never on. The picture HOST list is a refusal list — empty refuses
+# nothing — so it is seeded from the repository below before the strict instance first starts.
+# bind-dynamic on both instances so an address that appears late (wg0 after boot) is picked up
+# rather than fatal.
 #
 # Usage:  sudo scripts/install-dns-policy.sh              # from a clone of the deployed branch
 #         sudo scripts/install-dns-policy.sh --uninstall

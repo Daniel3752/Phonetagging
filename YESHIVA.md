@@ -83,9 +83,12 @@ rung 4 in `YESHIVA_LEVELS` (`src/levels.js`) — one word.
   `/etc/squid/app-media-on.txt`, which `scripts/sync-media-on.sh` regenerates every five minutes
   from `GET /api/proxy/media-on` — the tunnel addresses whose rung has `appMedia` on; the same
   script fills the `shmira_media_on` ipset that routes those phones' DNS to the open resolver, and
-  the strict resolver's host list. All three are **allowlists**: a phone missing from them, or a
-  sync that did not run, means pictures blocked rather than open. A rung change reaches the proxy
-  on the next sync, not instantly.
+  the strict resolver's host list. The address file and the ipset are **allowlists**: a phone
+  missing from them, or a sync that did not run, means pictures blocked rather than open. The host
+  list is the one piece that is a refusal list (an empty one refuses nothing), which is why the
+  installer seeds it from the repository (`scripts/app-media.dnsmasq`) before the strict resolver
+  first starts, the sync only ever replaces it with a list that parses, and `health-check.sh`
+  alerts when it is short. A rung change reaches the proxy on the next sync, not instantly.
   **Verifying on a phone**: `sudo scripts/debug-app-media.sh 120 <tunnel-ip>` logs every handshake
   to the app domains for two minutes and prints which hosts were terminated, spliced or bumped —
   run it while clearing Spotify's storage and opening a playlist. Then Settings and privacy →

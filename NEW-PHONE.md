@@ -51,8 +51,9 @@ enrollment QR (STOCK `com.hmdm.launcher` only — Google's DPC allowlist blocks 
    → Install a certificate → CA certificate. (Samsung: Biometrics and security → Other
    security settings.) The scary warning is expected.
 9b. ☐ **[PC]** The companion app's accessibility guard (WhatsApp Updates — Status and Channels
-    — closed on rungs 1-3): once Headwind has installed the companion (it is on every
-    configuration), grant the one permission that lets it switch its own guard on and keep it on:
+    — closed on yeshiva rungs 1-3 and standard rungs 1-4): once Headwind has installed the
+    companion (it is on every mapped configuration), grant the one permission that lets it switch
+    its own guard on and keep it on:
     `adb shell pm grant com.getshmira.companion android.permission.WRITE_SECURE_SETTINGS`
     then `adb shell am start -n com.getshmira.companion/.MainActivity` (or reboot). Verify:
     `adb shell settings get secure enabled_accessibility_services` names

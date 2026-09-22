@@ -22,7 +22,8 @@ phone (WG app, always-on+lockdown)
                   ├─ tcp 80  ─ iptables REDIRECT ─→ squid :3129 (intercept)
                   ├─ tcp 443 ─ iptables REDIRECT ─→ squid :3130 (intercept ssl-bump, same CA)
                   ├─ udp 443 ─ REJECT (kills QUIC → browsers fall back to filtered TCP)
-                  ├─ tcp/udp 853 ─ REJECT (no DNS-over-TLS out of the tunnel; see PROXY.md, the DNS layer)
+                  ├─ tcp/udp 853 ─ REJECT, and every port-53 packet DNAT'd to our resolvers — both only
+                  │                once install-dns-policy.sh has run (shmira-dns-policy.service; PROXY.md, the DNS layer)
                   └─ the rest ─ NAT out (DNS, push, app APIs; TLS still transits squid → splice.txt applies)
 
 DNS: every phone names 10.66.0.1 as its resolver. With `scripts/install-dns-policy.sh` applied

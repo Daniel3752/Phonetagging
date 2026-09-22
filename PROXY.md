@@ -162,9 +162,10 @@ squid ─────────────▶ 127.0.0.1 ───┘         
   every phone and squid draw the same answer — the property squid's intercept host check depends
   on (`WIREGUARD.md`). The only names the two disagree on are the picture hosts, which a strict
   phone never connects to, and the ad hosts, which nobody resolves.
-- **The ad list applies to every phone** through that forwarding: in-app ads (AdMob, Meta
-  Audience Network, AppLovin, Unity, ironSource, Vungle, Chartboost, InMobi, Pangle, Mintegral,
-  Amazon …) get no address and the SDK shows nothing. `sync-adblock.sh` pulls hagezi's Pro list
+- **The ad list applies to every phone** through that forwarding: in-app ads (AdMob, AppLovin,
+  Unity, ironSource, Vungle, Chartboost, InMobi, Pangle, Mintegral, Amazon …) get no address and
+  the SDK shows nothing. Meta Audience Network only in part: its ad requests share
+  `graph.facebook.com` with Facebook sign-in, which is kept. `sync-adblock.sh` pulls hagezi's Pro list
   nightly (228k names, `local=/host/` lines; dnsmasq loads them in 0.1 s and 20 MB — checked
   2026-09-22: Pro is the first tier covering all eleven SDK families and the last that leaves
   Meta's, Google's, Samsung's and WhatsApp's own hosts alone) plus its encrypted-DNS and
@@ -185,9 +186,14 @@ squid ─────────────▶ 127.0.0.1 ───┘         
   resolver names unresolvable, Chrome's DoH auto-upgrade never fires for a private resolver
   address, and `no_config_private_dns` locks the setting.
 - **Failure directions.** Strict down = the phones have no DNS (visible at once; the unit
-  restarts itself). Open down = squid has no DNS (the dependency that already existed). Both lists
-  and the ipset are allowlists or refusals that a missed sync leaves as they were. `--uninstall`
-  puts the single resolver back. `health-check.sh` probes both instances and the plumbing.
+  restarts itself). Open down = the phones have no DNS either (strict forwards to it), and squid
+  falls over to `1.1.1.1` (`dns_nameservers 127.0.0.1 1.1.1.1` in squid.conf): it keeps resolving,
+  but from a different cache than the phones (409s possible until the open instance is back) and
+  without the ad list, so the "squid enforces the DNS list as a side effect" point above holds
+  only while the open instance is up. The address file and the ipset are allowlists that a missed
+  sync leaves as they were; the strict host list is a refusal list, seeded from the repository so
+  it is never empty. `--uninstall` puts the single resolver back. `health-check.sh` probes both
+  instances and the plumbing.
 
 ## The bug that blocked every search (found 2026-09-04)
 
