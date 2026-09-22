@@ -201,11 +201,16 @@ restrictions still in force.
 Three new buckets, in the generators (`scripts/build-app-rules-seed.mjs`,
 `scripts/build-yeshiva-seed.mjs`) — never edit the migrations by hand:
 
-- **VIDEO** — Netflix, Disney+, Prime Video, Google TV, YouTube Music, Samsung TV Plus, Twitch,
-  Hulu, Plex, MX Player, VLC, and the Israeli services. Rides with the social bucket by the
-  operator's decision: blocked until the most open rung of each ladder (standard rung 5, yeshiva
-  rung 4). **Music streaming is deliberately not included** — Spotify keeps its per-rung states and
-  its artwork is refused at the network layer instead.
+- **VIDEO** — Netflix, Disney+, Prime Video, Google TV, Samsung TV Plus, Twitch, Hulu, Plex,
+  MX Player, VLC, and the Israeli services. Rides with the social bucket by the operator's
+  decision: blocked until the most open rung of each ladder (standard rung 5, yeshiva rung 4).
+- **MUSIC** — Spotify and **YouTube Music**, which share one constant in the generator by the
+  operator's decision ("treat YouTube Music as Spotify"), so they cannot drift apart: blocked on
+  rungs 1-3, allowed from rung 4, and permitted on the yeshiva blocklist rungs. Two things to know
+  about that equivalence: YouTube Music is a YouTube client and **will play music video**, and its
+  artwork is **not** covered by the Spotify picture rules, which are anchored to `scdn.co` and
+  `spotifycdn.com`. Extending the picture block to it is a separate change to `src/app-media.js`
+  and the DNS layer, not done here.
 - **APP SOURCES / BYPASS** — Galaxy Store, F-Droid, Amazon Appstore, Aurora, APKPure, Aptoide,
   Smart Switch, Bixby, the Google app, and Samsung's dormant Facebook installer stubs. Blocked on
   **every** rung including the most open one: these do not deliver content, they deliver whatever

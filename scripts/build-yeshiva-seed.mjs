@@ -228,7 +228,11 @@ const CIRCUMVENTION = {
 // Video streaming. Follows the SOCIAL bucket by the operator's decision — blocked on the rungs
 // that block social, permitted on rung 4, the most open rung, where the social apps are permitted
 // too. MUSIC streaming is deliberately absent: Spotify is allowed here and its artwork is refused
-// at the network layer instead (src/app-media.js, PROXY.md). Rungs 1-2 are allowlists, so an app
+// at the network layer instead (src/app-media.js, PROXY.md). YouTube Music is treated as Spotify
+// by the operator's decision, so it is deliberately NOT in this bucket — on the blocklist rungs it
+// has no row and is permitted, and on the allowlist rungs it is absent like Spotify. Note that it
+// is a YouTube client that will play music VIDEO, and its artwork is not covered by the Spotify
+// picture rules. Rungs 1-2 are allowlists, so an app
 // missing from this list is already absent there; these names exist for the blocklist rungs.
 //
 // Every Israeli entry is a best guess. On a BLOCKLIST rung a wrong package name is a silent hole —
@@ -240,7 +244,6 @@ const VIDEO = {
   'com.disney.disneyplus': 'Disney+',
   'com.amazon.avod.thirdpartyclient': 'Prime Video',
   'com.google.android.videos': 'Google TV / Play Movies (preinstalled)',
-  'com.google.android.apps.youtube.music': 'YouTube Music (preinstalled; plays music video)',
   'com.samsung.android.tvplus': 'Samsung TV Plus (preinstalled free live TV)',
   'com.hulu.plus': 'Hulu',
   'com.plexapp.android': 'Plex',

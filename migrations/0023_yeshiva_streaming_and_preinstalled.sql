@@ -199,7 +199,6 @@ VALUES
   ('yeshiva_rung_3', 'com.disney.disneyplus', 'blocked'),
   ('yeshiva_rung_3', 'com.amazon.avod.thirdpartyclient', 'blocked'),
   ('yeshiva_rung_3', 'com.google.android.videos', 'blocked'),
-  ('yeshiva_rung_3', 'com.google.android.apps.youtube.music', 'blocked'),
   ('yeshiva_rung_3', 'com.samsung.android.tvplus', 'blocked'),
   ('yeshiva_rung_3', 'com.hulu.plus', 'blocked'),
   ('yeshiva_rung_3', 'com.plexapp.android', 'blocked'),

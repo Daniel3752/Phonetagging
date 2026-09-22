@@ -70,7 +70,6 @@ console.log('\n3. video streaming rides with social: off until the most open run
 const VIDEO = [
   'com.netflix.mediaclient', 'com.disney.disneyplus', 'com.amazon.avod.thirdpartyclient',
   'com.google.android.videos', 'com.samsung.android.tvplus', 'com.hulu.plus', 'com.plexapp.android',
-  'com.google.android.apps.youtube.music',
 ];
 check('standard: blocked on rungs 1-4, allowed at rung 5', () => {
   for (const pkg of VIDEO) {
@@ -92,6 +91,17 @@ check('music streaming was NOT swept up with video', () => {
   assert.equal(stateOf(std, 'apps_rung_4', 'com.spotify.music'), 'allowed');
   assert.equal(stateOf(std, 'apps_rung_5', 'com.spotify.music'), 'allowed');
   assert.notEqual(stateOf(yesh, 'yeshiva_rung_4', 'com.spotify.music'), 'blocked');
+});
+check('YouTube Music is treated exactly as Spotify, on both ladders', () => {
+  // The operator's decision. They share one constant in the generator; this pins the result, so a
+  // later edit to one that misses the other fails here.
+  const YTM = 'com.google.android.apps.youtube.music';
+  for (const p of STANDARD_RUNGS) {
+    assert.equal(stateOf(std, p, YTM), stateOf(std, p, 'com.spotify.music'), `${p}: YouTube Music != Spotify`);
+  }
+  for (const p of ['yeshiva_rung_3', 'yeshiva_rung_4']) {
+    assert.equal(stateOf(yesh, p, YTM), stateOf(yesh, p, 'com.spotify.music'), `${p}: YouTube Music != Spotify`);
+  }
 });
 
 console.log('\n4. a second app store is refused on EVERY rung, the open one included');

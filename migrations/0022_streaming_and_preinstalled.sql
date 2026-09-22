@@ -26,7 +26,7 @@
 
 DELETE FROM app_rules
  WHERE policy_id IN ('apps_rung_1', 'apps_rung_2', 'apps_rung_3', 'apps_rung_4', 'apps_rung_5')
-   AND package_name IN ('com.hmdm.launcher','com.wireguard.android','com.getshmira.companion','com.whatsapp','com.twentyfoursix.app','com.spotify.music','com.openai.chatgpt','com.anthropic.claude','com.google.android.apps.bard','com.instagram.android','com.zhiliaoapp.musically','com.snapchat.android','com.facebook.katana','com.facebook.orca','com.reddit.frontpage','com.pinterest','com.tumblr','com.discord','com.twitter.android','com.tinder','com.bumble.app','co.hinge.app','com.okcupid.okcupid','com.grindrapp.android','com.netflix.mediaclient','com.netflix.NGPClient','com.disney.disneyplus','com.amazon.avod.thirdpartyclient','com.google.android.videos','com.google.android.apps.youtube.music','com.samsung.android.tvplus','tv.twitch.android.app','com.hulu.plus','com.plexapp.android','com.mxtech.videoplayer.ad','com.mxtech.videoplayer.pro','org.videolan.vlc','com.wbd.stream','com.apple.atve.android.appletv','com.peacocktv.peacockandroid','com.paramount.android.pplus','com.crunchyroll.crunchyroid','com.viki.android','com.rakuten.tv.android','il.co.mako.mako','com.reshet.tv','com.kan.kanapp','com.hot.hotplus','com.partner.tv','com.sting.tv','com.yes.yesplus','com.cellcom.tv','com.sec.android.app.samsungapps','org.fdroid.fdroid','com.amazon.venezia','com.huawei.appmarket','com.xiaomi.market','com.aurora.store','com.apkpure.aegon','cm.aptoide.pt','com.sec.android.easyMover','com.samsung.android.smartswitchassistant','com.samsung.android.bixby.agent','com.samsung.android.visionintelligence','com.samsung.android.bixby.wakeup','com.samsung.android.app.settings.bixby','com.google.android.googlequicksearchbox','com.google.android.apps.searchlite','com.facebook.system','com.facebook.appmanager','com.facebook.services','com.samsung.android.app.spage','com.samsung.android.game.gamehome','com.samsung.android.game.gametools','com.google.android.play.games','com.google.android.apps.magazines','com.google.android.apps.podcasts','com.samsung.android.voc','com.samsung.android.arzone','com.samsung.android.app.tips','com.samsung.android.themestore','com.tranzmate','com.waze','com.gettaxi.android','com.wolt.android','com.mysimpleweb.paybox','com.bank.bit','com.onesecondeveryday.app','org.sefaria.sefaria','com.chabad.app','com.google.android.gm','com.google.android.apps.maps','com.ubercab','com.lyft.android','com.ideomobile.hapoalim','com.ideomobile.leumi','com.discountbank.mobile','com.mizrahitefahot.mobile','com.fibi.bank');
+   AND package_name IN ('com.hmdm.launcher','com.wireguard.android','com.getshmira.companion','com.whatsapp','com.twentyfoursix.app','com.spotify.music','com.google.android.apps.youtube.music','com.openai.chatgpt','com.anthropic.claude','com.google.android.apps.bard','com.instagram.android','com.zhiliaoapp.musically','com.snapchat.android','com.facebook.katana','com.facebook.orca','com.reddit.frontpage','com.pinterest','com.tumblr','com.discord','com.twitter.android','com.tinder','com.bumble.app','co.hinge.app','com.okcupid.okcupid','com.grindrapp.android','com.netflix.mediaclient','com.netflix.NGPClient','com.disney.disneyplus','com.amazon.avod.thirdpartyclient','com.google.android.videos','com.samsung.android.tvplus','tv.twitch.android.app','com.hulu.plus','com.plexapp.android','com.mxtech.videoplayer.ad','com.mxtech.videoplayer.pro','org.videolan.vlc','com.wbd.stream','com.apple.atve.android.appletv','com.peacocktv.peacockandroid','com.paramount.android.pplus','com.crunchyroll.crunchyroid','com.viki.android','com.rakuten.tv.android','il.co.mako.mako','com.reshet.tv','com.kan.kanapp','com.hot.hotplus','com.partner.tv','com.sting.tv','com.yes.yesplus','com.cellcom.tv','com.sec.android.app.samsungapps','org.fdroid.fdroid','com.amazon.venezia','com.huawei.appmarket','com.xiaomi.market','com.aurora.store','com.apkpure.aegon','cm.aptoide.pt','com.sec.android.easyMover','com.samsung.android.smartswitchassistant','com.samsung.android.bixby.agent','com.samsung.android.visionintelligence','com.samsung.android.bixby.wakeup','com.samsung.android.app.settings.bixby','com.google.android.googlequicksearchbox','com.google.android.apps.searchlite','com.facebook.system','com.facebook.appmanager','com.facebook.services','com.samsung.android.app.spage','com.samsung.android.game.gamehome','com.samsung.android.game.gametools','com.google.android.play.games','com.google.android.apps.magazines','com.google.android.apps.podcasts','com.samsung.android.voc','com.samsung.android.arzone','com.samsung.android.app.tips','com.samsung.android.themestore','com.tranzmate','com.waze','com.gettaxi.android','com.wolt.android','com.mysimpleweb.paybox','com.bank.bit','com.onesecondeveryday.app','org.sefaria.sefaria','com.chabad.app','com.google.android.gm','com.google.android.apps.maps','com.ubercab','com.lyft.android','com.ideomobile.hapoalim','com.ideomobile.leumi','com.discountbank.mobile','com.mizrahitefahot.mobile','com.fibi.bank');
 
 INSERT INTO app_rules (policy_id, package_name, state)
 VALUES
@@ -60,6 +60,11 @@ VALUES
   ('apps_rung_3', 'com.spotify.music', 'blocked'),
   ('apps_rung_4', 'com.spotify.music', 'allowed'),
   ('apps_rung_5', 'com.spotify.music', 'allowed'),
+  ('apps_rung_1', 'com.google.android.apps.youtube.music', 'blocked'),
+  ('apps_rung_2', 'com.google.android.apps.youtube.music', 'blocked'),
+  ('apps_rung_3', 'com.google.android.apps.youtube.music', 'blocked'),
+  ('apps_rung_4', 'com.google.android.apps.youtube.music', 'allowed'),
+  ('apps_rung_5', 'com.google.android.apps.youtube.music', 'allowed'),
   ('apps_rung_1', 'com.openai.chatgpt', 'blocked'),
   ('apps_rung_2', 'com.openai.chatgpt', 'blocked'),
   ('apps_rung_3', 'com.openai.chatgpt', 'blocked'),
@@ -175,11 +180,6 @@ VALUES
   ('apps_rung_3', 'com.google.android.videos', 'blocked'),
   ('apps_rung_4', 'com.google.android.videos', 'blocked'),
   ('apps_rung_5', 'com.google.android.videos', 'allowed'),
-  ('apps_rung_1', 'com.google.android.apps.youtube.music', 'blocked'),
-  ('apps_rung_2', 'com.google.android.apps.youtube.music', 'blocked'),
-  ('apps_rung_3', 'com.google.android.apps.youtube.music', 'blocked'),
-  ('apps_rung_4', 'com.google.android.apps.youtube.music', 'blocked'),
-  ('apps_rung_5', 'com.google.android.apps.youtube.music', 'allowed'),
   ('apps_rung_1', 'com.samsung.android.tvplus', 'blocked'),
   ('apps_rung_2', 'com.samsung.android.tvplus', 'blocked'),
   ('apps_rung_3', 'com.samsung.android.tvplus', 'blocked'),

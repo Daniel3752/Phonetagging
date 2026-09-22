@@ -12,7 +12,7 @@
 --                        policy is the one in force. The shiur lock is a policy with web_mode
 --                        'none' that the schedules below swap in.
 --
--- Then the seed: the four yeshiva app policies + the shiur policy (412 app rules) and the
+-- Then the seed: the four yeshiva app policies + the shiur policy (411 app rules) and the
 -- Sunday–Thursday shiur windows. The windows' base is the TAG (`tag:yeshiva`), so four rows cover
 -- every yeshiva rung and the timetable is edited in one place:
 --   07:30–08:35  Shachris
@@ -213,7 +213,6 @@ VALUES
   ('yeshiva_rung_3', 'com.disney.disneyplus', 'blocked'),
   ('yeshiva_rung_3', 'com.amazon.avod.thirdpartyclient', 'blocked'),
   ('yeshiva_rung_3', 'com.google.android.videos', 'blocked'),
-  ('yeshiva_rung_3', 'com.google.android.apps.youtube.music', 'blocked'),
   ('yeshiva_rung_3', 'com.samsung.android.tvplus', 'blocked'),
   ('yeshiva_rung_3', 'com.hulu.plus', 'blocked'),
   ('yeshiva_rung_3', 'com.plexapp.android', 'blocked'),

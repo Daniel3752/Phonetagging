@@ -23,7 +23,9 @@ Headwind's installed-apps list.
 
 **Video streaming rides with the social bucket** (Netflix, Disney+, Prime Video, Google TV, Samsung
 TV Plus, the Israeli services): off at rung 3, permitted at rung 4 where social is. Music streaming
-does not — Spotify stays allowed and its artwork is refused at the network layer instead (PROXY.md).
+does not: **Spotify and YouTube Music are treated alike**, permitted on both blocklist rungs and
+absent from the allowlist rungs. Spotify's artwork is refused at the network layer (PROXY.md);
+YouTube Music's is not, and it is a YouTube client that will play music video.
 
 **App sources are refused on BOTH blocklist rungs**, rung 4 included: Galaxy Store, F-Droid, Amazon
 Appstore, Aurora, APKPure, Aptoide, Smart Switch, Bixby and the Google app. A second app store

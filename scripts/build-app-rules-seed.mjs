@@ -37,6 +37,12 @@ const EXPLICIT = BLOCKED_ALL;
 // Spotify keeps its own per-rung states above, and its artwork is refused at the network layer
 // instead (src/app-media.js, PROXY.md).
 const VIDEO = { 1: 'blocked', 2: 'blocked', 3: 'blocked', 4: 'blocked', 5: 'allowed' };
+// Music streaming. One rung looser than video: permitted from rung 4, where Spotify already was.
+// Spotify and YouTube Music share this constant by the operator's decision ("treat YouTube Music as
+// Spotify"), so the two cannot drift apart. NOTE for whoever revisits this: YouTube Music is a
+// YouTube client and will play music VIDEO, and its artwork is NOT covered by the Spotify picture
+// rules in src/app-media.js — those are anchored to scdn.co / spotifycdn.com.
+const MUSIC = { 1: 'blocked', 2: 'blocked', 3: 'blocked', 4: 'allowed', 5: 'allowed' };
 // Preinstalled content and extras the phone shipped with: the vendor's feed, games hub, news and
 // podcast readers. Same shape as social — clutter and content doorways, not a way round the policy.
 // These are SYSTEM apps: Headwind cannot uninstall them, it hides them from the launcher (the
@@ -63,7 +69,8 @@ const APPS = {
   // --- carried over unchanged from the prior seed ---
   'com.whatsapp':                 { label: 'WhatsApp',  states: { 1: 'blocked', 2: 'allowed', 3: 'allowed', 4: 'allowed', 5: 'allowed' } },
   'com.twentyfoursix.app':        { label: '24Six (CONFIRM package)', states: ALLOWED_ALL },
-  'com.spotify.music':            { label: 'Spotify',   states: { 1: 'blocked', 2: 'blocked', 3: 'blocked', 4: 'allowed', 5: 'allowed' } },
+  'com.spotify.music':            { label: 'Spotify',   states: MUSIC },
+  'com.google.android.apps.youtube.music': { label: 'YouTube Music (preinstalled) — treated as Spotify', states: MUSIC },
   'com.openai.chatgpt':           { label: 'ChatGPT',   states: { 1: 'blocked', 2: 'blocked', 3: 'blocked', 4: 'blocked', 5: 'allowed' } },
   'com.anthropic.claude':         { label: 'Claude',    states: { 1: 'blocked', 2: 'blocked', 3: 'blocked', 4: 'blocked', 5: 'allowed' } },
   'com.google.android.apps.bard': { label: 'Gemini',    states: { 1: 'blocked', 2: 'blocked', 3: 'blocked', 4: 'blocked', 5: 'allowed' } },
@@ -97,7 +104,6 @@ const APPS = {
   'com.disney.disneyplus':                { label: 'Disney+',                         states: VIDEO },
   'com.amazon.avod.thirdpartyclient':     { label: 'Prime Video',                     states: VIDEO },
   'com.google.android.videos':            { label: 'Google TV / Play Movies (preinstalled)', states: VIDEO },
-  'com.google.android.apps.youtube.music':{ label: 'YouTube Music (preinstalled; plays music video)', states: VIDEO },
   'com.samsung.android.tvplus':           { label: 'Samsung TV Plus (preinstalled free live TV)', states: VIDEO },
   'tv.twitch.android.app':                { label: 'Twitch',                          states: VIDEO },
   'com.hulu.plus':                        { label: 'Hulu',                            states: VIDEO },
