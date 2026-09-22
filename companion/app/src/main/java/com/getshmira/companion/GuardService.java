@@ -208,12 +208,25 @@ public class GuardService extends AccessibilityService {
                 scheduleInspect();
                 return;
             }
-            if (rules == null || !enforcing || !rules.watchesPackage(pkg)) {
+            if (rules == null || !rules.watchesPackage(pkg)) {
+                return;
+            }
+            refreshEnforcing();
+            if (!enforcing) {
                 return;
             }
             scheduleInspect();
         } catch (RuntimeException e) {
             Log.e(TAG, "guard event failed: " + e, e);
+        }
+    }
+
+    /** The cached "allowed" expires by age (PolicyClient), so the flag is re-read before every inspection. */
+    private void refreshEnforcing() {
+        try {
+            enforcing = PolicyClient.blockWhatsappUpdates(this);
+        } catch (RuntimeException e) {
+            enforcing = true;
         }
     }
 

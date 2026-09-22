@@ -65,7 +65,7 @@ function requireProxyKey(request, env) {
 // policy, or its whole tag) and to the policies those schedules switch to, so the effective policy
 // can be resolved here without a second query. D1's primary is an ocean away from where this
 // Worker runs for the phones, and a person is waiting on every round trip.
-async function resolveDevice(env, proxyUser, now) {
+export async function resolveDevice(env, proxyUser, now) {
   const fallback = { level: MIN_LEVEL, tag: DEFAULT_TAG, def: levelDefinition(MIN_LEVEL), deviceId: null, known: false, locked: false, policyId: null };
   if (!proxyUser) return fallback;
 

@@ -16,7 +16,10 @@
 // SELECTED tab / a screen title). Keep the texts to words that only ever appear on those screens:
 // "Updates" as the selected tab title, "Channels", "Find channels". Chat texts must never match.
 //
-// Bump COMPANION_RULES_VERSION on every change or phones keep their cached copy.
+// Bump COMPANION_RULES_VERSION on every change or phones keep their cached copy —
+// test/companion.test.mjs fails when the rules differ from the committed guard_rules.json and the
+// version does not exceed the committed one, and scripts/build-companion-rules.mjs refuses to
+// write such a file.
 
 export const COMPANION_RULES_VERSION = 3;
 

@@ -57,7 +57,8 @@ check('the regexes are plain POSIX ERE (no lookahead, no \\d, no non-greedy)', (
 // squid's -i regex is POSIX extended; everything used here is also valid JS.
 const media = new RegExp(confRx, 'i');
 const keep = new RegExp(confKeep, 'i');
-// What squid does for a host on a phone whose rung has in-app pictures off.
+// What squid does for a host on a phone whose rung has in-app pictures off (squid matches the
+// raw SNI, so no normalisation here).
 const squidTerminates = (h) => media.test(h) && !keep.test(h);
 
 console.log('\n2. squid terminates exactly the hosts the Worker refuses');
@@ -129,6 +130,7 @@ const corpus = [
   ['lh3.googleusercontent.com', null], ['photos.googleusercontent.com', null],
   ['audio-video-mix.scdn.co', null],   // a KEEP prefix wins over a media word further in
   ['image-cdn-ak.spotifycdn.com.evil.example', null], ['notscdn.co', null], ['i.scdn.co.example', null],
+  ['i.scdn.co.', 'spotify'], ['I.SCDN.CO', 'spotify'],   // an FQDN-dotted or upper-case SNI is the same host to both
 ];
 check(`${corpus.length} hosts agree between the Worker and squid`, () => {
   for (const [h, app] of corpus) {

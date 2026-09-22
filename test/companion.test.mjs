@@ -22,7 +22,11 @@ const admin = (path, body) => worker.fetch(new Request(`https://w${path}`, {
   headers: { 'Content-Type': 'application/json', Authorization: 'Bearer op-key' },
   body: JSON.stringify(body || {}),
 }), env);
-const policy = (user) => worker.fetch(new Request('https://w/api/companion/policy' + (user === undefined ? '' : `?user=${encodeURIComponent(user)}`)), env)
+// Friday 2026-09-11 16:00 Israel (13:00Z): no shiur window, so the rung alone decides. (The
+// route's default is the real clock, which section 2b covers with the windows in mind.)
+const FRIDAY = new Date('2026-09-11T13:00:00Z');
+const { handleCompanionPolicy: policyRoute } = await import('../src/companion-api.js');
+const policy = (user) => policyRoute(new Request('https://w/api/companion/policy' + (user === undefined ? '' : `?user=${encodeURIComponent(user)}`)), env, FRIDAY)
   .then((r) => r.json());
 
 console.log('\n1. phones on the books');
@@ -31,7 +35,8 @@ await admin('/api/admin/devices', { id: 'vortex', label: 'Vortex', policy_id: 'y
 await admin('/api/admin/devices', { id: 'open', label: 'Open', policy_id: 'apps_rung_5', timezone: 'Asia/Jerusalem', tag: 'standard', level: 5, proxy_user: '10.66.0.9' });
 
 let p = await policy('10.66.0.3');
-check('a yeshiva rung-3 phone blocks the Updates tab', p.known_device === true && p.whatsapp.block_updates === true && p.tag === 'yeshiva' && p.level === 3, JSON.stringify(p));
+check('a yeshiva rung-3 phone blocks the Updates tab', p.known_device === true && p.whatsapp.block_updates === true, JSON.stringify(p));
+check('the answer names nothing about the phone (the route is public)', !('device' in p) && !('tag' in p) && !('level' in p), JSON.stringify(p));
 p = await policy('10.66.0.4');
 check('a yeshiva rung-2 phone blocks it too', p.whatsapp.block_updates === true, JSON.stringify(p));
 p = await policy('10.66.0.9');
@@ -46,6 +51,25 @@ p = await policy('10.66.0.3');
 check('standard rung 4 blocks it (social is blocked there)', p.whatsapp.block_updates === true, JSON.stringify(p));
 await admin('/api/admin/devices/level', { id: 'isaac', tag: 'yeshiva', level: 3 });
 
+console.log('\n2b. the shiur lock closes the feed on every rung');
+{
+  // Sunday 2026-09-06 16:00 Israel (13:00Z) is inside the second seder window; Friday is not.
+  const SEDER = new Date('2026-09-06T13:00:00Z');
+  const FRIDAY = new Date('2026-09-11T13:00:00Z');
+  const { handleCompanionPolicy } = await import('../src/companion-api.js');
+  const at = (user, when) => handleCompanionPolicy(new Request(`https://w/api/companion/policy?user=${user}`), env, when).then((r) => r.json());
+  await admin('/api/admin/devices/level', { id: 'isaac', tag: 'yeshiva', level: 4 });
+  let q = await at('10.66.0.3', FRIDAY);
+  check('yeshiva rung 4 on a Friday: open', q.whatsapp.block_updates === false, JSON.stringify(q));
+  q = await at('10.66.0.3', SEDER);
+  check('the same phone inside a shiur window: closed', q.whatsapp.block_updates === true, JSON.stringify(q));
+  await admin('/api/admin/settings', { key: 'shiur_lock_mode', value: 'on' });
+  q = await at('10.66.0.3', FRIDAY);
+  check('"Locked now": closed whatever the clock says', q.whatsapp.block_updates === true, JSON.stringify(q));
+  await admin('/api/admin/settings', { key: 'shiur_lock_mode', value: 'schedule' });
+  await admin('/api/admin/devices/level', { id: 'isaac', tag: 'yeshiva', level: 3 });
+}
+
 console.log('\n3. fails closed');
 p = await policy('10.66.0.250');
 check('an address nobody has blocks', p.known_device === false && p.whatsapp.block_updates === true, JSON.stringify(p));
@@ -53,15 +77,30 @@ p = await policy(undefined);
 check('no address at all blocks', p.known_device === false && p.whatsapp.block_updates === true, JSON.stringify(p));
 p = await policy("' OR 1=1 --");
 check('junk blocks', p.known_device === false && p.whatsapp.block_updates === true, JSON.stringify(p));
+{
+  // A database that throws synchronously (a missing binding) must still answer the strict policy.
+  const { handleCompanionPolicy } = await import('../src/companion-api.js');
+  const broken = { DB: { prepare() { throw new Error('D1_ERROR'); } } };
+  const r = await handleCompanionPolicy(new Request('https://w/api/companion/policy?user=10.66.0.3'), broken);
+  const b = await r.json();
+  check('a database error blocks, with a 200 the phone can parse', r.status === 200 && b.known_device === false && b.whatsapp.block_updates === true, JSON.stringify(b));
+}
 
 console.log('\n4. the rules ride along');
 p = await policy('10.66.0.3');
 check('with a version the app can compare', p.rules_version === COMPANION_RULES_VERSION && Number.isInteger(p.rules_version));
 check('and the WhatsApp packages', Array.isArray(p.rules.packages) && p.rules.packages.includes('com.whatsapp'));
-check('every rule pattern compiles as a Java-compatible regex', (() => {
+check('every rule pattern is a regex both engines read the same way', (() => {
+  // The phone compiles these with java.util.regex; this test has only V8. The two agree on the
+  // plain subset, so anything outside it is refused here: no lookbehind, no named groups, no
+  // \\p classes, no inline flags, no {,n}, no possessive or atomic groups, no \\Z \\z \\A \\G \\h \\R.
+  const divergent = /\(\?<[=!]|\(\?<[a-zA-Z]|\\[pPkGZzAhRXbB]\{?|\(\?[a-zA-Z-]+[:)]|\{,|\*\+|\+\+|\?\+|\(\?>|\\Q|\\E/;
   for (const key of ['channel_activities', 'updates_view_ids', 'updates_texts', 'home_texts', 'conversation_texts']) {
     for (const r of p.rules[key]) {
-      if (r.regex) new RegExp(r.regex, 'iu');
+      if (r.regex) {
+        if (divergent.test(r.regex)) throw new Error(`${key}: "${r.regex}" uses syntax Java and JS read differently`);
+        new RegExp(r.regex, 'i'); new RegExp(r.regex, 'iu');
+      }
       if (!r.regex && !r.contains) throw new Error(`${key}: a rule with neither regex nor contains`);
     }
   }
@@ -78,6 +117,12 @@ console.log('\n5. the APK carries the same rules');
   const raw = JSON.parse(readFileSync(new URL('../companion/app/src/main/res/raw/guard_rules.json', import.meta.url), 'utf8'));
   check('res/raw/guard_rules.json matches src/companion-rules.js (run node scripts/build-companion-rules.mjs)',
     raw.rules_version === COMPANION_RULES_VERSION && JSON.stringify(raw.rules) === JSON.stringify(p.rules));
+  // The committed file is what phones already hold. Changed rules with the same version would
+  // never reach them (the phone keeps its copy unless the version is HIGHER).
+  const committed = JSON.parse((await import('node:child_process')).execSync('git show HEAD:companion/app/src/main/res/raw/guard_rules.json', { encoding: 'utf8', cwd: new URL('..', import.meta.url).pathname }));
+  const changed = JSON.stringify(committed.rules) !== JSON.stringify(p.rules);
+  check('a rules change since the last commit comes with a version bump', !changed || COMPANION_RULES_VERSION > committed.rules_version,
+    `rules changed, version ${COMPANION_RULES_VERSION} vs committed ${committed.rules_version}`);
 }
 
 console.log(failures ? `\n${failures} FAILED\n` : '\nAll companion checks passed.\n');

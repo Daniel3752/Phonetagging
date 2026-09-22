@@ -59,6 +59,13 @@ final class PolicyClient {
     static final long REFRESH_MS = 60L * 60L * 1000L;
     /** And sooner after a failure. */
     static final long RETRY_MS = 5L * 60L * 1000L;
+    /**
+     * A cached "allowed" is honoured only this long after the answer that carried it. Past that,
+     * with no fresh answer, the guard blocks: a phone moved to a stricter rung while the Worker
+     * was unreachable must not keep the feed open on an old answer. (A phone whose tunnel is
+     * down has no WhatsApp either, so this only ever bites when the Worker itself is down.)
+     */
+    static final long ALLOW_MAX_AGE_MS = 3L * 60L * 60L * 1000L;
 
     private static final int CONNECT_TIMEOUT_MS = 10_000;
     private static final int READ_TIMEOUT_MS = 15_000;
@@ -82,11 +89,17 @@ final class PolicyClient {
     // ----------------------------------------------------------------------------------
     // What the guard reads. Cheap, any thread.
 
-    /** Block WhatsApp's Updates tab and channels on this phone? Defaults to true until told otherwise. */
+    /**
+     * Block WhatsApp's Updates tab and channels on this phone? True until told otherwise, and
+     * true again once an "allowed" answer is older than {@link #ALLOW_MAX_AGE_MS}.
+     */
     static boolean blockWhatsappUpdates(Context context) {
-        return context.getApplicationContext()
-                .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                .getBoolean(KEY_BLOCK_UPDATES, true);
+        SharedPreferences prefs = context.getApplicationContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        if (prefs.getBoolean(KEY_BLOCK_UPDATES, true)) {
+            return true;
+        }
+        long age = System.currentTimeMillis() - prefs.getLong(KEY_FETCHED_AT, 0L);
+        return age < 0 || age > ALLOW_MAX_AGE_MS;
     }
 
     /** The served rules if any were ever received, else null (the caller falls back to the APK's copy). */

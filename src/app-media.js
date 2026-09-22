@@ -90,8 +90,10 @@ const mediaLabel = `(${alt(SPOTIFY_MEDIA_LABELS)}|([a-z0-9]+-)*(${words})(-[a-z0
 const akamai = `(([a-z0-9]+-)*(${words})(-[a-z0-9]+)*-spotify-com\\.akamaized\\.net)`;
 
 // POSIX ERE, case-insensitive, anchored: what squid's ssl::server_name_regex gets, verbatim.
+// The optional trailing dot: normalizeHost strips one for the Worker, and squid must agree with
+// the Worker on an SNI written as an FQDN (RFC 6066 forbids it, clients do it anyway).
 export const SQUID_APP_MEDIA_REGEX =
-  `^((${mediaLabel}\\.(${dom}))|${akamai}|play-lh\\.googleusercontent\\.com)$`;
+  `^((${mediaLabel}\\.(${dom}))|${akamai}|play-lh\\.googleusercontent\\.com)\\.?$`;
 export const SQUID_APP_KEEP_REGEX =
   `^((${alt(SPOTIFY_KEEP_LABELS)})\\.|(${alt(SPOTIFY_KEEP_PREFIXES)})[a-z0-9-]*\\.)`;
 

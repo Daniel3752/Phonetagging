@@ -116,9 +116,13 @@ interface — only the VPN's (`tun0`/`wg0`), never Wi-Fi's, so a router that han
 proxy uses) and asks the Worker
 `GET /api/companion/policy?user=<address>`. The answer follows the rung: `whatsappUpdates` in
 `src/levels.js` — closed on yeshiva rungs 1-3 and standard 1-4, open on yeshiva 4 (the rung that
-permits the social apps) and standard 5. It is cached, refreshed hourly and whenever the network
-comes back, and **fails closed**: until the first answer, when the address cannot be read, or for
-a phone the Worker does not know, the tab is closed.
+permits the social apps) and standard 5 — and the shiur lock: inside a shiur window, or under
+"Locked now", it is closed on every rung. The answer carries only two booleans and the rules,
+never the phone's name or rung (the route is public). It is cached, refreshed hourly and whenever
+the network comes back, and **fails closed**: until the first answer, when the address cannot be
+read, for a phone the Worker does not know, and once an "allowed" answer is more than three hours
+old without a refresh (a phone moved to a stricter rung while the Worker was down closes the feed
+by itself), the tab is closed.
 
 **How it recognises the screens** (`GuardRules`, from `src/companion-rules.js`, served in the
 same answer so a WhatsApp release that moves a button is an edit on the Worker, not a rebuild;
