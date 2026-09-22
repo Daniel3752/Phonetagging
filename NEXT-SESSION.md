@@ -744,7 +744,13 @@ test `no_config_vpn`), and only then un-bypass Isaac and unscope the rule.
   and the explicit list always bumped). PROXY.md "Decrypt or pass through". UNPROVEN on a phone.
 - The "Host header forgery" alerts are noise (phone DNS = 10.66.0.1 = the server's resolver).
 - The "Location can be accessed" notice on managed phones = Headwind agent's location permission.
-  Decide once in the configuration's location setting.
+  **DECIDED 2026-09-22: location tracking is NOT wanted. Turn it off.** Nothing in this system uses
+  it — the companion app declares no location permission at all (check its manifest), WireGuard
+  does not report position, and squid keeps no access log by design. It is purely a Headwind agent
+  feature. Turn it off in the Headwind configuration's location setting, and if the notice survives
+  a sync, revoke Location from the agent on the phone (Settings → Apps → Headwind → Permissions).
+  Worth doing rather than ignoring: the boys can see that notice, and a filter that also reports
+  location is a different proposition from one that does not.
 - A second Claude session was working on branch `claude/phone-filter-deployment-review-b9witi`
   (WireGuard work, NEW-PHONE.md). MERGED into this branch on 09-03. After PR #2 merges, that
   session must pull `main`; any further commits on its branch need merging by hand.
