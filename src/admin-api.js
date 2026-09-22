@@ -66,12 +66,16 @@ export async function handleAdmin(request, env, path) {
   switch (`${request.method} ${path}`) {
     // --- read-only views the admin page renders ------------------------------------------------
     case 'GET /api/admin/state': {
-      const [devices, policies, appRules, schedules, settingRows] = await Promise.all([
+      const [devices, policies, appRules, schedules, settingRows, overrides] = await Promise.all([
         all(env, 'SELECT * FROM devices ORDER BY label'),
         all(env, 'SELECT * FROM policies ORDER BY name'),
         all(env, 'SELECT * FROM app_rules ORDER BY policy_id, package_name'),
         all(env, 'SELECT * FROM schedules ORDER BY priority DESC, created_at DESC'),
         all(env, 'SELECT key, value FROM settings').catch(() => []),
+        // Per-phone overrides (migrations/0022). Empty for almost every fleet; shipped with the
+        // state so a phone under test is never a silent one — an override nobody can see is how a
+        // test becomes a permanent, forgotten exception.
+        all(env, 'SELECT * FROM device_overrides').catch(() => []),
       ]);
       const settings = Object.fromEntries(settingRows.map((r) => [r.key, r.value]));
       settings.shiur_lock_mode = normalizeShiurMode(settings.shiur_lock_mode);
@@ -80,7 +84,7 @@ export async function handleAdmin(request, env, path) {
       // `levels` is the standard ladder (kept for anything that reads it); `tags` carries every
       // ladder with its name, keyed by the tag a device stores.
       const tags = Object.values(TAGS).map((t) => ({ id: t.id, name: t.name, levels: t.levels, policyPrefix: t.policyPrefix }));
-      return json({ devices, policies, appRules, schedules, settings, levels: LEVELS, tags });
+      return json({ devices, policies, appRules, schedules, settings, overrides, levels: LEVELS, tags });
     }
 
     case 'GET /api/admin/verdicts':
@@ -285,6 +289,75 @@ export async function handleAdmin(request, env, path) {
         proxy_password: proxyPassword,
         htpasswd: `htpasswd -B -b /etc/squid/passwd ${proxyUser} '${proxyPassword}'`,
       });
+    }
+
+    // --- per-device overrides (the test bench) --------------------------------------------------
+    //
+    // Everything else here is keyed to a RUNG, which is shared by every phone on it, so trying a
+    // change meant trying it on everybody. This writes one device_overrides row (migrations/0022):
+    // the fields it names are answered differently for THAT handset, and every other phone on the
+    // rung is untouched.
+    //
+    // Each field takes true/false to override, or null to stop overriding it. Sending {} with
+    // clear: true removes the row entirely and puts the phone back on its rung.
+    case 'POST /api/admin/device-overrides': {
+      const id = String(body.device_id || body.id || '').trim();
+      if (!id) return json({ error: 'device_id is required' }, 400);
+      const device = await env.DB.prepare('SELECT id, label, level, tag FROM devices WHERE id = ?').bind(id).first();
+      if (!device) return json({ error: `no device ${id}` }, 404);
+
+      if (readSwitch(body.clear)) {
+        await env.DB.prepare('DELETE FROM device_overrides WHERE device_id = ?').bind(id).run();
+        await audit(env, 'operator', 'device_override_cleared', id, `${device.label} back on ${device.tag} rung ${device.level}`);
+        return json({ ok: true, device_id: id, cleared: true });
+      }
+
+      // A tri-state per field: true/false override it, null (or an omitted field) does not. Anything
+      // else is a typo and is refused rather than quietly meaning "no override" — an override that
+      // silently did not apply is the worst outcome for a test.
+      const FIELDS = ['images', 'app_media', 'block_social', 'streaming'];
+      const values = {};
+      for (const f of FIELDS) {
+        const raw = body[f];
+        if (raw === undefined) { values[f] = null; continue; }
+        if (raw === null || raw === '') { values[f] = null; continue; }
+        const on = readSwitch(raw);
+        if (on === null) return json({ error: `${f} must be true, false or null` }, 400);
+        values[f] = on ? 1 : 0;
+      }
+
+      let webMode = null;
+      if (body.web_mode !== undefined && body.web_mode !== null && body.web_mode !== '') {
+        webMode = String(body.web_mode).trim().toLowerCase();
+        if (!['none', 'web', 'blocklist'].includes(webMode)) {
+          return json({ error: "web_mode must be 'none', 'web', 'blocklist' or null" }, 400);
+        }
+      }
+
+      // The APP half: put this phone on another policy's Headwind configuration. Checked against
+      // the policies table so a typo cannot strand the scheduler on a policy that does not exist —
+      // which would make every run report a failure for this device and change nothing.
+      let policyOverride = null;
+      if (body.policy_id !== undefined && body.policy_id !== null && body.policy_id !== '') {
+        policyOverride = String(body.policy_id).trim();
+        const exists = await env.DB.prepare('SELECT id FROM policies WHERE id = ?').bind(policyOverride).first();
+        if (!exists) return json({ error: `no policy ${policyOverride}` }, 400);
+      }
+
+      await env.DB.prepare(`
+        INSERT INTO device_overrides (device_id, images, app_media, block_social, streaming, web_mode, policy_id, note, set_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(device_id) DO UPDATE SET
+          images = excluded.images, app_media = excluded.app_media, block_social = excluded.block_social,
+          streaming = excluded.streaming, web_mode = excluded.web_mode, policy_id = excluded.policy_id,
+          note = excluded.note, set_at = excluded.set_at
+      `).bind(id, values.images, values.app_media, values.block_social, values.streaming,
+        webMode, policyOverride, body.note ? String(body.note).slice(0, 300) : null, Date.now()).run();
+
+      const set = Object.entries({ ...values, web_mode: webMode, policy_id: policyOverride })
+        .filter(([, v]) => v !== null).map(([k, v]) => `${k}=${v}`).join(', ') || '(nothing)';
+      await audit(env, 'operator', 'device_override_set', id, `${device.label}: ${set}`);
+      return json({ ok: true, device_id: id, ...values, web_mode: webMode, policy_id: policyOverride });
     }
 
     // --- schedules ------------------------------------------------------------------------------

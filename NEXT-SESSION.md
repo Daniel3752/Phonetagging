@@ -1,5 +1,191 @@
 # Next session — start here
 
+## AUDIT (2026-09-22): where each open item actually lives, and what was fixed
+
+Asked to trace six things through the filter (yeshiva ladder only — the operator confirmed this
+mid-session), plus a per-phone test bench and the always-on-VPN lockdown. Findings first, then what
+this session changed. **Everything below is code on this branch, inert until `npx wrangler deploy`
+and `npm run db:migrate`.** Nothing on the server or on any phone was touched.
+
+### 1. Netflix on rung 3 — FIXED (both halves), and the cause was structural
+
+Not a bug in a rule; a gap where a rule had never existed. Both halves of the filter let it through:
+
+**The web half.** The yeshiva browser is `webMode: 'blocklist'` — **allow-by-default with no model
+in the request path**. Only four things refuse a site there: the explicit list (level1), the social
+list (level2), a keyword hit on a *search*, and a NEVER already on file. Netflix is none of them, so
+`netflix.com` was simply allowed on every yeshiva rung. This is worth sitting with, because it is
+not only Netflix: **on the yeshiva ladder every site that is not explicit and not social is open.**
+That is the tag's design (it is a blocklist filter, by choice), but it means "rung 3" says far less
+about the web than the rung numbers suggest.
+
+The same answer is what squid asks at the **TLS handshake**, which is the only moment it ever sees
+of a spliced connection — so `ssl_bump splice filter_allows` spliced the Netflix *app's* traffic
+through untouched too. The app worked for the same reason the website did.
+
+**The app half.** `yeshiva_rung_3`'s blocklist is 99 packages — social, dating, explicit-capable,
+other browsers, VPNs, YouTube, Twitch — and **not one streaming service**. No Netflix, Disney+,
+Prime Video, Hulu, Max. Headwind therefore never removed it.
+
+Rungs 1 and 2 are worse, and counter-intuitively so: they are **allowlists**, which sounds stricter
+and is not. `pushPolicyApps` (`src/headwind.js`) only ever issues a REMOVE for a package with an
+explicit `'blocked'` row, and **never removes an app merely for being absent from an allow list**.
+Enforcing an allowlist properly needs `no_install_apps`, which is deliberately not applied. So on
+the two strictest rungs an installed Netflix stayed installed and working. This is the same
+inversion recorded further down for rungs 1-2 in September; it was fixed for the social apps then
+and streaming was never in any bucket.
+
+**Fixed in this session, both halves — they must stay in step, because the app is only gone until
+someone reinstalls it, and the site was always reachable in Chrome regardless:**
+
+- `src/streaming.js` — a pure hostname matcher, same shape as `app-media.js`. Whole registrable
+  domains (the video CDNs live on domains of their own: `nflxvideo.net`, `aiv-cdn.net`), plus exact
+  hosts where the domain must keep working (`tv.apple.com`, never `apple.com`). ISP domains that
+  also sell television (Partner, Cellcom, HOT) are deliberately **not** listed — that would take the
+  phone bill with it. Only their TV-specific hosts.
+- `streaming: false` on all four yeshiva rungs in `src/levels.js`; `streaming: true` on every
+  standard rung, which is left to its model as before (it rates a streaming service ~4 and so
+  already keeps it out of standard rungs 2-3).
+- Step 0c in `src/proxy-api.js`, ahead of the no-web check because it is an app decision as much as
+  a browser one, and host-scoped so it holds at the handshake.
+- `migrations/0023_yeshiva_streaming_block.sql` — 26 packages × 4 rungs, additive and re-runnable,
+  leaving each rung's existing 99 rules alone. The bucket is in `scripts/build-yeshiva-seed.mjs`
+  (which also regenerates 0016), so the generator stays the source of truth.
+
+**Rung 4 is included on purpose** and is the debatable call. It is the rung that permits the social
+apps, so the obvious home for these was the social bucket next to YouTube; they are a different
+thing in that a streaming service's entire product is filmed drama rather than a feed that can
+carry it. To reverse: delete its rows in 0023, drop `STREAMING` from the rung-4 bucket in the
+generator, and set `streaming: true` on rung 4 in `levels.js`.
+
+**Several Israeli package names are guesses** (marked CONFIRM). A wrong one is harmless — nothing to
+remove — but reconcile them against Headwind's installed-apps list on a real phone.
+
+### 2. Testing on one phone — BUILT
+
+There was no way to do this, and one near-miss that shows the shape of the problem:
+`devices.allow_youtube`, a single hard-coded boolean that swaps yeshiva rung 3 onto a second policy.
+The right idea, built once, for one app. Everything else is keyed to a **rung**, which is shared, and
+`POST /api/admin/devices` actively **refuses** a `policy_id` that does not match the one derived from
+(tag, rung) — so a phone could not be pointed anywhere of its own.
+
+Generalized into `device_overrides` (`migrations/0022`): one row per phone, every field nullable,
+NULL meaning "use the rung's answer". A phone with no row behaves exactly as before, so the table is
+empty on arrival and changes nothing until someone writes to it.
+
+```
+curl -X POST .../api/admin/device-overrides -H "Authorization: Bearer $OPERATOR_KEY" \
+  -d '{"device_id":"isaac","app_media":false,"note":"spotify artwork test"}'
+curl ... -d '{"device_id":"isaac","clear":true}'      # back on the rung
+```
+
+Overridable: `images`, `app_media`, `block_social`, `streaming`, `web_mode`, and `policy_id` (the app
+half — another policy's Headwind configuration for this handset only). A corrupt or unrecognised
+value falls back to the rung, never to "open". Overrides ride along in `GET /api/admin/state`, so a
+phone under test is never a silent exception. **Caveat:** setting `policy_id` means a schedule whose
+`base_policy_id` names the phone's original policy stops matching it; the shiur windows are written
+as `tag:yeshiva` and are unaffected, which is the common case.
+
+### 3. Chrome images still visible — most likely cause identified, NOT fixed (needs the panel)
+
+Every yeshiva rung has `images: false`, and the mechanism is: Chrome is pointed at squid's **browser
+port 3128**, where everything is bumped, and the helper then denies image requests
+(`strip_images`). Stripping only ever happens on a **decrypted** request —
+`allow and not handshake and entry['strip']` in `squid-acl-helper.py`. If Chrome is not on 3128 its
+traffic takes the intercept path, approved hosts are **spliced**, nothing is decrypted, and **no
+image is ever stripped**.
+
+Chrome is put on 3128 by a Headwind *managed app setting* (`ProxyMode=fixed_servers`,
+`ProxyServer=10.66.0.1:3128`) that is set **by hand in the panel** — there is no code in this repo
+that pushes it. It is recorded as set on **configuration 4 only** (`yeshiva_rung_2`, the Vortex),
+where pictures were confirmed grey on Wikipedia. Configurations 5/6/7/8 were created later as copies.
+
+**So: open configuration 5 (`yeshiva_rung_3`) in Headwind and check whether those two Chrome
+settings are present.** If they are missing, that is the whole answer. Confirm from the phone with
+`chrome://policy`, and from the server with
+`tail -f /var/log/squid/access.log | grep <tunnel-ip>` — `HIER_DIRECT` is the browser port,
+`ORIGINAL_DST` is the intercept path. Seeing `ORIGINAL_DST` for Chrome traffic confirms it.
+
+Separately and already known: Google embeds result thumbnails **in the results page itself**, so no
+image stripping can touch them. `udm=14` is the answer and is already enforced.
+
+### 4. Ads in apps — NOT BUILT, nothing exists
+
+There is no ad blocking anywhere in the system. `sync-blocklists.sh` pulls exactly two lists,
+level1 (explicit) and level2 (social), from the private `shmiras-blocklists` repo.
+
+The good news is that the mechanism is already proven: **a hostname is visible at the TLS handshake
+even for a pinned, spliced app**, which is exactly how Spotify's artwork is refused. An ad-domain
+list can be blocked the same way, for apps as well as the browser, with nothing installed on the
+phone. Cheapest route: add a `level3.json` (ads) to the blocklist repo, load it in the helper beside
+the other two, and gate it on a per-rung flag the way `streaming` now is. Expect breakage in
+ad-funded apps, so put it behind a `device_overrides` row on one phone first — which is now possible.
+
+### 5. WhatsApp Channels/Status — CONFIRMED IMPOSSIBLE at the network layer
+
+Worth closing rather than re-investigating. WhatsApp serves Channels, Status and ordinary chat from
+the **same endpoints behind certificate pinning**, and `.whatsapp.net`/`.whatsapp.com` are both
+pre-auth exempt and spliced precisely so the app keeps working. The proxy cannot see inside, so it
+cannot tell a Status view from a message. The only mechanisms that could are an on-device
+**Accessibility service** (large piece of work; the companion app is a watchdog with no such powers)
+or dropping WhatsApp. `README.md` already recorded this; this session re-confirmed it in the code.
+
+### 6. Spotify / in-app images — built, per-rung, and now per-phone
+
+`appMedia: false` on yeshiva rungs 1-3 (rung 4 keeps artwork on purpose). Enforced in squid by the
+`app_media_hosts` SNI regex plus the `app_media_on` src ACL, which `sync-media-on.sh` rewrites from
+`/api/proxy/media-on` — an **allowlist**, so a missing phone or a stale sync means pictures off. That
+endpoint now honours per-device overrides too, so artwork can be toggled on one handset. The open
+empty-playlists bug below is unchanged and is still the first thing to fix.
+
+### 7. Always-on VPN and the WireGuard tunnel — the answer, without blocking installs
+
+The operator's constraint: **must not stop the boys installing apps**, which rules out
+`no_install_apps`. Nothing below needs it.
+
+What is true today: always-on + lockdown is set **by hand in the phone's Settings** (step 18b), and
+whoever holds the phone can walk back into Settings and switch it off. `adb` cannot set it — the
+keys are not writable by the shell user. Headwind has no always-on VPN setting of its own.
+
+The real fix is an Android **Device Owner** API, not a restriction:
+
+```java
+DevicePolicyManager.setAlwaysOnVpnPackage(admin, "com.wireguard.android", /* lockdown */ true);
+```
+
+Set by a Device Owner, the user **cannot** turn it off in Settings — the toggle is greyed out. The
+Device Owner here is the Headwind agent (`com.hmdm.launcher`), and the companion app cannot do it:
+it binds to the agent's plugin API to force a config refresh and holds no device-policy powers, and
+there is only ever one Device Owner. So this needs the agent to make the call — Headwind Community
+is open source, and a patched agent APK is within reach of a project that already builds its own
+companion APK. That is the one durable answer.
+
+Two cheaper things to try first, in this order:
+
+1. **Re-test `no_config_vpn` in the other order.** The test that concluded it kills our own tunnel
+   was run *without* always-on already configured. Set always-on + lockdown first, sync, then apply
+   `no_config_vpn`, and see whether the running tunnel survives while the setting becomes
+   unchangeable. If it does, that is the whole answer for free. (Still open from September.)
+2. **`setUninstallBlocked` on `com.wireguard.android`**, so the app cannot be removed.
+
+On "turning off or deleting the tunnel in WireGuard": with lockdown on, **breaking the tunnel yields
+no internet, not open internet** — confirmed on the Vortex. So it is self-defeating rather than a
+bypass, and the only real hole is turning always-on off in Settings first, which is exactly what the
+Device Owner call closes. WireGuard for Android has no config lock of its own.
+
+**Also still open and load-bearing:** Isaac's phone may still carry
+`iptables -t nat -I PREROUTING -i wg0 -s 10.66.0.3 -j RETURN`, which bypasses squid **entirely** and
+leaves the handset unfiltered no matter what any rung says. Check this before concluding anything
+from a test on that phone — it would mask every fix above. It does not survive a reboot.
+
+### Tests
+
+`npm test` and `npm run test:helper` both green. New: `test/streaming.test.mjs` (30 checks) covering
+the matcher, the rung-3 refusal, that the handshake answer is host-scoped, that the standard ladder
+is untouched, and that an override moves **one** phone while the other on the same rung does not.
+
+---
+
 ## OPEN BUG (2026-09-19): Spotify's catalogue went empty on Isaac's phone
 
 **Symptom, on 10.66.0.3 (Isaac's S22, yeshiva rung 3), right after the proxy was brought up to date

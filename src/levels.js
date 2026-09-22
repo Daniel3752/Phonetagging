@@ -53,12 +53,18 @@ export const NEVER_LEVEL = 6;
 // trade than the pictures are worth at the most open rung. Mirrors
 // level_definitions in the schema — the DB rows are the source of truth for enforcement ids, this is
 // the source of truth for the semantics, and the two are kept in step.
+// streaming: may this rung reach a video streaming service (Netflix, Disney+, Prime Video — see
+// src/streaming.js)? The STANDARD ladder leaves this true on every rung: it has a model in the
+// request path, which already rates a streaming service around 4 and so keeps it out of rungs 2-3
+// by the ordinary rating gate. Turning it off here as well would override that judgement with a
+// hard-coded list, which is not what the standard ladder is for. The yeshiva ladder is the
+// opposite case — see YESHIVA_LEVELS.
 export const LEVELS = [
-  { level: 1, name: 'No browser', webMode: 'none', images: false, textSearch: false, imageSearch: false, blockSocial: true,  appMedia: false },
-  { level: 2, name: 'Text-only',  webMode: 'web',  images: false, textSearch: true,  imageSearch: false, blockSocial: true,  appMedia: false },
-  { level: 3, name: 'Essential',  webMode: 'web',  images: true,  textSearch: true,  imageSearch: true,  blockSocial: true,  appMedia: true  },
-  { level: 4, name: 'General',    webMode: 'web',  images: true,  textSearch: true,  imageSearch: true,  blockSocial: true,  appMedia: true  },
-  { level: 5, name: 'Open',       webMode: 'web',  images: true,  textSearch: true,  imageSearch: true,  blockSocial: false, appMedia: true  },
+  { level: 1, name: 'No browser', webMode: 'none', images: false, textSearch: false, imageSearch: false, blockSocial: true,  appMedia: false, streaming: true },
+  { level: 2, name: 'Text-only',  webMode: 'web',  images: false, textSearch: true,  imageSearch: false, blockSocial: true,  appMedia: false, streaming: true },
+  { level: 3, name: 'Essential',  webMode: 'web',  images: true,  textSearch: true,  imageSearch: true,  blockSocial: true,  appMedia: true,  streaming: true },
+  { level: 4, name: 'General',    webMode: 'web',  images: true,  textSearch: true,  imageSearch: true,  blockSocial: true,  appMedia: true,  streaming: true },
+  { level: 5, name: 'Open',       webMode: 'web',  images: true,  textSearch: true,  imageSearch: true,  blockSocial: false, appMedia: true,  streaming: true },
 ];
 
 // The yeshiva temp tag. The BROWSER is the same on every rung that has one: blocklist-only (the
@@ -86,11 +92,24 @@ export const LEVELS = [
 // needs a splice entry. decrypt: true would instead make the helper force a bump of every
 // approved host for these phones at the TLS handshake — the fallback if the Chrome setting cannot
 // be pushed, at the cost of breaking apps that reject the filter's certificate. Off.
+// streaming: false on EVERY yeshiva rung, rung 4 included. This ladder has no model in the request
+// path — it is allow-by-default, and only the explicit list, the social list, a keyword hit or a
+// NEVER on file refuses anything. A video streaming service is none of those, so netflix.com was
+// reachable on every rung, in Chrome and at the handshake that decides whether the app is spliced:
+// that is how a phone on rung 3 was watching Netflix. There is no rating here to lean on, so the
+// list in src/streaming.js is the whole mechanism.
+//
+// Rung 4 is the debatable one and is deliberately included. It is the rung that permits the social
+// apps, so the question is whether film and television follow them — and they are a different
+// thing: a streaming service's entire product is filmed drama, which is what this ladder exists to
+// keep off the phone, rather than a feed that merely can carry it. To let streaming back in at
+// rung 4, set this true here and drop STREAMING from the rung-4 blocked bucket in
+// scripts/build-yeshiva-seed.mjs; both halves have to agree or the app is gone while the site works.
 export const YESHIVA_LEVELS = [
-  { level: 1, name: 'Apps only',            webMode: 'none',      images: false, textSearch: false, imageSearch: false, blockSocial: true, appMedia: false, appModel: 'allowlist', decrypt: false },
-  { level: 2, name: 'Apps + browser',       webMode: 'blocklist', images: false, textSearch: true,  imageSearch: false, blockSocial: true, appMedia: false, appModel: 'allowlist', decrypt: false, textOnlyGoogle: true },
-  { level: 3, name: 'Blocklist, no social', webMode: 'blocklist', images: false, textSearch: true,  imageSearch: false, blockSocial: true, appMedia: false, appModel: 'blocklist', decrypt: false, textOnlyGoogle: true },
-  { level: 4, name: 'Blocklist',            webMode: 'blocklist', images: false, textSearch: true,  imageSearch: false, blockSocial: true, appMedia: true,  appModel: 'blocklist', decrypt: false, textOnlyGoogle: true },
+  { level: 1, name: 'Apps only',            webMode: 'none',      images: false, textSearch: false, imageSearch: false, blockSocial: true, appMedia: false, streaming: false, appModel: 'allowlist', decrypt: false },
+  { level: 2, name: 'Apps + browser',       webMode: 'blocklist', images: false, textSearch: true,  imageSearch: false, blockSocial: true, appMedia: false, streaming: false, appModel: 'allowlist', decrypt: false, textOnlyGoogle: true },
+  { level: 3, name: 'Blocklist, no social', webMode: 'blocklist', images: false, textSearch: true,  imageSearch: false, blockSocial: true, appMedia: false, streaming: false, appModel: 'blocklist', decrypt: false, textOnlyGoogle: true },
+  { level: 4, name: 'Blocklist',            webMode: 'blocklist', images: false, textSearch: true,  imageSearch: false, blockSocial: true, appMedia: true,  streaming: false, appModel: 'blocklist', decrypt: false, textOnlyGoogle: true },
 ];
 
 // The tags a device can carry, with the ladder each one uses and the app-policy id convention
@@ -119,6 +138,61 @@ export function maxLevelFor(tag) {
 
 export function levelDefinition(level, tag = DEFAULT_TAG) {
   return ladderFor(tag).find((l) => l.level === level) || null;
+}
+
+// --- Per-device overrides (the test bench) ------------------------------------------------------
+//
+// Everything above is keyed to a RUNG, and a rung is shared by every phone on it, so "turn the
+// pictures off and see what breaks" could only be asked of everybody at once. A device_overrides
+// row (migrations/0022) answers for ONE phone and names only the fields it changes.
+//
+// The fields a row may override. Deliberately a closed list: a column nobody reads is a typo, and
+// a field that silently meant something would be worse here than anywhere else. `webMode` is
+// included because turning the browser off for one phone is the quickest way to test a lockdown;
+// the rest are the flags the proxy consults per request.
+const OVERRIDABLE_BOOLEANS = ['images', 'appMedia', 'blockSocial', 'streaming', 'imageSearch', 'textSearch', 'decrypt', 'textOnlyGoogle'];
+const OVERRIDABLE_WEB_MODES = new Set(['none', 'web', 'blocklist']);
+
+// D1 has no boolean type, so these arrive as 0/1 (or null for "no override"). Anything that is not
+// recognisably a 0 or a 1 is treated as NO OVERRIDE — a corrupt row falls back to the rung's own
+// answer, never to "open". Returns undefined when the field should be left alone.
+function overrideBoolean(value) {
+  if (value === null || value === undefined || value === '') return undefined;
+  if (value === true || value === 1 || value === '1') return true;
+  if (value === false || value === 0 || value === '0') return false;
+  return undefined;
+}
+
+// A level definition with this device's overrides applied over it. Pure: returns a new object and
+// never mutates the shared LEVELS/YESHIVA_LEVELS rows, which are module-level and would otherwise
+// leak one phone's test across the whole fleet inside a warm isolate.
+//
+// A null/absent row, or a row whose every field is null, returns the definition unchanged — which
+// is what makes this safe to deploy to a live fleet: the table is empty on arrival.
+export function applyDeviceOverrides(definition, overrides) {
+  if (!definition || !overrides) return definition;
+  const merged = { ...definition };
+  let changed = false;
+
+  for (const field of OVERRIDABLE_BOOLEANS) {
+    // The row stores snake_case (app_media); the definition is camelCase (appMedia). Accept either
+    // so a hand-written row and the admin API agree.
+    const snake = field.replace(/[A-Z]/g, (c) => '_' + c.toLowerCase());
+    const raw = overrides[field] !== undefined ? overrides[field] : overrides[snake];
+    const value = overrideBoolean(raw);
+    if (value !== undefined && merged[field] !== value) {
+      merged[field] = value;
+      changed = true;
+    }
+  }
+
+  const webMode = overrides.webMode ?? overrides.web_mode;
+  if (typeof webMode === 'string' && OVERRIDABLE_WEB_MODES.has(webMode) && merged.webMode !== webMode) {
+    merged.webMode = webMode;
+    changed = true;
+  }
+
+  return changed ? merged : definition;
 }
 
 // Clamps anything that reaches us from a form, an API body or an old row into a usable device rung.

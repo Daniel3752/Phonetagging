@@ -148,6 +148,54 @@ const EXPLICIT = {
   'com.reddit.frontpage.beta': 'Reddit (beta)',
 };
 
+// Video streaming services. Blocked at EVERY yeshiva rung, rung 4 included — the same tier as the
+// explicit bucket and the other browsers rather than the social one.
+//
+// Why every rung. Rung 4 is the rung that permits the social apps, so the obvious place for these
+// would be the SOCIAL bucket alongside YouTube and Twitch. They are a different thing: a streaming
+// service's whole product is filmed drama, which is the content this ladder exists to keep off the
+// phone, rather than a feed that merely can carry it. And rungs 1-2 need the explicit row for a
+// second reason — they are ALLOWLISTS, and Headwind never removes an app merely for being absent
+// from an allow list (headwind.js pushPolicyApps), so without a 'blocked' row the two STRICTEST
+// rungs were the ones leaving Netflix installed and working.
+//
+// The web half of this lives in src/streaming.js and levels.js (`streaming: false`). Both halves
+// have to agree: the app is only gone until it is installed again, and the site was always
+// reachable in Chrome regardless of whether the app was there.
+//
+// CONFIRM entries are best-guess package names, the same convention as the buckets above — a wrong
+// one is harmless (nothing to remove) and should be reconciled against Headwind's installed-apps
+// list on a real phone.
+const STREAMING = {
+  'com.netflix.mediaclient': 'Netflix',
+  'com.netflix.NGPClient': 'Netflix (partner/preload build)',
+  'com.disney.disneyplus': 'Disney+',
+  'com.amazon.avod.thirdpartyclient': 'Prime Video',
+  'com.amazon.amazonvideo.livingroom': 'Prime Video (living room build)',
+  'com.hulu.plus': 'Hulu',
+  'com.wbd.stream': 'Max (HBO)',
+  'com.hbo.hbonow': 'HBO Now (legacy)',
+  'com.cbs.app': 'Paramount+',
+  'com.peacocktv.peacockandroid': 'Peacock',
+  'com.apple.atve.android.appletv': 'Apple TV',
+  'com.google.android.videos': 'Google TV / Play Movies',
+  'com.plexapp.android': 'Plex',
+  'com.crunchyroll.crunchyroid': 'Crunchyroll (CONFIRM package)',
+  'tv.fubo.mobile': 'Fubo (CONFIRM package)',
+  'com.mubi': 'MUBI (CONFIRM package)',
+  'com.vudu.android.app': 'Vudu (CONFIRM package)',
+  'com.mxtech.videoplayer.ad': 'MX Player (its OTT section streams film and TV)',
+  // Israeli television.
+  'com.sting.tv': 'STING TV (CONFIRM package)',
+  'com.yes.yesplus': 'yes+ (CONFIRM package)',
+  'il.co.hot.hotplus': 'HOT (CONFIRM package)',
+  'com.partner.tv': 'Partner TV (CONFIRM package)',
+  'com.cellcom.cellcomtv': 'Cellcom TV (CONFIRM package)',
+  'il.co.mako.mako': 'Mako / Keshet 12 (CONFIRM package)',
+  'com.reshet.tv': 'Reshet 13 (CONFIRM package)',
+  'il.org.kan.kan': 'Kan 11 (CONFIRM package)',
+};
+
 const OTHER_BROWSERS = {
   'com.sec.android.app.sbrowser': 'Samsung Internet',
   'org.mozilla.firefox': 'Firefox',
@@ -220,13 +268,13 @@ const CIRCUMVENTION = {
 // is the one in force — the shiur lock — whatever the phone's rung says.
 const POLICIES = [
   { id: 'yeshiva_rung_1', name: 'Yeshiva — Rung 1 (Apps only)',            app_default: 'blocked', web_mode: null,
-    allowed: { ...ESSENTIALS, ...NECESSITIES }, blocked: {} },
+    allowed: { ...ESSENTIALS, ...NECESSITIES }, blocked: { ...STREAMING } },
   { id: 'yeshiva_rung_2', name: 'Yeshiva — Rung 2 (Apps + browser)',       app_default: 'blocked', web_mode: null,
-    allowed: { ...ESSENTIALS, ...NECESSITIES, ...BROWSER }, blocked: {} },
+    allowed: { ...ESSENTIALS, ...NECESSITIES, ...BROWSER }, blocked: { ...STREAMING } },
   { id: 'yeshiva_rung_3', name: 'Yeshiva — Rung 3 (Blocklist, no social)', app_default: 'allowed', web_mode: null,
-    allowed: {}, blocked: { ...SOCIAL, ...EXPLICIT, ...OTHER_BROWSERS, ...CIRCUMVENTION } },
+    allowed: {}, blocked: { ...SOCIAL, ...EXPLICIT, ...STREAMING, ...OTHER_BROWSERS, ...CIRCUMVENTION } },
   { id: 'yeshiva_rung_4', name: 'Yeshiva — Rung 4 (Blocklist)',            app_default: 'allowed', web_mode: null,
-    allowed: {}, blocked: { ...EXPLICIT, ...OTHER_BROWSERS, ...CIRCUMVENTION } },
+    allowed: {}, blocked: { ...EXPLICIT, ...STREAMING, ...OTHER_BROWSERS, ...CIRCUMVENTION } },
   // In shiur: only what is needed to be reachable. No browser (web_mode none), no Torah apps
   // either — the point is the phone is not a thing to look at during seder.
   { id: 'yeshiva_shiur',  name: 'Yeshiva — Shiur (locked to essentials)',   app_default: 'blocked', web_mode: 'none',

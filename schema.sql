@@ -120,6 +120,28 @@ CREATE TABLE IF NOT EXISTS devices (
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_devices_proxy_user ON devices (proxy_user);
 
+-- Per-phone overrides of the rung's answer — the test bench. Everything else here is keyed to a
+-- RUNG, which is shared by every phone on it, so trying a change meant trying it on everybody. A
+-- row belongs to one device and overrides only the fields it names; every field is nullable and
+-- NULL means "use the rung's answer", so a phone with no row behaves exactly as it did before.
+--
+-- The 0/1 columns mirror the level definition in levels.js (images, appMedia, blockSocial) and are
+-- read back through a normalizer that treats anything unrecognised as "no override" — a corrupt
+-- row falls back to the rung, never to "open". policy_id is the APP half: it puts this phone on
+-- another policy's Headwind configuration, which is how one handset tries a new app rule.
+-- See migrations/0022_device_overrides.sql for the full reasoning.
+CREATE TABLE IF NOT EXISTS device_overrides (
+  device_id TEXT PRIMARY KEY,
+  images INTEGER,
+  app_media INTEGER,
+  block_social INTEGER,
+  streaming INTEGER,
+  web_mode TEXT,
+  policy_id TEXT,
+  note TEXT,
+  set_at INTEGER
+);
+
 -- A recurring time window that swaps in a different policy. device_id NULL means the schedule
 -- applies to every device whose baseline policy is base_policy_id, so a rule can be written once
 -- for the whole fleet and overridden per device. base_policy_id may instead be `tag:<tag>`
