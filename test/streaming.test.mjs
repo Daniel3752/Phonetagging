@@ -62,6 +62,10 @@ check('Apple TV by exact host', isStreamingHost('tv.apple.com'));
 check('but NOT apple.com itself — the phone needs it', !isStreamingHost('apple.com') && !isStreamingHost('www.apple.com'));
 check('and NOT play.google.com', !isStreamingHost('play.google.com'));
 check('an ordinary site is not streaming', !isStreamingHost('wikipedia.org') && !isStreamingHost('sefaria.org'));
+check('the other video platforms level2 lacks', isStreamingHost('vimeo.com') && isStreamingHost('rumble.com') && isStreamingHost('kick.com'));
+// Twitch lives in the synced social list, which is broader (every rung where blockSocial is true).
+// Repeating it here was duplication, and duplication is how the YouTube gap happened.
+check('Twitch is left to the social list, not duplicated here', !isStreamingHost('twitch.tv'));
 check('junk is not streaming', !isStreamingHost('') && !isStreamingHost(null));
 
 console.log('\n2. yeshiva rung 3: the whole reason this exists');

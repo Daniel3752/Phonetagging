@@ -24,7 +24,14 @@
 // so the whole registrable domain goes, including its video CDNs, which live on domains of their
 // own (nflxvideo.net, aiv-cdn.net) and would otherwise keep serving after the front door closed.
 //
-// WHAT IS DELIBERATELY NOT HERE. An ISP that also sells television (Partner, Cellcom, HOT as a
+// WHAT IS DELIBERATELY NOT HERE — the social list already owns it. The synced level2 list
+// (scripts/sync-blocklists.sh) carries Twitch with its CDNs, and applies wherever blockSocial is
+// true: every yeshiva rung, and standard rungs 1-4. That is strictly broader than this module, so
+// repeating Twitch here was duplication, and duplication is what let YouTube fall between the two
+// halves in the first place. Check level2 before adding an ordinary social or UGC domain here; this
+// module is for what the lists do not carry, or where the rungs genuinely disagree (see YouTube).
+//
+// ALSO NOT HERE. An ISP that also sells television (Partner, Cellcom, HOT as a
 // company) keeps its billing and account pages on the same registrable domain as its TV product.
 // Blocking those would take the phone bill with it, so only TV-specific hosts are listed and the
 // ISP domains are left alone. Likewise apple.com and play.google.com: the store and the account
@@ -50,8 +57,11 @@ const STREAMING_DOMAINS = new Set([
   'peacocktv.com',
   // Plex, Crunchyroll, Mubi, and the other subscription libraries.
   'plex.tv', 'crunchyroll.com', 'mubi.com', 'curiositystream.com', 'vudu.com', 'fubo.tv',
-  // Twitch — already an app-level block in the social bucket; the site needs blocking too.
-  'twitch.tv', 'ttvnw.net',
+  // Other video platforms, which the social list does NOT carry. Blocked on every yeshiva rung,
+  // including rung 4 — note that rung 4 does permit YouTube, so if that concession is meant to
+  // extend to user-video generally, these belong out of this list rather than in it.
+  'vimeo.com', 'dailymotion.com', 'dmcdn.net', 'rumble.com', 'rumble.cloud', 'kick.com',
+  'bitchute.com', 'odysee.com',
   // Israeli television. TV-specific domains only — see the note above about ISP billing pages.
   'sting.tv', 'stingtv.co.il', '13tv.co.il', 'mako.co.il', 'kan.org.il', 'yes.co.il',
 ]);
