@@ -10,10 +10,23 @@ validated but never actually read by the scheduler; that is fixed and tested but
 policy does nothing, which is the whole mechanism for testing on one handset.
 
 1. **Companion 0.1.2 onto Isaac's phone only.** The fleet runs 0.1.1, which dies about two minutes
-   after every start, so nothing is watching for installs. Route: copy configuration 5 in Headwind,
-   create policy `yeshiva_rung_3_test` mapped to it, set Isaac's override `policy_id` to that,
-   upload `companion/releases/shmira-companion-0.1.2.apk` and add it to the test configuration only.
-   Verify, then add it to configuration 5 and clear the override.
+   after every start, so nothing is watching for installs. **It has never been uploaded to Headwind;
+   the built, signed APK is `companion/releases/shmira-companion-0.1.2.apk`.** Route:
+   1. Headwind -> copy configuration 5 -> note the new configuration's id.
+   2. /admin -> Policies -> create `yeshiva_rung_3_test`, mapped to that configuration id.
+      It MUST carry the configuration id, or the scheduler reports the phone failed every run.
+   3. `export OPERATOR_KEY=...`, then `./scripts/test-on-phone.sh devices` for Isaac's device id and
+      `./scripts/test-on-phone.sh set <id> --policy yeshiva_rung_3_test --note "companion 0.1.2"`.
+   4. Headwind -> Applications -> Add -> upload the APK. Add it to the TEST configuration only, with
+      Action: Install, Run after install: on, Run at boot: on, Show icon: off.
+   5. Verify on the handset: the service survives more than ten minutes (0.1.1's whole bug was dying
+      at about two), and a blocklisted app installed from Play is removed in seconds rather than at
+      the next sync.
+   6. Then add it to configuration 5 for the rest of the fleet, and
+      `./scripts/test-on-phone.sh clear <id>`.
+
+   `./scripts/test-on-phone.sh status` lists every phone currently off its rung. Run it before
+   calling the job finished, so a test never becomes a permanent undocumented exception.
 2. **Chrome images.** Check configuration 5 for the Chrome managed settings `ProxyMode=fixed_servers`
    and `ProxyServer=10.66.0.1:3128`. Recorded as present on configuration 4 only. If they are
    missing, that is the whole reason pictures still show, and the fix is entering two settings.
