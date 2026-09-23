@@ -27,9 +27,29 @@ policy does nothing, which is the whole mechanism for testing on one handset.
 
    `./scripts/test-on-phone.sh status` lists every phone currently off its rung. Run it before
    calling the job finished, so a test never becomes a permanent undocumented exception.
-2. **Chrome images.** Check configuration 5 for the Chrome managed settings `ProxyMode=fixed_servers`
-   and `ProxyServer=10.66.0.1:3128`. Recorded as present on configuration 4 only. If they are
-   missing, that is the whole reason pictures still show, and the fix is entering two settings.
+2. **Chrome images — the first hypothesis is WEAKENED, 2026-09-23.** The guess was that
+   configuration 5 lacked the Chrome managed proxy settings, leaving Chrome on the intercept path
+   where nothing is decrypted and so nothing is stripped. The live access log for 10.66.0.3 says
+   otherwise:
+
+   | path | count | meaning |
+   |---|---|---|
+   | `HIER_DIRECT` | 668 | came in on the browser port (3128), decrypted, strippable |
+   | `ORIGINAL_DST` | 6324 | intercept path, spliced, never stripped |
+
+   The 6324 is NOT the problem — that is app traffic, which is supposed to be intercepted. The 668
+   is the finding: **Chrome did reach the browser port**, so the managed setting is present and at
+   least partly working on that phone. So the pictures are getting through for some other reason.
+
+   Next candidates, cheapest first:
+   - **Which pictures?** Google search result thumbnails are embedded IN the results page, so no
+     image stripping can touch them; the answer is the `udm=14` text-only mode, which Google will
+     not serve to a Chrome older than the feature. **Isaac's Chrome version was never confirmed**
+     (the Vortex's was 105, too old). If the pictures are on Google results pages, this is almost
+     certainly it, and the fix is updating Chrome, not the filter.
+   - Ordinary sites' pictures showing would instead mean the strip is not firing — check that the
+     helper negotiates `strip_images` and that the rung really reads `images: false`.
+   - The log has since been deleted (see below), so settling this needs a fresh, brief window.
 3. **The VPN ordering test.** Always-on + lockdown first, sync, THEN `no_config_vpn`. Needs no adb.
    If the tunnel survives while the setting locks, the patched-agent question disappears.
 4. **Location.** The agent policy-granted itself the permission (hence the greyed-out toggle), so
@@ -761,7 +781,11 @@ test stalled on the tunnel (below). See PROXY.md "The bug that blocked every sea
   `bump test_phones` for it; `splice wg_phones` (old splice-by-default) for everyone else. When
   the Vortex passes, replace with the repo's unscoped block (`splice filter_allows` for all).
   Also has `%un %SRC %URI`, `concurrency=64 … queue-size=1024`, `acl worker_sni` + splice.
-- **`access_log` is ON** (`/var/log/squid/access.log`) for debugging. Turn it OFF when done:
+- ~~**`access_log` is ON**~~ — **CLOSED 2026-09-23.** Logging was still on from the September
+  debugging and had accumulated 1.4 MB of two people's browsing. Set back to `access_log none`,
+  squid reconfigured, and the accumulated logs deleted. Anything needing the log from now on wants a
+  short deliberate window, then off again. The original note follows for reference:
+- (historical) **`access_log` is ON** (`/var/log/squid/access.log`) for debugging. Turn it OFF when done:
   `sed -i 's|^access_log /var/log/squid/access.log|access_log none|' /etc/squid/squid.conf && squid -k reconfigure`
 - `debug_options` line was added and removed again (verify: `grep debug_options /etc/squid/squid.conf` → nothing).
 - The live helper is the repo helper PLUS a one-line debug patch that writes
