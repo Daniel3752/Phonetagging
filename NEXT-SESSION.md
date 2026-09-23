@@ -36,8 +36,10 @@ policy does nothing, which is the whole mechanism for testing on one handset.
    the phone is the wrong place to fix it. Look for the configuration's permission-granting setting.
    If Headwind offers none, fold it into the agent patch in (3) — dropping the permission from the
    agent's manifest rides along with the always-on VPN call.
-5. **Isaac's iptables bypass.** Confirm `-i wg0 -s 10.66.0.3 -j RETURN` is gone from the server, or
-   that handset is unfiltered regardless of everything above. Does not survive a reboot.
+5. ~~**Isaac's iptables bypass.**~~ **CONFIRMED GONE 2026-09-23** —
+   `iptables -t nat -L PREROUTING -n | grep RETURN` returns nothing on the live box. Both phones are
+   genuinely filtered, so tests on Isaac's handset mean what they say. This also settles that
+   YouTube and Netflix getting through were real gaps in the filter, not an unfiltered phone.
 
 **Why the phone is safe meanwhile:** the streaming block does not depend on the companion. Even if
 Netflix is reinstalled, the app cannot work — the Worker refuses netflix.com and the video CDNs for
@@ -742,9 +744,18 @@ test stalled on the tunnel (below). See PROXY.md "The bug that blocked every sea
 
 ### Live server state RIGHT NOW (mdm.getshmira.com) — verify, don't assume
 
-- **Isaac's phone (10.66.0.3) BYPASSES squid entirely**: `iptables -t nat -I PREROUTING -i wg0
-  -s 10.66.0.3 -j RETURN`. Unfiltered. Remove with the same command and `-D` when the Vortex
-  passes. The rule does not survive a reboot.
+- ~~**Isaac's phone (10.66.0.3) BYPASSES squid entirely**~~ — **NO LONGER TRUE, verified
+  2026-09-23:** `iptables -t nat -L PREROUTING -n | grep RETURN` returns nothing. The rule never
+  survived a reboot and is gone. Both phones are filtered through squid.
+- **Blocklist sync is HEALTHY, verified 2026-09-23:** level1 carries 24,821 domains, refreshed that
+  morning at 03:17, so the explicit tier is firing. But `level2.json` (social) is only ~2 KB, about
+  thirty domains, and **youtube.com is not in it** — which is exactly why YouTube was reachable in
+  Chrome on rung 3. The yeshiva web tier has no model, so these two lists are the ONLY things that
+  refuse a site: anything absent from both is open whatever the rung says. Instagram, TikTok,
+  Snapchat, Reddit and X are all worth checking against level2 for the same hole. The clean home for
+  ordinary social domains is the shmiras-blocklists repo, which syncs nightly by itself; code
+  matchers (src/streaming.js) belong only where the rungs genuinely disagree, as they do for
+  YouTube.
 - `/etc/squid/squid.conf` differs from the repo in one intended way: the ssl_bump block is
   SCOPED — `acl test_phones src 10.66.0.4` (the Vortex); `splice test_phones filter_allows` /
   `bump test_phones` for it; `splice wg_phones` (old splice-by-default) for everyone else. When
