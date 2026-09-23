@@ -136,6 +136,7 @@ CREATE TABLE IF NOT EXISTS device_overrides (
   app_media INTEGER,
   block_social INTEGER,
   streaming INTEGER,
+  youtube INTEGER,
   web_mode TEXT,
   policy_id TEXT,
   note TEXT,

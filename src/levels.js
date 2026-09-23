@@ -60,11 +60,11 @@ export const NEVER_LEVEL = 6;
 // hard-coded list, which is not what the standard ladder is for. The yeshiva ladder is the
 // opposite case — see YESHIVA_LEVELS.
 export const LEVELS = [
-  { level: 1, name: 'No browser', webMode: 'none', images: false, textSearch: false, imageSearch: false, blockSocial: true,  appMedia: false, streaming: true },
-  { level: 2, name: 'Text-only',  webMode: 'web',  images: false, textSearch: true,  imageSearch: false, blockSocial: true,  appMedia: false, streaming: true },
-  { level: 3, name: 'Essential',  webMode: 'web',  images: true,  textSearch: true,  imageSearch: true,  blockSocial: true,  appMedia: true,  streaming: true },
-  { level: 4, name: 'General',    webMode: 'web',  images: true,  textSearch: true,  imageSearch: true,  blockSocial: true,  appMedia: true,  streaming: true },
-  { level: 5, name: 'Open',       webMode: 'web',  images: true,  textSearch: true,  imageSearch: true,  blockSocial: false, appMedia: true,  streaming: true },
+  { level: 1, name: 'No browser', webMode: 'none', images: false, textSearch: false, imageSearch: false, blockSocial: true,  appMedia: false, streaming: true, youtube: true },
+  { level: 2, name: 'Text-only',  webMode: 'web',  images: false, textSearch: true,  imageSearch: false, blockSocial: true,  appMedia: false, streaming: true, youtube: true },
+  { level: 3, name: 'Essential',  webMode: 'web',  images: true,  textSearch: true,  imageSearch: true,  blockSocial: true,  appMedia: true,  streaming: true, youtube: true },
+  { level: 4, name: 'General',    webMode: 'web',  images: true,  textSearch: true,  imageSearch: true,  blockSocial: true,  appMedia: true,  streaming: true, youtube: true },
+  { level: 5, name: 'Open',       webMode: 'web',  images: true,  textSearch: true,  imageSearch: true,  blockSocial: false, appMedia: true,  streaming: true, youtube: true },
 ];
 
 // The yeshiva temp tag. The BROWSER is the same on every rung that has one: blocklist-only (the
@@ -106,10 +106,10 @@ export const LEVELS = [
 // rung 4, set this true here and drop STREAMING from the rung-4 blocked bucket in
 // scripts/build-yeshiva-seed.mjs; both halves have to agree or the app is gone while the site works.
 export const YESHIVA_LEVELS = [
-  { level: 1, name: 'Apps only',            webMode: 'none',      images: false, textSearch: false, imageSearch: false, blockSocial: true, appMedia: false, streaming: false, appModel: 'allowlist', decrypt: false },
-  { level: 2, name: 'Apps + browser',       webMode: 'blocklist', images: false, textSearch: true,  imageSearch: false, blockSocial: true, appMedia: false, streaming: false, appModel: 'allowlist', decrypt: false, textOnlyGoogle: true },
-  { level: 3, name: 'Blocklist, no social', webMode: 'blocklist', images: false, textSearch: true,  imageSearch: false, blockSocial: true, appMedia: false, streaming: false, appModel: 'blocklist', decrypt: false, textOnlyGoogle: true },
-  { level: 4, name: 'Blocklist',            webMode: 'blocklist', images: false, textSearch: true,  imageSearch: false, blockSocial: true, appMedia: true,  streaming: false, appModel: 'blocklist', decrypt: false, textOnlyGoogle: true },
+  { level: 1, name: 'Apps only',            webMode: 'none',      images: false, textSearch: false, imageSearch: false, blockSocial: true, appMedia: false, streaming: false, youtube: false, appModel: 'allowlist', decrypt: false },
+  { level: 2, name: 'Apps + browser',       webMode: 'blocklist', images: false, textSearch: true,  imageSearch: false, blockSocial: true, appMedia: false, streaming: false, youtube: false, appModel: 'allowlist', decrypt: false, textOnlyGoogle: true },
+  { level: 3, name: 'Blocklist, no social', webMode: 'blocklist', images: false, textSearch: true,  imageSearch: false, blockSocial: true, appMedia: false, streaming: false, youtube: false, appModel: 'blocklist', decrypt: false, textOnlyGoogle: true },
+  { level: 4, name: 'Blocklist',            webMode: 'blocklist', images: false, textSearch: true,  imageSearch: false, blockSocial: true, appMedia: true,  streaming: false, youtube: true,  appModel: 'blocklist', decrypt: false, textOnlyGoogle: true },
 ];
 
 // The tags a device can carry, with the ladder each one uses and the app-policy id convention
@@ -150,7 +150,7 @@ export function levelDefinition(level, tag = DEFAULT_TAG) {
 // a field that silently meant something would be worse here than anywhere else. `webMode` is
 // included because turning the browser off for one phone is the quickest way to test a lockdown;
 // the rest are the flags the proxy consults per request.
-const OVERRIDABLE_BOOLEANS = ['images', 'appMedia', 'blockSocial', 'streaming', 'imageSearch', 'textSearch', 'decrypt', 'textOnlyGoogle'];
+const OVERRIDABLE_BOOLEANS = ['images', 'appMedia', 'blockSocial', 'streaming', 'youtube', 'imageSearch', 'textSearch', 'decrypt', 'textOnlyGoogle'];
 const OVERRIDABLE_WEB_MODES = new Set(['none', 'web', 'blocklist']);
 
 // D1 has no boolean type, so these arrive as 0/1 (or null for "no override"). Anything that is not

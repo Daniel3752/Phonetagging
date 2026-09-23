@@ -57,11 +57,49 @@ const STREAMING_DOMAINS = new Set([
 ]);
 
 // Exact hostnames, where the registrable domain itself must keep working. tv.apple.com is Apple TV+
-// while apple.com is the account and the phone's own services; the same reasoning for Google TV.
+// while apple.com is the account and the phone's own services.
 const STREAMING_HOSTS = new Set([
   'tv.apple.com',
-  'tv.youtube.com',
 ]);
+
+// --- YouTube, which is its own question ----------------------------------------------------------
+//
+// YouTube is a streaming service, but it is NOT in the lists above, because the rungs disagree about
+// it in a way they do not about Netflix. The yeshiva app blocklist puts YouTube in the SOCIAL bucket:
+// blocked on rungs 1-3, permitted on rung 4 (the rung that allows the social apps). And rung 3 has a
+// per-phone exception, `devices.allow_youtube`, which puts one boy on `yeshiva_rung_3_yt` — rung 3
+// with the official app left installed. A flat block would override both of those decisions.
+//
+// So it gets its own flag (`youtube` in levels.js) and its own matcher, and the proxy consults the
+// per-phone exception before applying it.
+//
+// googlevideo.com is where the video bytes actually come from, so it matters more than youtube.com:
+// without it the page loads and nothing plays. It is effectively YouTube-only — Google's other media
+// lives on googleusercontent.com — but it is the one entry here worth re-checking if something
+// unrelated breaks.
+const YOUTUBE_DOMAINS = new Set([
+  'youtube.com', 'youtu.be', 'youtube-nocookie.com',
+  'ytimg.com',        // thumbnails and page assets
+  'googlevideo.com',  // the video CDN: the actual playback bytes
+]);
+
+// Exact hosts on domains that must otherwise keep working. Reachable from Chrome, which is bumped on
+// the browser port; an APP's call to googleapis is pre-auth exempt and spliced (see squid.conf), so
+// this line holds for the browser and is best-effort for the app.
+const YOUTUBE_HOSTS = new Set([
+  'youtubei.googleapis.com',
+]);
+
+// True when this hostname belongs to YouTube.
+export function isYoutubeHost(hostname) {
+  const h = normalizeHost(hostname);
+  if (!h) return false;
+  if (YOUTUBE_HOSTS.has(h)) return true;
+  for (const domain of YOUTUBE_DOMAINS) {
+    if (h === domain || h.endsWith(`.${domain}`)) return true;
+  }
+  return false;
+}
 
 // True when this hostname belongs to a video streaming service.
 export function isStreamingHost(hostname) {

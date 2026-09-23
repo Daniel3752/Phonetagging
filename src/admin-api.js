@@ -315,7 +315,7 @@ export async function handleAdmin(request, env, path) {
       // A tri-state per field: true/false override it, null (or an omitted field) does not. Anything
       // else is a typo and is refused rather than quietly meaning "no override" — an override that
       // silently did not apply is the worst outcome for a test.
-      const FIELDS = ['images', 'app_media', 'block_social', 'streaming'];
+      const FIELDS = ['images', 'app_media', 'block_social', 'streaming', 'youtube'];
       const values = {};
       for (const f of FIELDS) {
         const raw = body[f];
@@ -345,13 +345,13 @@ export async function handleAdmin(request, env, path) {
       }
 
       await env.DB.prepare(`
-        INSERT INTO device_overrides (device_id, images, app_media, block_social, streaming, web_mode, policy_id, note, set_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO device_overrides (device_id, images, app_media, block_social, streaming, youtube, web_mode, policy_id, note, set_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(device_id) DO UPDATE SET
           images = excluded.images, app_media = excluded.app_media, block_social = excluded.block_social,
-          streaming = excluded.streaming, web_mode = excluded.web_mode, policy_id = excluded.policy_id,
-          note = excluded.note, set_at = excluded.set_at
-      `).bind(id, values.images, values.app_media, values.block_social, values.streaming,
+          streaming = excluded.streaming, youtube = excluded.youtube, web_mode = excluded.web_mode,
+          policy_id = excluded.policy_id, note = excluded.note, set_at = excluded.set_at
+      `).bind(id, values.images, values.app_media, values.block_social, values.streaming, values.youtube,
         webMode, policyOverride, body.note ? String(body.note).slice(0, 300) : null, Date.now()).run();
 
       const set = Object.entries({ ...values, web_mode: webMode, policy_id: policyOverride })

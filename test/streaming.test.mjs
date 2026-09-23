@@ -14,7 +14,7 @@
 // No network and no model: a blocklist rung must never call the model, and that is counted.
 
 import { handleProxyCheck, handleMediaOnList } from '../src/proxy-api.js';
-import { isStreamingHost } from '../src/streaming.js';
+import { isStreamingHost, isYoutubeHost } from '../src/streaming.js';
 import { applyDeviceOverrides, levelDefinition } from '../src/levels.js';
 import { makeDB } from './d1-shim.mjs';
 
@@ -115,6 +115,43 @@ out = await (await proxyCheck('10.66.0.3', 'https://en.wikipedia.org/')).json();
 check('web_mode none takes the browser away from that phone alone', out.allow === false && out.action === 'no_web', JSON.stringify(out));
 out = await (await proxyCheck('10.66.0.5', 'https://en.wikipedia.org/')).json();
 check('and the other phone still browses', out.allow === true, JSON.stringify(out));
+
+console.log('\n6b. YouTube, which the rungs disagree about');
+check('youtube.com and youtu.be', isYoutubeHost('www.youtube.com') && isYoutubeHost('youtu.be'));
+check('the video CDN, which is what actually plays', isYoutubeHost('r1---sn-abc.googlevideo.com'));
+check('but NOT google.com or the account media', !isYoutubeHost('google.com') && !isYoutubeHost('lh3.googleusercontent.com'));
+check('YouTube is NOT in the streaming list (it has its own flag)', !isStreamingHost('youtube.com'));
+
+// Isaac's row still carries web_mode none from section 6; clear the whole override first.
+await DB.prepare(`DELETE FROM device_overrides WHERE device_id = 'isaac'`).run();
+out = await (await proxyCheck('10.66.0.3', 'https://www.youtube.com/watch?v=x')).json();
+check('yeshiva rung 3 refuses youtube.com', out.allow === false && out.action === 'blocked', JSON.stringify(out));
+out = await (await proxyCheck('10.66.0.3', 'https://r1---sn-abc.googlevideo.com/videoplayback')).json();
+check('and the video CDN, so nothing plays', out.allow === false, JSON.stringify(out));
+
+// The per-phone exception must reach the WEB too, or the site is refused on the very phone that
+// was granted the app.
+await DB.prepare(`UPDATE devices SET allow_youtube = 1 WHERE id = 'isaac'`).run();
+out = await (await proxyCheck('10.66.0.3', 'https://www.youtube.com/')).json();
+check('allow_youtube lets that phone reach youtube.com', out.allow === true, JSON.stringify(out));
+out = await (await proxyCheck('10.66.0.5', 'https://www.youtube.com/')).json();
+check('while the other rung-3 phone is still refused', out.allow === false, JSON.stringify(out));
+out = await (await proxyCheck('10.66.0.3', 'https://www.netflix.com/')).json();
+check('and allow_youtube does NOT open Netflix', out.allow === false, JSON.stringify(out));
+
+// Scoped to rung 3: the flag is remembered on other rungs but must not act there.
+await DB.prepare(`UPDATE devices SET level = 2 WHERE id = 'isaac'`).run();
+out = await (await proxyCheck('10.66.0.3', 'https://www.youtube.com/')).json();
+check('the flag is inert on rung 2', out.allow === false, JSON.stringify(out));
+await DB.prepare(`UPDATE devices SET level = 3, allow_youtube = 0 WHERE id = 'isaac'`).run();
+
+// Rung 4 permits the social apps, YouTube among them, so the site follows.
+await DB.prepare(`UPDATE devices SET level = 4, policy_id = 'yeshiva_rung_4' WHERE id = 'other'`).run();
+out = await (await proxyCheck('10.66.0.5', 'https://www.youtube.com/')).json();
+check('yeshiva rung 4 allows youtube.com, matching its app blocklist', out.allow === true, JSON.stringify(out));
+out = await (await proxyCheck('10.66.0.5', 'https://www.netflix.com/')).json();
+check('but rung 4 still refuses Netflix', out.allow === false, JSON.stringify(out));
+await DB.prepare(`UPDATE devices SET level = 3, policy_id = 'yeshiva_rung_3' WHERE id = 'other'`).run();
 
 console.log('\n7. the operator endpoint, so none of this is hand-written SQL');
 const worker = (await import('../src/index.js')).default;
