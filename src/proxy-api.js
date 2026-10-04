@@ -351,6 +351,14 @@ export async function handleProxyCheck(request, env, now = new Date()) {
     return json({ ...base, cache_scope: 'url', allow: true, action: 'allow', hostname, reason: 'Search homepage.' });
   }
 
+  // Operator exception for Yeshiva rung 3. Keep this after the shiur lock and image checks,
+  // and scoped to this ladder/rung rather than changing the shared NFL classification.
+  if (tag === 'yeshiva' && level === 3 &&
+      (hostname === 'nfl.com' || hostname.endsWith('.nfl.com'))) {
+    return json({ ...base, allow: true, action: 'allow', hostname,
+      reason: 'NFL is allowed on Yeshiva rung 3.' });
+  }
+
   // 5. Ordinary site: known verdict, else classify the whole domain inline (standard ladder) or
   //    allow it (blocklist rung — the explicit and social lists were already applied by the helper).
   let verdict = await verdictPromise;

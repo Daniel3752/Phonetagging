@@ -339,3 +339,31 @@ blanking on Android Chrome (deny_info → `/blocked` → SVG; unproven on a devi
 swap by the scheduler (tested against a fake Headwind; never yet seen on the agent), what Headwind
 Remove actually does to a Play app, which stock package names the Vortex actually has, and which
 apps on rungs 3–4 need splice entries.
+
+## Rung 3 access update — October 4, 2026
+
+Yeshiva rung 3 allows `nfl.com` and its subdomains, including when its shared
+classification says blocked. The exception preserves browser image stripping and
+shiur locks. It does not change another rung or the Standard ladder. The current
+upstream explicit/social blocklists do not contain NFL; those lists still apply.
+
+Migration `0022_yeshiva_rung3_temporary_vpn.sql` temporarily allows the VPN/tunnel
+apps previously blocked on both `yeshiva_rung_3` and `yeshiva_rung_3_yt`. Explicit
+allowed rules replace Headwind's existing Remove actions when pushed. Tor Browser,
+DNS changer tools, social apps, and other browser restrictions are unchanged.
+
+Deploy with `npm run db:migrate` and `npm run deploy`, then use **Push apps** for
+both rung-3 policies in `/admin` and sync the phones. The migration alone does not
+update Headwind. A VPN app previously uninstalled must be reinstalled from Play.
+The older seed generator reproduces historical migrations; apply migration 0022
+after any app-rule reseed.
+
+Android's always-on VPN/lockdown is configured separately on each phone. If enabled,
+it still prevents another VPN from connecting: switch off lockdown/always-on for
+the existing tunnel in Android VPN settings to use another VPN. Check that neither
+rung-3 Headwind configuration applies `no_config_vpn`. This phone-side step is not
+performed by the Worker migration. Another active VPN can bypass Shmira filtering.
+
+There is no automatic expiry for this temporary allowance. To revoke it, set the
+same package rules in migration 0022 to `blocked` through a new migration, push both
+policies again, and restore the phone's original tunnel lockdown settings.
