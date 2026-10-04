@@ -7,7 +7,7 @@ import { sha256Hex } from '../src/crypto.js';
 const DB = makeDB('./schema.sql');
 DB._db.exec(readFileSync('migrations/0019_yeshiva_app_rules_refresh.sql', 'utf8'));
 const before = DB._db.prepare("SELECT * FROM app_rules WHERE policy_id <> 'yeshiva_rung_3' ORDER BY policy_id, package_name").all();
-const migration = readFileSync('migrations/0022_yeshiva_rung3_temporary_vpn.sql', 'utf8');
+const migration = readFileSync('migrations/0025_yeshiva_rung3_temporary_vpn.sql', 'utf8');
 DB._db.exec(migration);
 DB._db.exec(migration); // safe to reapply
 assert.deepEqual(DB._db.prepare("SELECT * FROM app_rules WHERE policy_id NOT IN ('yeshiva_rung_3', 'yeshiva_rung_3_yt') ORDER BY policy_id, package_name").all(), before);

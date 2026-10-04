@@ -347,7 +347,7 @@ classification says blocked. The exception preserves browser image stripping and
 shiur locks. It does not change another rung or the Standard ladder. The current
 upstream explicit/social blocklists do not contain NFL; those lists still apply.
 
-Migration `0022_yeshiva_rung3_temporary_vpn.sql` temporarily allows the VPN/tunnel
+Migration `0025_yeshiva_rung3_temporary_vpn.sql` temporarily allows the VPN/tunnel
 apps previously blocked on both `yeshiva_rung_3` and `yeshiva_rung_3_yt`. Explicit
 allowed rules replace Headwind's existing Remove actions when pushed. Tor Browser,
 DNS changer tools, social apps, and other browser restrictions are unchanged.
@@ -355,7 +355,7 @@ DNS changer tools, social apps, and other browser restrictions are unchanged.
 Deploy with `npm run db:migrate` and `npm run deploy`, then use **Push apps** for
 both rung-3 policies in `/admin` and sync the phones. The migration alone does not
 update Headwind. A VPN app previously uninstalled must be reinstalled from Play.
-The older seed generator reproduces historical migrations; apply migration 0022
+The older seed generator reproduces historical migrations; apply migration 0025
 after any app-rule reseed.
 
 Android's always-on VPN/lockdown is configured separately on each phone. If enabled,
@@ -365,5 +365,5 @@ rung-3 Headwind configuration applies `no_config_vpn`. This phone-side step is n
 performed by the Worker migration. Another active VPN can bypass Shmira filtering.
 
 There is no automatic expiry for this temporary allowance. To revoke it, set the
-same package rules in migration 0022 to `blocked` through a new migration, push both
+same package rules in migration 0025 to `blocked` through a new migration, push both
 policies again, and restore the phone's original tunnel lockdown settings.

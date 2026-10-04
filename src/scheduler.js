@@ -17,21 +17,44 @@ import { resolveEffectivePolicy } from './policy.js';
 import { setDeviceConfiguration } from './headwind.js';
 
 export async function runScheduler(env, now = new Date()) {
-  const [devices, schedules, policies, shiurMode] = await Promise.all([
+  const [devices, schedules, policies, shiurMode, overrides] = await Promise.all([
     env.DB.prepare('SELECT * FROM devices').all().then((r) => r.results || []),
     env.DB.prepare('SELECT * FROM schedules').all().then((r) => r.results || []),
     env.DB.prepare('SELECT * FROM policies').all().then((r) => r.results || []),
     // The shiur lock toggle. A missing row (or a database without the table yet) is 'schedule'.
     env.DB.prepare(`SELECT value FROM settings WHERE key = 'shiur_lock_mode'`).first()
       .then((r) => r?.value).catch(() => undefined),
+    // Per-phone overrides (migrations/0022). Only policy_id concerns the scheduler — the rest are
+    // web-tier flags the proxy reads per request. Caught rather than thrown so a database that has
+    // not taken the migration yet still runs the fleet.
+    env.DB.prepare('SELECT device_id, policy_id FROM device_overrides WHERE policy_id IS NOT NULL')
+      .all().then((r) => r.results || []).catch(() => []),
   ]);
 
   const policyById = new Map(policies.map((p) => [p.id, p]));
+  // device_id -> the policy this ONE phone should be on instead of its rung's. This is the app half
+  // of the test bench: it is how a new app rule, or a new build of the companion, is tried on one
+  // handset without moving a rung that other people's phones are on.
+  const overridePolicyByDevice = new Map(overrides.map((o) => [o.device_id, o.policy_id]));
   const summary = { checked: devices.length, changed: 0, unchanged: 0, failed: 0, errors: [] };
 
   for (const device of devices) {
     try {
-      const { policyId, scheduleId, forced } = resolveEffectivePolicy(device, schedules, now, { shiurMode });
+      // An overridden phone resolves against the policy the override names, as though that were its
+      // baseline. Everything downstream — the schedules, the shiur lock, the idempotence check —
+      // then works unchanged.
+      //
+      // The override is ignored if it names a policy that no longer exists, rather than failing the
+      // device: a deleted test policy must not strand a real phone on an error every five minutes.
+      //
+      // NOTE: a schedule whose base_policy_id names the phone's ORIGINAL policy stops covering it
+      // while an override is in force. The yeshiva shiur windows are written as `tag:yeshiva`, so
+      // they still apply, and a phone under test is still locked for seder.
+      const overridePolicy = overridePolicyByDevice.get(device.id);
+      const overridden = overridePolicy && policyById.has(overridePolicy);
+      const resolvedAgainst = overridden ? { ...device, policy_id: overridePolicy } : device;
+
+      const { policyId, scheduleId, forced } = resolveEffectivePolicy(resolvedAgainst, schedules, now, { shiurMode });
 
       if (policyId === device.last_applied_policy_id) {
         summary.unchanged++;
@@ -56,7 +79,10 @@ export async function runScheduler(env, now = new Date()) {
         .bind(policyId, device.id).run();
 
       await audit(env, 'scheduler', 'policy_applied', device.id,
-        `${device.last_applied_policy_id || '(none)'} -> ${policyId}${scheduleId ? ` via schedule ${scheduleId}` : forced ? ' (shiur lock switched on)' : ' (baseline)'}`);
+        `${device.last_applied_policy_id || '(none)'} -> ${policyId}${scheduleId ? ` via schedule ${scheduleId}` : forced ? ' (shiur lock switched on)' : ' (baseline)'}` +
+        // Say so in the log. A phone that is not on its rung's policy, with nothing recording why,
+        // is how a test becomes a permanent exception nobody can account for later.
+        (overridden ? ` [per-device override: baseline ${overridePolicy}, not ${device.policy_id}]` : ''));
 
       summary.changed++;
     } catch (err) {

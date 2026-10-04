@@ -11,6 +11,13 @@
 // Decision order (first match wins):
 //   0. The phone's EFFECTIVE policy right now (its schedules and the shiur toggle, resolved the
 //      same way the scheduler does) has web_mode 'none' → deny everything: the phone is locked.
+//   0c. A video streaming service (src/streaming.js) on a rung that does not get them → deny. The
+//      yeshiva ladder is allow-by-default with no model, and a streaming service is neither
+//      explicit nor social, so this list is the only thing that refuses one there.
+//   0d. YouTube on a rung that does not get it → deny. Separate from 0c because the rungs disagree
+//      about YouTube: the app blocklist treats it as social (blocked on yeshiva 1-3, allowed on 4),
+//      and rung 3 carries a per-phone exception (devices.allow_youtube) that must be honoured here
+//      too, or the site is refused on the phone that was granted the app.
 //   1. Rung with no web (rung 1 on either ladder) → deny everything.
 //   2. Search URL → judge the QUERY (keyword pre-filter, then model on the standard ladder; keyword
 //      pre-filter and anything on file, NO model, on a blocklist rung). Image search is off on
@@ -36,8 +43,9 @@ import { keywordRating } from './keywords.js';
 import { classifyDomain } from './classify.js';
 import { registrableDomain, normalizeHost } from './domains.js';
 import { appMediaHost } from './app-media.js';
-import { isVisibleAtLevel, levelDefinition, normalizeDeviceLevel, normalizeSiteLevel, normalizeTag, MIN_LEVEL, NEVER_LEVEL, DEFAULT_TAG } from './levels.js';
-import { resolveEffectivePolicy, SHIUR_POLICY_ID } from './policy.js';
+import { isStreamingHost, isYoutubeHost } from './streaming.js';
+import { isVisibleAtLevel, levelDefinition, applyDeviceOverrides, normalizeDeviceLevel, normalizeSiteLevel, normalizeTag, MIN_LEVEL, NEVER_LEVEL, DEFAULT_TAG } from './levels.js';
+import { resolveEffectivePolicy, SHIUR_POLICY_ID, YOUTUBE_TAG, YOUTUBE_RUNG } from './policy.js';
 import { sha256Hex, timingSafeEqual } from './crypto.js';
 
 function json(data, status = 200) {
@@ -70,15 +78,20 @@ async function resolveDevice(env, proxyUser, now) {
   if (!proxyUser) return fallback;
 
   const rows = await env.DB.prepare(`
-    SELECT d.id, d.level, d.tag, d.timezone, d.policy_id, d.shiur_lock, bp.web_mode AS base_web_mode,
+    SELECT d.id, d.level, d.tag, d.timezone, d.policy_id, d.shiur_lock, d.allow_youtube,
+           bp.web_mode AS base_web_mode,
            (SELECT value FROM settings WHERE key = 'shiur_lock_mode') AS shiur_mode,
+           o.images AS o_images, o.app_media AS o_app_media, o.block_social AS o_block_social,
+           o.streaming AS o_streaming, o.youtube AS o_youtube, o.web_mode AS o_web_mode,
+           o.policy_id AS o_policy_id,
            s.id AS s_id, s.device_id AS s_device_id, s.base_policy_id AS s_base_policy_id,
            s.active_policy_id AS s_active_policy_id, s.day_mask AS s_day_mask, s.start_min AS s_start_min,
            s.end_min AS s_end_min, s.priority AS s_priority, s.created_at AS s_created_at,
            ap.web_mode AS s_web_mode
     FROM devices d
-    LEFT JOIN policies bp ON bp.id = d.policy_id
-    LEFT JOIN schedules s ON (s.base_policy_id = d.policy_id OR s.base_policy_id = 'tag:' || d.tag)
+    LEFT JOIN device_overrides o ON o.device_id = d.id
+    LEFT JOIN policies bp ON bp.id = COALESCE(o.policy_id, d.policy_id)
+    LEFT JOIN schedules s ON (s.base_policy_id = COALESCE(o.policy_id, d.policy_id) OR s.base_policy_id = 'tag:' || d.tag)
                          AND (s.device_id IS NULL OR s.device_id = d.id)
     LEFT JOIN policies ap ON ap.id = s.active_policy_id
     WHERE d.proxy_user = ?
@@ -88,8 +101,12 @@ async function resolveDevice(env, proxyUser, now) {
   const row = rows[0];
   const tag = normalizeTag(row.tag);
   const level = normalizeDeviceLevel(row.level, tag);
-  const device = { id: row.id, policy_id: row.policy_id, timezone: row.timezone, tag, shiur_lock: row.shiur_lock };
-  const webModeByPolicy = new Map([[row.policy_id, row.base_web_mode]]);
+  // The baseline follows a per-device policy override, the same way the scheduler resolves it
+  // (src/scheduler.js). If the two disagreed, the phone would be running one configuration's apps
+  // while the proxy judged its web by another's.
+  const baselinePolicyId = row.o_policy_id || row.policy_id;
+  const device = { id: row.id, policy_id: baselinePolicyId, timezone: row.timezone, tag, shiur_lock: row.shiur_lock };
+  const webModeByPolicy = new Map([[baselinePolicyId, row.base_web_mode]]);
   const schedules = [];
   for (const r of rows) {
     if (!r.s_id) continue;
@@ -107,9 +124,25 @@ async function resolveDevice(env, proxyUser, now) {
   // can be deleted (bein hazmanim) — in both cases the map has no row for it and the phone would
   // read as unlocked while the console says locked. The shiur policy means no web by definition.
   const locked = policyId === SHIUR_POLICY_ID || webModeByPolicy.get(policyId) === 'none';
+  // This phone's own overrides, applied over the rung's definition. Absent for almost every phone
+  // (the table is empty until someone puts a handset under test), in which case this returns the
+  // rung's definition unchanged. Applied AFTER the lock is resolved, so an override can loosen the
+  // browser for a test without quietly unlocking a phone that is in a shiur window.
+  let def = applyDeviceOverrides(levelDefinition(level, tag), {
+    images: row.o_images, app_media: row.o_app_media, block_social: row.o_block_social,
+    streaming: row.o_streaming, youtube: row.o_youtube, web_mode: row.o_web_mode,
+  });
+  // The per-phone YouTube exception (devices.allow_youtube, migrations/0020). It already picks the
+  // app policy that leaves the YouTube app installed; without the same answer here the website
+  // would be refused on the very phone that was granted the app, which is incoherent. Scoped
+  // exactly as the app side is — yeshiva rung 3 only — so the flag stays inert everywhere else and
+  // cannot quietly open YouTube on a rung nobody granted it on.
+  if (row.allow_youtube && tag === YOUTUBE_TAG && level === YOUTUBE_RUNG && def && !def.youtube) {
+    def = { ...def, youtube: true };
+  }
   return {
-    level, tag, def: levelDefinition(level, tag), deviceId: row.id, known: true,
-    policyId, locked,
+    level, tag, def, deviceId: row.id, known: true,
+    policyId, locked, overridden: def !== levelDefinition(level, tag),
   };
 }
 
@@ -211,13 +244,21 @@ export async function handleMediaOnList(request, env) {
   const denied = requireProxyKey(request, env);
   if (denied) return denied;
 
-  const rows = await env.DB.prepare('SELECT proxy_user, level, tag FROM devices')
-    .all().then((r) => r.results || []).catch(() => []);
+  // The override join matters here as much as on the request path: turning a pinned app's pictures
+  // on or off for ONE handset is exactly the kind of thing this list decides, and a phone under
+  // test would otherwise be listed by its rung while the proxy answered by its override.
+  const rows = await env.DB.prepare(`
+    SELECT d.proxy_user, d.level, d.tag, o.app_media AS o_app_media
+    FROM devices d LEFT JOIN device_overrides o ON o.device_id = d.id
+  `).all().then((r) => r.results || []).catch(() => []);
 
   const addresses = [];
   for (const row of rows) {
     const tag = normalizeTag(row.tag);
-    const def = levelDefinition(normalizeDeviceLevel(row.level, tag), tag);
+    const def = applyDeviceOverrides(
+      levelDefinition(normalizeDeviceLevel(row.level, tag), tag),
+      { app_media: row.o_app_media }
+    );
     if (!def || !def.appMedia) continue;
     // Only a bare IPv4 address is usable in a squid src ACL. A password-path phone identified by a
     // login name simply is not listed, which leaves it on the safe side.
@@ -288,6 +329,29 @@ export async function handleProxyCheck(request, env, now = new Date()) {
   if (mediaApp) {
     return json({ ...base, cache_scope: 'host', allow: false, action: 'image_blocked', hostname, app: mediaApp,
       reason: `Images inside ${mediaApp} are turned off at this level.` });
+  }
+
+  // 0c. A video streaming service, on a rung that does not get them. Like 0b this is ahead of the
+  //     no-web check, because it is an APP decision as much as a browser one: rung 1 has no browser
+  //     but does have apps, and the Netflix app's hostname is the only thing the proxy ever sees of
+  //     it. Host-scoped and model-free, so it is also the answer at the TLS handshake.
+  //
+  //     This is what the yeshiva ladder had no way to express. Its browser is allow-by-default with
+  //     no model, and a streaming service is neither explicit nor social, so netflix.com was simply
+  //     allowed on every rung — see src/streaming.js. The app half (Headwind removing the app) and
+  //     this half have to agree; the app can be reinstalled, and the site was always reachable.
+  if (def && def.streaming === false && isStreamingHost(hostname)) {
+    return json({ ...base, cache_scope: 'host', allow: false, action: 'blocked', hostname,
+      reason: 'Streaming services are turned off on this phone.' });
+  }
+
+  // 0d. YouTube, on a rung that does not get it. Separate from 0c because the rungs disagree about
+  //     YouTube in a way they do not about Netflix: the app blocklist treats it as SOCIAL (blocked on
+  //     yeshiva 1-3, permitted on 4), and rung 3 has a per-phone exception. resolveDevice has already
+  //     applied that exception to `def.youtube`, so this line just enforces whatever it concluded.
+  if (def && def.youtube === false && isYoutubeHost(hostname)) {
+    return json({ ...base, cache_scope: 'host', allow: false, action: 'blocked', hostname,
+      reason: 'YouTube is turned off on this phone.' });
   }
 
   // 1. Rung 1: no web at all.
