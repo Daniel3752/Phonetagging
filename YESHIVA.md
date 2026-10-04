@@ -2,14 +2,14 @@
 
 A temporary, deliberately simple profile for getting the yeshiva boys' phones started before they
 are migrated onto the standard five-rung ladder. Everything about it is one switch away from the
-standard model: a phone carries `tag = 'yeshiva'` and a rung 1–4; give it `tag = 'standard'` and a
-rung 1–5 and it is migrated. It lives in the same console — https://phone-url-filter.daniel08-madar.workers.dev/admin, **Yeshiva** tab.
+standard model: a phone carries `tag = 'yeshiva'` and a rung 1â€“4; give it `tag = 'standard'` and a
+rung 1â€“5 and it is migrated. It lives in the same console â€” https://phone-url-filter.daniel08-madar.workers.dev/admin, **Yeshiva** tab.
 
 ## The rungs
 
 | Rung | Apps (Headwind) | Browser (proxy) |
 |---|---|---|
-| 1 Apps only | **allowlist** — essentials + necessities; Chrome not on it | none |
+| 1 Apps only | **allowlist** â€” essentials + necessities; Chrome not on it | none |
 | 2 Apps + browser | the same allowlist, **with Chrome** | the yeshiva browser |
 | 3 Blocklist, no social | everything except **social, explicit/dating, other browsers, VPNs** | the yeshiva browser |
 | 4 Blocklist | everything except **explicit/dating, other browsers, VPNs** (social apps allowed) | the yeshiva browser |
@@ -21,7 +21,7 @@ their Google/AOSP/Samsung flavours; reconcile against Headwind's installed-apps 
 **The browser is one profile at every rung that has one**, exactly as specified: "one type, no
 images, no explicit sites, no social media". So rung 4's browser still blocks the social *sites*
 even though the social *apps* are allowed there. If that was not the intent, flip `blockSocial` on
-rung 4 in `YESHIVA_LEVELS` (`src/levels.js`) — one word.
+rung 4 in `YESHIVA_LEVELS` (`src/levels.js`) â€” one word.
 
 ## The yeshiva browser
 
@@ -43,57 +43,57 @@ rung 4 in `YESHIVA_LEVELS` (`src/levels.js`) — one word.
   `appMedia` in `src/levels.js` is where that lives.
   **Enforced in squid, not by the filter helper** (`app_media_hosts` in `scripts/squid.conf`, step 6
   of `apply-yeshiva-squid.sh`): squid matches the host by role with a regex and terminates the
-  connection. Asking the Worker per request was tried first and is unsound at the TLS handshake —
+  connection. Asking the Worker per request was tried first and is unsound at the TLS handshake â€”
   with the helper answering ERR for `image-cdn-fa.spotifycdn.com`, verified by hand with the same
   arguments and the same client address, squid spliced six connections and 182 KB of cover art
   arrived. An external ACL is an asynchronous lookup that squid may not have in hand when it must
   choose splice or bump, so a decision that must not fail open cannot rest on it.
   It stays per-rung all the same, without the helper: `app_media_on` is a `src` ACL read from
   `/etc/squid/app-media-on.txt`, which `scripts/sync-media-on.sh` regenerates every five minutes
-  from `GET /api/proxy/media-on` — the tunnel addresses whose rung has `appMedia` on. A file ACL is
+  from `GET /api/proxy/media-on` â€” the tunnel addresses whose rung has `appMedia` on. A file ACL is
   evaluated synchronously, so there is nothing to race. The list is an **allowlist**: a phone
   missing from it, or a sync that did not run, means pictures blocked rather than open. The cost is
   that a rung change reaches the proxy on the next sync, not instantly.
 - **Search:** allowed, screened by the keyword list (`keyword_rules`) and by anything already on
   file as NEVER from the standard phones; image search off; result thumbnails are images and get
   blanked like everything else. Not model-judged.
-  A keyword hit refuses at **rating 5 or above** — 6 is NEVER (explicit) and 5 is the seed's
-  "immodest" band (bikini, lingerie, swimwear, cleavage, miniskirt …). Until 2026-09-15 only 6
+  A keyword hit refuses at **rating 5 or above** â€” 6 is NEVER (explicit) and 5 is the seed's
+  "immodest" band (bikini, lingerie, swimwear, cleavage, miniskirt â€¦). Until 2026-09-15 only 6
   refused here, which left this tag *looser* than standard rung 4, where a rating-5 query is
   refused. `KEYWORD_REFUSE_LEVEL` in `src/proxy-api.js` is the one place that threshold lives.
-  Every path an engine answers a query on is screened, not just its main results path — video and
-  news searches (`bing /videos/search`, `brave /videos`, `yandex /video/search` …) used to be
+  Every path an engine answers a query on is screened, not just its main results path â€” video and
+  news searches (`bing /videos/search`, `brave /videos`, `yandex /video/search` â€¦) used to be
   unrecognised as searches and were waved through as the engine's homepage with the words never
   seen. `ENGINES` in `src/search.js` is the list; an engine path missing there is a hole.
   Known gap that remains: a text search for explicit material that dodges the keyword list returns
   text results (the sites themselves are then on the explicit list). If that matters before
   migration, the one-line fix is to pass `noModel: false` for blocklist rungs in `proxy-api.js`
-  `rateSearch` — the model then rates every search and NEVER refuses it, at a model call per new
+  `rateSearch` â€” the model then rates every search and NEVER refuses it, at a model call per new
   query.
 - **Only the browser is decrypted; no app is touched.** To blank an image the proxy has to see
   inside the connection, and Squid cannot tell an app's connection from Chrome's by hostname. So
   Chrome gets its own door: Headwind pushes Chrome a managed proxy setting pointing at Squid's
   explicit port through the tunnel (`10.66.0.1:3128`, named `browser` in squid.conf), and
-  everything on that port is bumped. Apps never use it — their traffic takes the intercept path,
+  everything on that port is bumped. Apps never use it â€” their traffic takes the intercept path,
   where approved hosts are spliced exactly as on the standard ladder. **Nothing needs a splice
   entry.** Setup is one Chrome managed configuration in Headwind (below). If the setting is not
   applied, Chrome falls back to the intercept path: still filtered by hostname (both lists, the
-  shiur lock), but images load — so verify it on the phone (chrome://policy shows the values).
+  shiur lock), but images load â€” so verify it on the phone (chrome://policy shows the values).
 
 ### Chrome must be recent, or every Google search is refused
 
 **Google will not serve `udm=14` to a browser older than the feature.** `udm=14` shipped in 2024;
 a phone on, say, Chrome 105 (2022) gets its search answered with a `302` to the *same* search with
 `udm=14` stripped out, which the proxy then correctly refuses. The phone shows the block page on
-every single search and nothing in the setup looks wrong — the policy is right, the URL is right,
+every single search and nothing in the setup looks wrong â€” the policy is right, the URL is right,
 the tunnel is fine.
 
 Proven on the Vortex, 2026-09-15, by changing nothing but the user-agent:
 
 ```
-curl -A '…Chrome/105.0.0.0 Mobile…' 'https://www.google.com/search?q=volcano&udm=14'
+curl -A 'â€¦Chrome/105.0.0.0 Mobileâ€¦' 'https://www.google.com/search?q=volcano&udm=14'
   -> 302  location: https://www.google.com/search?q=volcano      # udm stripped
-curl -A '…Chrome/120.0.0.0 Mobile…' 'https://www.google.com/search?q=volcano&udm=14'
+curl -A 'â€¦Chrome/120.0.0.0 Mobileâ€¦' 'https://www.google.com/search?q=volcano&udm=14'
   -> 200
 ```
 
@@ -102,7 +102,7 @@ as part of setting a phone up. `chrome://version` on the phone, or read the `Use
 squid header dump. This is the first thing to rule out when "every search is blocked".
 
 Things that are NOT the cause, all eliminated on that phone: the other search parameters (`hl`,
-`gl`, `safe` — Google strips `udm` whatever they are), cookies, being signed in to a Google
+`gl`, `safe` â€” Google strips `udm` whatever they are), cookies, being signed in to a Google
 account, `Via` / `X-Forwarded-For` (both already off), HTTP/1.1 versus HTTP/2, and every Chrome
 request header.
 
@@ -117,12 +117,12 @@ one of its own rather than being a flag the phone carries alone.
 
 | Policy | Headwind configuration | allowed | blocked |
 |---|---|---|---|
-| `yeshiva_rung_1` | 6 — Rung 1 | 69 | 100 (adds Chrome: no browser on this rung) |
-| `yeshiva_rung_2` | 4 — Rung 2 | 70 | 99 |
-| `yeshiva_rung_3` | 5 — Rung 3 | — | 99 |
-| `yeshiva_rung_3_yt` | 8 — Rung 3 WYT | — | 98 (YouTube not removed) |
-| `yeshiva_rung_4` | 7 — Rung 4 | — | 75 (social apps permitted) |
-| `yeshiva_shiur` | **deliberately unmapped** | 17 | — |
+| `yeshiva_rung_1` | 6 â€” Rung 1 | 69 | 100 (adds Chrome: no browser on this rung) |
+| `yeshiva_rung_2` | 4 â€” Rung 2 | 70 | 99 |
+| `yeshiva_rung_3` | 5 â€” Rung 3 | â€” | 99 |
+| `yeshiva_rung_3_yt` | 8 â€” Rung 3 WYT | â€” | 98 (YouTube not removed) |
+| `yeshiva_rung_4` | 7 â€” Rung 4 | â€” | 75 (social apps permitted) |
+| `yeshiva_shiur` | **deliberately unmapped** | 17 | â€” |
 
 The shiur policy stays unmapped on purpose: Remove uninstalls Play apps, so a mapped Shiur
 configuration would strip a boy's WhatsApp at the start of a window and never restore it.
@@ -136,7 +136,7 @@ its URL in the panel.
 ### Rungs 1 and 2 are not really allowlists any more
 
 They were designed as allowlists enforced by `no_install_apps` on a clean phone. That restriction
-was deliberately NOT applied — a phone that refuses every install is painful to live with — and
+was deliberately NOT applied â€” a phone that refuses every install is painful to live with â€” and
 **Push apps never removes an app merely for being absent from an allowlist**; it only acts on rules
 that exist. So the enforcement comes entirely from the blocked rules, which is why rungs 1 and 2
 carry the same ~99-package blocklist as rung 3 (browsers, VPNs, DNS changers, social, dating,
@@ -149,33 +149,33 @@ the loosest removed 75 apps.
 
 "The entire phone besides essential items doesn't work during shiur." Two halves:
 
-- **Apps:** a policy `yeshiva_shiur` — an allowlist of the essentials (phone, contacts, messages,
+- **Apps:** a policy `yeshiva_shiur` â€” an allowlist of the essentials (phone, contacts, messages,
   WhatsApp, clock, settings, the agent and WireGuard). The scheduler swaps every yeshiva phone onto
   it inside the windows and back to its rung's policy outside them. This is the existing
   scheduler; it needs the policy mapped to a Headwind configuration (below).
 - **Web:** the policy has `web_mode = 'none'`. The proxy resolves each phone's effective policy on
   every request, the same way the scheduler does, and refuses everything while the shiur policy is
-  in force. The block page says "The phone is locked right now — it's shiur time". This half needs
+  in force. The block page says "The phone is locked right now â€” it's shiur time". This half needs
   no Headwind and applies within a minute of the window starting (the helper's cache TTL).
 
-**The fleet toggle** (Yeshiva tab → Shiur lock): **Timetable** (default), **Off** (bein
-hazmanim, a trip — the windows are ignored), **Locked now** (every yeshiva phone locked
+**The fleet toggle** (Yeshiva tab â†’ Shiur lock): **Timetable** (default), **Off** (bein
+hazmanim, a trip â€” the windows are ignored), **Locked now** (every yeshiva phone locked
 immediately until you switch back). It is one setting read by both halves; changing it runs the
 scheduler.
 
-**Per phone** (Yeshiva tab → Phones on the tag → Shiur lock on/off): off exempts that one phone
-from the timetable and from "Locked now" — it stays on its rung's policy. Per-phone off beats
+**Per phone** (Yeshiva tab â†’ Phones on the tag â†’ Shiur lock on/off): off exempts that one phone
+from the timetable and from "Locked now" â€” it stays on its rung's policy. Per-phone off beats
 the fleet toggle. Migration 0018 adds the column (`devices.shiur_lock`, default on).
 
-The windows, Sunday–Thursday, in the phone's local time (set every yeshiva phone's zone to
-`Asia/Jerusalem` — the form does this when you pick the tag):
+The windows, Sundayâ€“Thursday, in the phone's local time (set every yeshiva phone's zone to
+`Asia/Jerusalem` â€” the form does this when you pick the tag):
 
 | Window | Covers |
 |---|---|
-| 07:30–08:35 | Shachris (korbanos) |
-| 09:15–13:45 | First seder (hachana until 11:40, then shiur), selichos, mincha |
-| 15:35–19:15 | Second seder (daf 15:35 / amud 16:15), bekius review, halacha + mussar |
-| 20:15–22:00 | Maariv, night seder |
+| 07:30â€“08:35 | Shachris (korbanos) |
+| 09:15â€“13:45 | First seder (hachana until 11:40, then shiur), selichos, mincha |
+| 15:35â€“19:15 | Second seder (daf 15:35 / amud 16:15), bekius review, halacha + mussar |
+| 20:15â€“22:00 | Maariv, night seder |
 
 Breakfast, lunch and dinner are the gaps. Each window takes the *earlier* of a "9:15/9:30"-style
 start. Selichos is seasonal and folded into the second window; when the season ends either leave it
@@ -183,19 +183,19 @@ or split that window. Edit them on the Yeshiva tab; they are four ordinary sched
 is the whole tag (`tag:yeshiva`), so one row covers every rung.
 
 **Amud-class boys** (second seder from 16:15): on the Schedules tab add a window for *his phone
-only*, "applies to" `every phone on Yeshiva`, "switch to" his rung's policy (e.g. `Yeshiva — Rung
-2`), 15:35–16:15, priority 200. Device-specific and higher priority, so it wins over the tag-wide
+only*, "applies to" `every phone on Yeshiva`, "switch to" his rung's policy (e.g. `Yeshiva â€” Rung
+2`), 15:35â€“16:15, priority 200. Device-specific and higher priority, so it wins over the tag-wide
 lock for those forty minutes; the lock resumes at 16:15. `test/yeshiva.test.mjs` pins exactly this.
 
 ## Getting the app lists onto the phones
 
 The rules in D1 do nothing until they are in the Headwind configuration the phone is on. That is
-now one button: **Policies tab → the policy's row → Push apps** (`POST /api/admin/policies/push-apps`).
+now one button: **Policies tab â†’ the policy's row â†’ Push apps** (`POST /api/admin/policies/push-apps`).
 It reads the configuration, creates catalogue entries for packages Headwind has never heard of,
-writes every rule in (blocked → **Remove**; allowed → **Install** when Headwind holds an APK,
+writes every rule in (blocked â†’ **Remove**; allowed â†’ **Install** when Headwind holds an APK,
 otherwise icon-only, since a Play app has nothing to install), leaves any other entry the operator
 added by hand alone, and saves. Push again after editing rules; it is idempotent. Phones apply it
-at their next sync — a reboot forces it.
+at their next sync â€” a reboot forces it.
 
 What **Remove** does on the phone is Headwind's business, and it is the one thing still to be
 confirmed on a live phone: for a user-installed (Play) app the agent uninstalls it; for a system
@@ -203,9 +203,9 @@ app it can only hide it. The first push on the Vortex (rung 2, TikTok installed)
 
 Two Android restrictions complete the allowlist rungs, in the configuration's MDM Settings:
 
-- `no_install_apps` — nothing can be installed from the Play Store or anywhere else; the agent
+- `no_install_apps` â€” nothing can be installed from the Play Store or anywhere else; the agent
   can still install what the configuration says. Rungs 1 and 2 only.
-- Removing `com.android.vending` (the Play Store, a system app, so it is hidden) — also rungs 1
+- Removing `com.android.vending` (the Play Store, a system app, so it is hidden) â€” also rungs 1
   and 2 only. Rungs 3 and 4 need the store.
 
 The Shiur configuration is the same idea with the `yeshiva_shiur` policy: copy the rung's
@@ -215,7 +215,7 @@ and everything else on the list is Remove.
 ### ANSWERED, 2026-09-16: Remove UNINSTALLS a Play app, permanently
 
 Tested on the Vortex. TikTok was marked Remove on rung 2, the phone synced, and TikTok was **gone
-from the device** — not hidden, uninstalled. Headwind holds no APK for a Play app, so it cannot put
+from the device** â€” not hidden, uninstalled. Headwind holds no APK for a Play app, so it cannot put
 it back. The only way it returns is the boy reinstalling it from the Play Store himself.
 
 That is correct and wanted for a RUNG: "this phone does not have TikTok" should mean the app is
@@ -231,12 +231,12 @@ So the app half of the shiur lock cannot be built from Remove. The options are:
 
 | Approach | Apps come back? | Cost |
 |---|---|---|
-| **Kiosk mode** for the Shiur configuration | Yes — apps stay installed, kiosk just confines the phone to its list | The mechanism Headwind actually provides for this; rejected once on comfort grounds, but it is the only supported way |
-| **Managed Launcher** for the Shiur configuration | Yes — the launcher shows only the configured apps | Weaker than kiosk (other entry points remain), and the phone's home app changes at every window boundary |
-| **Web-only shiur** (what runs today) | N/A — apps are never touched | Free, already working: the browser is locked for the window, apps stay available |
+| **Kiosk mode** for the Shiur configuration | Yes â€” apps stay installed, kiosk just confines the phone to its list | The mechanism Headwind actually provides for this; rejected once on comfort grounds, but it is the only supported way |
+| **Managed Launcher** for the Shiur configuration | Yes â€” the launcher shows only the configured apps | Weaker than kiosk (other entry points remain), and the phone's home app changes at every window boundary |
+| **Web-only shiur** (what runs today) | N/A â€” apps are never touched | Free, already working: the browser is locked for the window, apps stay available |
 | App suspension (`setPackagesSuspended`) | Yes | Not exposed by Headwind's API; would need an agent-side change |
 
-Until one is chosen, the shiur lock is **web-only** — which does work, and is what the proxy has
+Until one is chosen, the shiur lock is **web-only** â€” which does work, and is what the proxy has
 been enforcing all along. Do not map a Shiur configuration containing Play-app Remove entries.
 
 ## Deploying it
@@ -253,14 +253,14 @@ server files should go together.
    sudo scripts/apply-yeshiva-squid.sh
    ```
    That script patches the LIVE `/etc/squid/squid.conf` in place (the four changed lines: helper
-   format, deny_info, `name=browser`, the browser_port acl + bump rule), keeps everything else —
-   the scoped `test_phones` rule and the access log included — backs the file up beside itself,
+   format, deny_info, `name=browser`, the browser_port acl + bump rule), keeps everything else â€”
+   the scoped `test_phones` rule and the access log included â€” backs the file up beside itself,
    installs the helper, parses and reconfigures. Idempotent; `--dry-run` shows the diff first.
-   Do NOT run `install-squid.sh` — it would overwrite the hand edits.
-4. **The phone's row** (Devices tab, Edit): Tag = Yeshiva, Rung = 2 — the "App policy" line
-   under them should read `Yeshiva — Rung 2` — Time zone `Asia/Jerusalem`, proxy login = its
+   Do NOT run `install-squid.sh` â€” it would overwrite the hand edits.
+4. **The phone's row** (Devices tab, Edit): Tag = Yeshiva, Rung = 2 â€” the "App policy" line
+   under them should read `Yeshiva â€” Rung 2` â€” Time zone `Asia/Jerusalem`, proxy login = its
    tunnel IP. Save.
-5. **Chrome's settings**, in Headwind: the phone's configuration → Applications Settings tab →
+5. **Chrome's settings**, in Headwind: the phone's configuration â†’ Applications Settings tab â†’
    Add, application `com.android.chrome`, one row each:
    ```
    ProxyMode                       fixed_servers
@@ -271,8 +271,8 @@ server files should go together.
    DefaultSearchProviderKeyword    google.com
    ```
    The first two send Chrome to the browser port. The rest make address-bar searches use Google's
-   text-only "Web" results (`udm=14`: no thumbnails — Google embeds them in the page, beyond any
-   image stripping), in English (`hl=en`, `gl=il` — Squid exits from Germany, so Google would
+   text-only "Web" results (`udm=14`: no thumbnails â€” Google embeds them in the page, beyond any
+   image stripping), in English (`hl=en`, `gl=il` â€” Squid exits from Germany, so Google would
    otherwise answer in German with an EU consent page), with SafeSearch forced (`safe=active`).
    The proxy refuses any Google results page on the yeshiva tag that is not in Web mode, so the
    box on google.com itself says "search from the address bar".
@@ -284,16 +284,16 @@ server files should go together.
 From here the WEB side of the tag and the shiur lock are live for that phone. The APP side needs:
 
 6. **Headwind configurations**, in the panel, one per yeshiva policy:
-   - `Yeshiva — Rung 1..4`: copy of **Background (Agent) Mode** with the restrictions from
-     NEW-PHONE.md §E; app list per the policy (Install the allowed ones; for the allowlist rungs
-     Delete/hide Chrome on rung 1 and the rest of what the phone ships with that is not listed —
+   - `Yeshiva â€” Rung 1..4`: copy of **Background (Agent) Mode** with the restrictions from
+     NEW-PHONE.md Â§E; app list per the policy (Install the allowed ones; for the allowlist rungs
+     Delete/hide Chrome on rung 1 and the rest of what the phone ships with that is not listed â€”
      Headwind's exact Block semantics are still the open item in NEXT-SESSION.md).
-   - `Yeshiva — Shiur`: a **copy of the rung's configuration** whose app list is the essentials
-     (Phone, Contacts, Messages, WhatsApp, Clock, Settings, the agent, WireGuard) — *not* kiosk
+   - `Yeshiva â€” Shiur`: a **copy of the rung's configuration** whose app list is the essentials
+     (Phone, Contacts, Messages, WhatsApp, Clock, Settings, the agent, WireGuard) â€” *not* kiosk
      mode; that was ruled out deliberately. Read the warning under "Getting the app lists onto the
      phones" before adding any Play app as Remove here.
    Paste each configuration's id on the Yeshiva tab (Headwind configurations card). Until then the
-   scheduler reports "no Headwind configuration mapped" for yeshiva phones every five minutes —
+   scheduler reports "no Headwind configuration mapped" for yeshiva phones every five minutes â€”
    noisy in the audit log, harmless.
 7. **Apply now** and watch the phone: inside a window the agent should sync onto the Shiur
    configuration with only the essentials; outside it, back to the rung's configuration. The agent
@@ -301,20 +301,20 @@ From here the WEB side of the tag and the shiur lock are live for that phone. Th
 
 ## Testing on the Vortex
 
-Prerequisite: the tunnel actually handshaking (NEXT-SESSION.md START HERE — hotspot, endpoint,
+Prerequisite: the tunnel actually handshaking (NEXT-SESSION.md START HERE â€” hotspot, endpoint,
 key). Then, with the Vortex on rung 2 of the tag, on the hotspot, in Chrome:
 
-1. `https://en.wikipedia.org` — loads, **every picture a grey box of the right shape**, layout intact.
+1. `https://en.wikipedia.org` â€” loads, **every picture a grey box of the right shape**, layout intact.
    If pictures are missing entirely (collapsed) rather than grey: the redirect to `/blocked` is
    not reaching the Worker (check the `deny_info` line). If pictures LOAD: Chrome is not on the
-   browser port — `chrome://policy` on the phone should show ProxyMode/ProxyServer; on the server
+   browser port â€” `chrome://policy` on the phone should show ProxyMode/ProxyServer; on the server
    `ss -tn | grep :3128` should show the phone's tunnel IP connected.
-1b. Open WhatsApp, Waze, a bank app — all work, untouched (they are on the intercept path).
-2. Search "volcano" — text results, thumbnails grey. Search "porn" — the refused-search page.
-3. `https://www.instagram.com` — block page (social list). `https://pornhub.com` — block page.
-4. `https://www.ynet.co.il` or any never-seen site — loads (no rating, no model call; the Worker's
+1b. Open WhatsApp, Waze, a bank app â€” all work, untouched (they are on the intercept path).
+2. Search "volcano" â€” text results, thumbnails grey. Search "porn" â€” the refused-search page.
+3. `https://www.instagram.com` â€” block page (social list). `https://pornhub.com` â€” block page.
+4. `https://www.ynet.co.il` or any never-seen site â€” loads (no rating, no model call; the Worker's
    logs show no classification).
-5. Yeshiva tab → Shiur lock → **Locked now**: any site → "The phone is locked right now"; WhatsApp
+5. Yeshiva tab â†’ Shiur lock â†’ **Locked now**: any site â†’ "The phone is locked right now"; WhatsApp
    still works. Back to **Timetable**.
 6. Move the phone to rung 1 (Yeshiva tab, "1" button): Chrome shows the block page for everything;
    move it back.
@@ -322,7 +322,7 @@ key). Then, with the Vortex on rung 2 of the tag, on the hotspot, in Chrome:
 
 ## Migrating a phone off the tag
 
-Yeshiva tab → the phone's row → **standard 4** (or Devices → Edit → Tag = Standard, pick the rung).
+Yeshiva tab â†’ the phone's row â†’ **standard 4** (or Devices â†’ Edit â†’ Tag = Standard, pick the rung).
 The baseline policy switches to `apps_rung_N`, the shiur windows stop applying, and the browser
 becomes the AI-judged one at that rung. Its Headwind configuration follows on the next scheduler
 run if `apps_rung_N` is mapped, otherwise change it in the panel.
@@ -334,8 +334,47 @@ lock on the web side, the tag-wide windows with per-phone exemptions, the consol
 and squid.conf changes, the migration.
 
 Depends on the phone: Chrome honouring the pushed ProxyMode/ProxyServer (a documented Chrome
-managed policy on Android, pushed through Headwind's per-app settings — unproven here), image
-blanking on Android Chrome (deny_info → `/blocked` → SVG; unproven on a device), the configuration
+managed policy on Android, pushed through Headwind's per-app settings â€” unproven here), image
+blanking on Android Chrome (deny_info â†’ `/blocked` â†’ SVG; unproven on a device), the configuration
 swap by the scheduler (tested against a fake Headwind; never yet seen on the agent), what Headwind
 Remove actually does to a Play app, which stock package names the Vortex actually has, and which
-apps on rungs 3–4 need splice entries.
+apps on rungs 3â€“4 need splice entries.
+
+## Rung 3 access update â€” October 4, 2026
+
+Yeshiva rung 3 allows `nfl.com` and its subdomains, including when its shared
+classification says blocked. The exception preserves browser image stripping and
+shiur locks. It does not change another rung or the Standard ladder. The current
+upstream explicit/social blocklists do not contain NFL; those lists still apply.
+
+Migration `0025_yeshiva_rung3_temporary_vpn.sql` temporarily allows the VPN/tunnel
+apps previously blocked on both `yeshiva_rung_3` and `yeshiva_rung_3_yt`. Explicit
+allowed rules replace Headwind's existing Remove actions when pushed. Tor Browser,
+DNS changer tools, social apps, and other browser restrictions are unchanged.
+
+Deploy with `npm run db:migrate` and `npm run deploy`, then use **Push apps** for
+both rung-3 policies in `/admin` and sync the phones. The migration alone does not
+update Headwind. A VPN app previously uninstalled must be reinstalled from Play.
+The older seed generator reproduces historical migrations; apply migration 0025
+after any app-rule reseed.
+
+Android's always-on VPN/lockdown is configured separately on each phone. If enabled,
+it still prevents another VPN from connecting: switch off lockdown/always-on for
+the existing tunnel in Android VPN settings to use another VPN. Check that neither
+rung-3 Headwind configuration applies `no_config_vpn`. This phone-side step is not
+performed by the Worker migration. Another active VPN can bypass Shmira filtering.
+
+There is no automatic expiry for this temporary allowance. To revoke it, set the
+same package rules in migration 0025 to `blocked` through a new migration, push both
+policies again, and restore the phone's original tunnel lockdown settings.
+
+### Live deployment note
+
+On October 4 the live Worker contained companion endpoints and other changes not
+fully represented by either GitHub branch. Do not redeploy the entire branch until
+that source drift is reconciled. The NFL change was applied as the narrow patch in
+`deployments/2026-10-04-rung3-nfl.patch` to the downloaded production bundle, retaining
+its existing bindings and settings. The same access tests passed against that bundle.
+The exception also requires the effective policy to be `yeshiva_rung_3` or
+`yeshiva_rung_3_yt`; a phone on a separate test policy does not receive it.
+Migration 0025 was applied to production and recorded in D1 migrations.

@@ -293,7 +293,7 @@ export async function handleProxyCheck(request, env, now = new Date()) {
   // nothing on the other paths and saves a full round trip on the common one.
   const search = parseSearchUrl(body.url);
   const verdictPromise = search ? null : lookupVerdict(env, hostname);
-  const { level, tag, def, deviceId, known, locked } = await resolveDevice(env, body.user, now);
+  const { level, tag, def, deviceId, known, locked, policyId } = await resolveDevice(env, body.user, now);
 
   // cache_scope tells the helper how widely it may reuse this answer: 'host' when the decision
   // depended on the hostname alone (an ordinary site — one answer covers every URL on it, so a page
@@ -413,6 +413,15 @@ export async function handleProxyCheck(request, env, now = new Date()) {
         level: normalizeSiteLevel(engineVerdict.level), reason: engineVerdict.reason });
     }
     return json({ ...base, cache_scope: 'url', allow: true, action: 'allow', hostname, reason: 'Search homepage.' });
+  }
+
+  // Operator exception for Yeshiva rung 3. Keep this after the shiur lock and image checks,
+  // and scoped to this ladder/rung rather than changing the shared NFL classification.
+  if (tag === 'yeshiva' && level === 3 &&
+      ['yeshiva_rung_3', 'yeshiva_rung_3_yt'].includes(policyId) &&
+      (hostname === 'nfl.com' || hostname.endsWith('.nfl.com'))) {
+    return json({ ...base, allow: true, action: 'allow', hostname,
+      reason: 'NFL is allowed on Yeshiva rung 3.' });
   }
 
   // 5. Ordinary site: known verdict, else classify the whole domain inline (standard ladder) or
