@@ -378,3 +378,8 @@ its existing bindings and settings. The same access tests passed against that bu
 The exception also requires the effective policy to be `yeshiva_rung_3` or
 `yeshiva_rung_3_yt`; a phone on a separate test policy does not receive it.
 Migration 0025 was applied to production and recorded in D1 migrations.
+
+Both normal Headwind pushes succeeded: configuration 5 reported 140 Remove,
+2 Install, 25 icon-only; configuration 8 reported 139 Remove, 2 Install, 25 icon-only.
+The test policy/configuration 10 was not pushed or edited. Phone-side receipt and
+Android VPN lockdown were not verified remotely.
