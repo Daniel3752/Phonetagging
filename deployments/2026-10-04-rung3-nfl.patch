@@ -1,0 +1,37 @@
+--- index.js
++++ index.js
+@@ -1989,7 +1989,7 @@
+   const features = new Set(Array.isArray(body.features) ? body.features.map(String) : []);
+   const search = parseSearchUrl(body.url);
+   const verdictPromise = lookupVerdict(env, hostname);
+-  const { level, tag, def, deviceId, known, locked, youtubeGranted } = await resolveDevice(env, body.user, now);
++  const { level, tag, def, deviceId, known, locked, youtubeGranted, policyId } = await resolveDevice(env, body.user, now);
+   const stripImages = !!def && def.webMode !== "none" && !def.images;
+   const helperStrips = stripImages && features.has("strip_images");
+   const base = {
+@@ -2059,7 +2059,10 @@
+       reason: "YouTube explicitly enabled for this phone."
+     });
+   }
+-  if (hostVerdict && (hostVerdict.site_mode === "blocked" || normalizeSiteLevel(hostVerdict.level) >= NEVER_LEVEL)) {
++  const nflAllowed = tag === "yeshiva" && level === 3 &&
++    ["yeshiva_rung_3", "yeshiva_rung_3_yt"].includes(policyId) &&
++    (hostname === "nfl.com" || hostname.endsWith(".nfl.com"));
++  if (!nflAllowed && hostVerdict && (hostVerdict.site_mode === "blocked" || normalizeSiteLevel(hostVerdict.level) >= NEVER_LEVEL)) {
+     return json2({
+       ...base,
+       allow: false,
+@@ -2124,6 +2127,13 @@
+       });
+     }
+     return json2({ ...base, cache_scope: "url", allow: true, action: "allow", hostname, reason: "Search homepage." });
++  }
++  // Operator exception: normal Yeshiva rung 3 policies only; leave test policies untouched.
++  if (tag === "yeshiva" && level === 3 &&
++      ["yeshiva_rung_3", "yeshiva_rung_3_yt"].includes(policyId) &&
++      (hostname === "nfl.com" || hostname.endsWith(".nfl.com"))) {
++    return json2({ ...base, allow: true, action: "allow", hostname,
++      reason: "NFL is allowed on Yeshiva rung 3." });
+   }
+   let verdict = await verdictPromise;
+   let action;

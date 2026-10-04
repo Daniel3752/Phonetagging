@@ -36,7 +36,8 @@ assert.equal((await check('notnfl.com')).allow, false);
 assert.equal((await check('nfl.com.example')).allow, false);
 assert.equal((await check('nfl.com', undefined, { dest: 'image' })).allow, false);
 assert.equal((await check('nfl.com', '2026-09-06T13:00:00Z')).action, 'locked');
-for (const [tag, level, policy] of [['yeshiva', 2, 'yeshiva_rung_2'], ['yeshiva', 4, 'yeshiva_rung_4'], ['standard', 3, 'apps_rung_3']]) {
+await DB.prepare("INSERT INTO policies (id, name, app_default, created_at) VALUES ('test_bench', 'Test bench', 'allowed', 0)").run();
+for (const [tag, level, policy] of [['yeshiva', 3, 'test_bench'], ['yeshiva', 2, 'yeshiva_rung_2'], ['yeshiva', 4, 'yeshiva_rung_4'], ['standard', 3, 'apps_rung_3']]) {
   await DB.prepare('UPDATE devices SET tag = ?, level = ?, policy_id = ?').bind(tag, level, policy).run();
   assert.equal((await check('nfl.com')).allow, false, `${tag} ${level}`);
 }

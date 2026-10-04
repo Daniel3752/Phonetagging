@@ -5,6 +5,8 @@
 -- Android always-on VPN lockdown is separate; see YESHIVA.md.
 -- To revoke: set these same rules to blocked in a new migration and push both policies.
 INSERT INTO app_rules (policy_id, package_name, state) VALUES
+  ('yeshiva_rung_3', 'com.protonvpn.android', 'allowed'),
+  ('yeshiva_rung_3_yt', 'com.protonvpn.android', 'allowed'),
   ('yeshiva_rung_3', 'com.nordvpn.android', 'allowed'),
   ('yeshiva_rung_3', 'com.expressvpn.vpn', 'allowed'),
   ('yeshiva_rung_3', 'com.surfshark.vpnclient.android', 'allowed'),
